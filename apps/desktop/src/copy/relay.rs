@@ -6,11 +6,10 @@
 crate::copy! {
     // The bar.
     RELAY_TITLE = "按顺序做",
-    RELAY_STEP_OF = "第 {k}/{n} 步",
     RELAY_ALL_DONE = "都做完了",
     RELAY_STOPPED_AT = "停在 {name}：{reason}",
-    RELAY_STOPPED_BY = "{name} 停止了",
-    RELAY_STOP = "停止",
+    RELAY_STOPPED_BY = "{name} 停止了。要继续，在下面再写一条顺序，比如 {example}",
+    RELAY_STOP = "停止顺序…",
     RELAY_RETRY = "重试",
     RELAY_STOP_REFUSED = "没能停止",
     RELAY_RETRY_REFUSED = "没能重试",
@@ -32,7 +31,7 @@ crate::copy! {
     RELAY_WHY_UNKNOWN = "停住了",
     // The composer.
     RELAY_HINT_ORDER = "按顺序做：{names}",
-    RELAY_HINT_DISCOVER = "想让他们按顺序做？用 → 连起来",
+    RELAY_HINT_DISCOVER = "想让他们按顺序做？用 -> 连起来，比如 @{first} -> @{second}",
     RELAY_HINT_IN_TOPIC = "按顺序做要在话题里用",
     RELAY_HINT_RUNNING = "这个话题已经在按顺序做，先停止它",
     RELAY_REFUSED_BAD_STEPS = "按顺序做要写 2 到 6 步，同一个成员不能挨着",
@@ -41,4 +40,14 @@ crate::copy! {
     // Who is at work in the 话题 (详情 → 成员).
     PEOPLE_WORKING = "在做",
     PEOPLE_TOOK_PART = "参与过",
+    // 停止… on the bar asks first: a stopped order cannot go on.
+    RELAY_STOP_TITLE = "停止这个顺序？",
+    RELAY_STOP_MESSAGE_RUNNING = "正在做的成员会停在现在这一步，后面的步不再开始。\n要继续，得再写一条顺序。",
+    RELAY_STOP_MESSAGE_PAUSED = "后面的步不再开始。\n要继续，得再写一条顺序。",
+    // The composer, when the server refused an order.
+    RELAY_REFUSED_UNAVAILABLE = "没能开始按顺序做：{name} 现在接不了。换一位成员再发",
+    // The order a stopped relay's bar gives as an example.
+    RELAY_ORDER_EXAMPLE = "@{first} -> @{second}",
+    // 详情 → 成员: the member a paused order is stuck at (the bar's word).
+    PEOPLE_STUCK = "卡住了",
 }

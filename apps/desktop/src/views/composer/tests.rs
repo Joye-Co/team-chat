@@ -289,6 +289,22 @@ fn new_topic_mode_uses_the_first_line_as_title(cx: &mut TestAppContext) {
     assert_eq!(h.provider.draft(&DraftKey::new_topic(GROUP)).body, "");
 }
 
+/// A refused start (here: the 群 is gone) opens no other 话题 and keeps the
+/// typed text in the field.
+#[gpui::test]
+fn a_refused_topic_start_keeps_the_text(cx: &mut TestAppContext) {
+    let (h, cx) = open(cx, None);
+    let nav = h.view.update(cx, |this, _| this.services.nav.clone());
+    nav.update(cx, |nav, cx| nav.open_group("g-gone".into(), cx));
+    cx.run_until_parked();
+    let topics_before = h.provider.topics(GROUP).len();
+    cx.simulate_input("这段话不能丢");
+    cx.simulate_keystrokes("enter");
+    assert_eq!(h.text(cx), "这段话不能丢");
+    assert_eq!(h.provider.topics(GROUP).len(), topics_before);
+    assert_eq!(nav.update(cx, |nav, _| nav.topic.clone()), None);
+}
+
 #[gpui::test]
 fn pending_files_become_chips_and_go_with_the_message(cx: &mut TestAppContext) {
     let (h, cx) = open(cx, Some(TOPIC));
@@ -860,4 +876,37 @@ fn a_tall_picture_stays_in_its_square(cx: &mut TestAppContext) {
         };
         assert_eq!(picture, square, "a {w}×{h} picture");
     }
+}
+
+/// The hint under a draft names who reads it before their next step: a message
+/// goes to each member it @s, and with no @ to the 话题's owner.
+#[gpui::test]
+fn the_next_step_hint_follows_the_members_the_draft_names(cx: &mut TestAppContext) {
+    use crate::fake::v2::{self as d, V2Samples};
+    cx.update(gpui_component::init);
+    let provider: Arc<dyn ChatProvider> = V2Samples::with_second_run();
+    let (view, vcx) = cx.add_window_view(move |window, cx| {
+        let services = Services::new(provider, cx);
+        services.nav.update(cx, |nav, cx| {
+            nav.open_topic(d::DEV.into(), d::T_VIRTUAL.into(), cx)
+        });
+        let mut composer = ComposerView::new(services, window, cx);
+        composer.v2 = true;
+        composer
+    });
+    vcx.run_until_parked();
+    let hint = |draft: &str, vcx: &mut VisualTestContext| {
+        view.update_in(vcx, |this, window, cx| {
+            this.set_text(draft, window, cx);
+            this.working_member()
+        })
+    };
+    assert_eq!(hint("先别合并", vcx).as_deref(), Some("Forge"));
+    assert_eq!(hint("@Scout 再跑一遍", vcx).as_deref(), Some("Scout"));
+    assert_eq!(
+        hint("@Scout 和 @Forge 对一下", vcx).as_deref(),
+        Some("Scout、Forge")
+    );
+    // A member of the 群 who is not at work: no one at work reads this draft.
+    assert_eq!(hint("@小王 看看", vcx), None);
 }

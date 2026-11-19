@@ -124,4 +124,8 @@ crate::copy! {
     LIVE_TOPIC_COMMANDS = "跑了 {k} 条命令",
     LIVE_TOPIC_FILES = "改了 {files}",
     LIVE_TOPIC_FILES_MORE = "{files} 等 {n} 个文件",
+    // The failed badge: the status word of §2.12 (the banner keeps 没做完).
+    LIVE_SHORT_FAILED = "失败",
+    // A stopped run is over; LIVE_MEMBER_STOPPED is the hold of a take-over.
+    LIVE_MEMBER_ENDED = "{member} 已停止",
 }

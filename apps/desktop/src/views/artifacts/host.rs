@@ -1477,6 +1477,34 @@ pub fn shown_in_pane(artifact_id: &str, cx: &App) -> bool {
     })
 }
 
+/// True while a 产出 pane shows this version of `artifact_id`: a row that names another
+/// version still opens it there. No version, on the row or in the pane, is the newest,
+/// `latest`.
+pub fn version_in_pane(artifact_id: &str, version: Option<u32>, latest: u32, cx: &App) -> bool {
+    let Some(PaneNavs(navs)) = cx.try_global::<PaneNavs>() else {
+        return false;
+    };
+    let wanted = version.unwrap_or(latest);
+    navs.iter().filter_map(|n| n.upgrade()).any(|nav| {
+        matches!(
+            nav.read(cx).visible_pane(),
+            crate::app::RightPane::Artifact { id, version }
+                if id == artifact_id && version.unwrap_or(latest) == wanted
+        )
+    })
+}
+
+/// `在右侧打开`, the muted words at the end of a row whose 产出 the pane already shows.
+pub fn in_pane_label(cx: &App) -> gpui::Div {
+    use crate::ui::native::{NativeType as _, native_colors};
+    use gpui::{ParentElement as _, Styled as _, div};
+    div()
+        .flex_none()
+        .n_callout()
+        .text_color(native_colors(cx).secondary)
+        .child(crate::copy::artifact_page::ARTIFACT_IN_PANE)
+}
+
 /// The reference row's action: moves keyboard focus into the page the 产出
 /// pane shows (the thread keeps no live copy of it, so the one live page of
 /// `artifact_id` is the pane's).

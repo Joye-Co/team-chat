@@ -22,6 +22,7 @@ use crate::{
     copy::timeline as t,
     data::{ChatProvider, Member, Message},
     theme::{self, Type as _},
+    ui::native::tokens::space,
 };
 
 /// What an extra can read while it renders.
@@ -153,6 +154,7 @@ impl MessageExtra for QuoteExtra {
     ) -> Option<AnyElement> {
         let quoted_id = message.quote_of.as_deref()?;
         let colors = theme::colors(cx);
+        let alone = message.body.trim().is_empty();
         let quoted = match ctx.message(quoted_id) {
             Some(q) => Some(crate::data::QuotedMessage {
                 author_id: q.author_id.clone(),
@@ -164,6 +166,42 @@ impl MessageExtra for QuoteExtra {
                 .provider
                 .quoted_message(&message.group_id, &message.id, quoted_id),
         };
+        // A 话题 started from a message has no words of its own: the quote is
+        // the whole first message, so it is drawn as one: the body recipe
+        // (14/22, Markdown), all of it, behind the quote bar. The author is
+        // named only when it is not the sender, whose name is one line above.
+        if alone && let Some(q) = quoted.as_ref().filter(|q| !q.deleted) {
+            let name = (q.author_id != message.author_id)
+                .then(|| ctx.member(&q.author_id).map(|m| m.name.clone()))
+                .flatten();
+            let body = crate::markdown::message_body(
+                gpui::ElementId::Name(format!("quote-body-{}", message.id).into()),
+                q.body.clone(),
+                &crate::markdown::mention_targets(ctx.members, ctx.me),
+            )
+            .w_full()
+            .text_color(colors.text_1);
+            return Some(
+                div()
+                    .mb(space::S4)
+                    .pl(space::S12)
+                    .border_l_2()
+                    .border_color(colors.quote_bar)
+                    .flex()
+                    .flex_col()
+                    .min_w(px(0.))
+                    .children(name.map(|n| {
+                        div()
+                            .t_callout()
+                            .semibold()
+                            .text_color(colors.text_1)
+                            .one_line()
+                            .child(n)
+                    }))
+                    .child(body)
+                    .into_any_element(),
+            );
+        }
         let (name, text) = match quoted {
             Some(q) if q.deleted => (
                 ctx.member(&q.author_id).map(|m| m.name.clone()),
@@ -177,8 +215,8 @@ impl MessageExtra for QuoteExtra {
         };
         Some(
             div()
-                .mb(px(4.))
-                .pl(px(10.))
+                .mb(space::S4)
+                .pl(space::S12)
                 .border_l_2()
                 .border_color(colors.quote_bar)
                 .flex()
@@ -205,24 +243,58 @@ impl MessageExtra for QuoteExtra {
     }
 }
 
-/// The first non-empty line of a body without leading Markdown marks, cut to
-/// [`QUOTE_CHARS`].
-pub fn quote_preview(body: &str) -> String {
-    let line = body
-        .lines()
+/// The text lines of a body without their leading Markdown marks.
+fn text_lines(body: &str) -> impl Iterator<Item = &str> {
+    body.lines()
         .map(|l| l.trim().trim_start_matches(['#', '>', '-', '*', '`', ' ']))
-        .find(|l| !l.is_empty())
-        .unwrap_or_default();
-    crate::markdown::clip(line, QUOTE_CHARS)
+        .filter(|l| !l.is_empty())
+}
+
+/// The first non-empty line of a body without leading Markdown marks, cut to
+/// [`QUOTE_CHARS`]. It ends with `…` when the body goes on, so a cut quote never reads
+/// as the whole message.
+pub fn quote_preview(body: &str) -> String {
+    let mut lines = text_lines(body);
+    let line = lines.next().unwrap_or_default();
+    let mut text = crate::markdown::clip(line, QUOTE_CHARS);
+    if lines.next().is_some() && !text.ends_with('…') {
+        text.push('…');
+    }
+    text
+}
+
+/// The first `max` text lines of a body in plain words, one per line; `…` ends the last
+/// one when the body goes on.
+pub fn quote_lines(body: &str, max: usize) -> String {
+    // Plain words: inline Markdown marks (`**`, backticks) are not drawn here.
+    let mut lines = text_lines(body)
+        .map(|l| crate::views::search::plain::plain(l).trim().to_string())
+        .filter(|l| !l.is_empty());
+    let mut shown: Vec<String> = lines
+        .by_ref()
+        .take(max)
+        .map(|l| crate::markdown::clip(&l, QUOTE_CHARS))
+        .collect();
+    if lines.next().is_some()
+        && let Some(last) = shown.last_mut()
+        && !last.ends_with('…')
+    {
+        last.push('…');
+    }
+    shown.join("\n")
 }
 
 #[cfg(test)]
 mod tests {
-    use super::quote_preview;
+    use super::{quote_lines, quote_preview};
 
     #[test]
     fn preview_takes_the_first_text_line() {
-        assert_eq!(quote_preview("\n## 标题\n正文"), "标题");
+        // A body that goes on says so.
+        assert_eq!(quote_preview("\n## 标题\n正文"), "标题…");
+        assert_eq!(quote_preview("只有一行"), "只有一行");
+        assert_eq!(quote_lines("# 一\n\n二\n- 三", 2), "一\n二…");
+        assert_eq!(quote_lines("一\n二", 6), "一\n二");
         assert_eq!(quote_preview("```\ncargo test\n```"), "cargo test");
         let long = "字".repeat(200);
         assert_eq!(quote_preview(&long).chars().count(), 121);

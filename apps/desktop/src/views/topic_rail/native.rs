@@ -3,7 +3,8 @@
 //! [`InspectorSection`] with a disclosure header; Body rows with `secondary`
 //! labels and `label` values; actions as a trailing `arrow.up.forward`
 //! borderless button; plan progress as the 4 pt determinate bar. No pills,
-//! no text links, no hover fills on rows.
+//! no text links. A row that is itself a button (a changed file, a member)
+//! draws the row hover fill (COMPLETENESS.md E3); plain rows have none.
 
 use gpui::{
     AnyElement, App, ClickEvent, Context, ElementId, Hsla, InteractiveElement as _, IntoElement,
@@ -96,7 +97,8 @@ pub(super) fn changes_pane_body(
     diff: Option<crate::data::v2::TopicDiff>,
     open: &std::collections::HashSet<String>,
     toggle: ToggleFile,
-    cx: &App,
+    window: &mut gpui::Window,
+    cx: &mut App,
 ) -> AnyElement {
     use crate::ui::native::{PushSize, PushStyle, metrics, push_button};
     let k = native_colors(cx);
@@ -173,10 +175,18 @@ pub(super) fn changes_pane_body(
                 .items_start()
                 .gap(space::S8)
                 .child(
+                    // The title's icon: 16, centered on the title's first
+                    // line (the headline line box).
                     div()
                         .flex_none()
-                        .pt(px(2.))
-                        .child(mark(Sym::PullRequest, k.secondary)),
+                        .h(ui::native::tokens::text::HEADLINE.1)
+                        .flex()
+                        .items_center()
+                        .child(ui::icons::icon(
+                            Sym::PullRequest,
+                            ui::native::tokens::icon::MD,
+                            k.secondary,
+                        )),
                 )
                 .child(
                     div()
@@ -194,14 +204,15 @@ pub(super) fn changes_pane_body(
         .when(!meta.is_empty(), |el| {
             el.child(detail(meta.join(" · "), cx))
         })
+        // 检查 then 状态, the order of the inspector's 改动 section.
+        .children(checks)
         .child(label_value(
             c::INSPECTOR_STATE,
             StatusBadge::new(state_kind, state_text),
             cx,
         ))
-        .children(checks)
         .children(browser);
-    let files = changed_files(diff, open, toggle, cx);
+    let files = changed_files(diff, open, toggle, window, cx);
     div()
         .id("changes-pane")
         .size_full()
@@ -234,7 +245,8 @@ fn changed_files(
     diff: Option<crate::data::v2::TopicDiff>,
     open: &std::collections::HashSet<String>,
     toggle: ToggleFile,
-    cx: &App,
+    window: &mut gpui::Window,
+    cx: &mut App,
 ) -> AnyElement {
     use crate::data::v2::TopicDiff;
     let k = native_colors(cx);
@@ -357,7 +369,7 @@ impl TopicRail {
     /// The trailing `arrow.up.forward` that opens `pane`.
     fn open_button(
         &self,
-        id: &'static str,
+        id: impl Into<ElementId>,
         name: &'static str,
         pane: RightPane,
         window: &mut gpui::Window,
@@ -391,7 +403,7 @@ impl TopicRail {
             .min_w(px(0.))
             .rounded(ui::native::metrics::GROUP_RADIUS)
             .bg(k.group)
-            .px(px(14.))
+            .px(ui::native::metrics::INSPECTOR_GROUP_INSET)
             .py(px(12.))
             .flex()
             .flex_col()
@@ -399,7 +411,7 @@ impl TopicRail {
             .child(
                 div()
                     .flex()
-                    .child(StatusBadge::new(badge, text).max_w(px(260.))),
+                    .child(StatusBadge::new(badge, text).max_w(px(260.)).on_fill(true)),
             )
             .children(detail.map(|step| {
                 div()
@@ -522,14 +534,26 @@ impl TopicRail {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let k = native_colors(cx);
-        let mut section = self.section(OWNER, c::TOPIC_RAIL_PEOPLE, cx);
-        // R2-17, §2.13: no AI member took part yet: a compact empty (icon and
-        // muted line), and the section header offers the ghost 指派 (§2.5).
+        let mut section = self.section(OWNER, c::TOPIC_RAIL_PEOPLE, cx).list_rows();
+        // R2-17: no AI member took part yet: the header says so in a muted
+        // note beside the ghost 指派 (§2.5). Not a compact empty among the
+        // rows: the group lists the 群's members, so a line that reads "no
+        // members" on top of them contradicts the list (§2.13: an empty
+        // stands in place of the data).
         if !marks.iter().any(|(_, tag)| *tag != c::INSPECTOR_ASKED) {
             if let Some(t) = d.topic.as_ref() {
                 section = section.action(self.assign_button(t, cx));
             }
-            section = section.row(EmptyLine::new(c::RAIL_EMPTY_OWNER).icon(Sym::Person));
+            // Not while a run of this 话题 is at work (the thread shows its
+            // card before the server's member list names it).
+            let at_work = d
+                .run
+                .iter()
+                .chain(d.others.iter().map(|(r, _)| r))
+                .any(|r| r.status.is_active() && r.status != crate::data::RunStatus::Waiting);
+            if !at_work {
+                section = section.note(c::RAIL_EMPTY_OWNER);
+            }
         }
         let mut people: Vec<(crate::data::Member, Option<&'static str>)> = Vec::new();
         let lead = |id: Option<&str>, tag: &'static str, people: &mut Vec<_>| {
@@ -574,13 +598,18 @@ impl TopicRail {
             section = section.row(
                 div()
                     .id(SharedString::from(format!("rail-member-{}", m.id)))
-                    .w_full()
-                    .min_h(px(28.))
+                    // The fill reaches past the text by the padding, so the avatar stays on
+                    // the section's left edge.
+                    .mx(-space::S6)
+                    .h(crate::ui::native::metrics::INSPECTOR_LIST_ROW)
+                    .px(space::S6)
+                    .rounded(radius::MD)
                     .flex()
                     .items_center()
                     .gap(space::S8)
                     .n_body()
                     .cursor_pointer()
+                    .hover(|el| el.bg(k.row_hover))
                     .child(div().flex_1().min_w(px(0.)).child(self.person_in(
                         &m.id,
                         Some(&m),
@@ -598,8 +627,9 @@ impl TopicRail {
         section.into_any_element()
     }
 
-    /// 计划: the plan of the run the rail shows and, while more members
-    /// work (A2-11), one block per member's run, each led by its member.
+    /// 计划: the plan of a run that is not at work (one at work has it on the
+    /// thread's working card), led by its member when the 话题 has runs of
+    /// more than one member or an order.
     pub(super) fn native_plan(
         &self,
         d: &Data,
@@ -607,28 +637,18 @@ impl TopicRail {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let mut section = self.section(PLAN, c::TOPIC_RAIL_PLAN, cx);
-        let many = !d.others.is_empty();
-        let blocks = std::iter::once((run, d.step_times.as_slice()))
-            .chain(d.others.iter().map(|(r, t)| (r, t.as_slice())));
-        for (i, (run, times)) in blocks.enumerate() {
-            if many {
-                let who = self.person(
-                    &format!("plan-{}", run.id),
-                    d.member(&run.bot_id).as_ref(),
-                    None,
-                    cx,
-                );
-                section = section.row(
-                    div()
-                        .w_full()
-                        .when(i > 0, |el| el.pt(space::S12))
-                        .pb(space::S4)
-                        .n_body()
-                        .child(who),
-                );
-            }
-            section = self.plan_rows(section, run, times, cx);
+        // §2.5: a finished plan is never read as the plan of the run the
+        // state names.
+        if d.plan_led {
+            let who = self.person(
+                &format!("plan-{}", run.id),
+                d.member(&run.bot_id).as_ref(),
+                None,
+                cx,
+            );
+            section = section.row(div().w_full().pb(space::S4).n_body().child(who));
         }
+        section = self.plan_rows(section, run, &d.step_times, cx);
         section.into_any_element()
     }
 
@@ -648,7 +668,9 @@ impl TopicRail {
             .filter(|i| i.state == PlanState::Done)
             .count();
         let all_done = done == total;
-        let live = run.status.is_active();
+        // §2.12: 在做 only while the run works (the 成员 header's test); a run
+        // that waits, stopped or failed says where it stands.
+        let live = run.status.is_active() && run.status != crate::data::RunStatus::Waiting;
         let took = match (run.started_at, run.ended_at) {
             (Some(a), Some(b)) => Some(((b - a).max(0)) as u64),
             _ => None,
@@ -656,11 +678,25 @@ impl TopicRail {
         let summary = row(cx)
             .child(if all_done {
                 fill(c::PLAN_ALL_DONE, &[("n", &total.to_string())])
-            } else {
+            } else if live {
                 // §2.12, T-02: one count, done/total, as the bar and the card.
                 fill(
                     c::OWNER_WORKING,
                     &[("n", &done.to_string()), ("total", &total.to_string())],
+                )
+            } else {
+                let at = run
+                    .plan
+                    .iter()
+                    .position(|i| i.state != PlanState::Done)
+                    .map_or(total, |i| i + 1);
+                fill(
+                    crate::copy::cards_v2::STRIP_STOPPED,
+                    &[
+                        ("n", &at.to_string()),
+                        ("done", &done.to_string()),
+                        ("total", &total.to_string()),
+                    ],
                 )
             })
             .child(div().flex_1())
@@ -679,7 +715,6 @@ impl TopicRail {
         } else {
             done as f32 / total as f32
         };
-        let _ = live;
         // D12: the one Progress (h4, primary on primary 20 %).
         let bar = div().py(space::S6).child(progress(value, cx));
         section = section.row(summary).row(bar);
@@ -688,6 +723,16 @@ impl TopicRail {
             // person has the needs-you icon; never a free colored dot.
             let glyph = match item.state {
                 PlanState::Done => mark(Sym::Check, k.secondary),
+                // A run that ended at this step no longer works on it: the
+                // failed mark for a run that got stuck, the ban mark for one
+                // a person stopped (§2.12, as the title bar and the relay
+                // strip), never the spinner.
+                PlanState::Current if !run.status.is_active() => match run.status {
+                    crate::data::RunStatus::Failed => state_mark(BadgeState::Failed, &k),
+                    crate::data::RunStatus::Cancelled => state_mark(BadgeState::Deactivated, &k),
+                    _ => None,
+                }
+                .unwrap_or_else(|| mark(Sym::Todo, k.secondary)),
                 PlanState::Current => state_mark(BadgeState::Working, &k)
                     .unwrap_or_else(|| mark(Sym::Todo, k.secondary)),
                 PlanState::Waiting => state_mark(BadgeState::NeedsYou, &k)
@@ -755,7 +800,7 @@ impl TopicRail {
             ChangeState::Closed => (BadgeState::Offline, c::CHANGES_CLOSED),
             _ => (BadgeState::Queued, c::CHANGES_OPEN),
         };
-        let state = StatusBadge::new(state_kind, state_text);
+        let state = StatusBadge::new(state_kind, state_text).on_fill(true);
         let checks_ok = ch.checks_total > 0 && ch.checks_passed == ch.checks_total;
         let mut section = self
             .section(CHANGES, c::TOPIC_RAIL_CHANGES, cx)
@@ -777,24 +822,27 @@ impl TopicRail {
                     .child(fill(c::INSPECTOR_FILES, &[("n", &ch.files.to_string())])),
             );
         if ch.checks_total > 0 {
-            section = section.row(div().pt(space::S6).child(label_value(
-                c::INSPECTOR_CHECKS,
-                StatusBadge::new(
-                    if checks_ok {
-                        BadgeState::Done
-                    } else {
-                        BadgeState::Failed
-                    },
-                    fill(
-                        c::INSPECTOR_CHECKS_VALUE,
-                        &[
-                            ("passed", &ch.checks_passed.to_string()),
-                            ("total", &ch.checks_total.to_string()),
-                        ],
-                    ),
-                ),
-                cx,
-            )));
+            section = section.row(
+                div().pt(space::S6).child(label_value(
+                    c::INSPECTOR_CHECKS,
+                    StatusBadge::new(
+                        if checks_ok {
+                            BadgeState::Done
+                        } else {
+                            BadgeState::Failed
+                        },
+                        fill(
+                            c::INSPECTOR_CHECKS_VALUE,
+                            &[
+                                ("passed", &ch.checks_passed.to_string()),
+                                ("total", &ch.checks_total.to_string()),
+                            ],
+                        ),
+                    )
+                    .on_fill(true),
+                    cx,
+                )),
+            );
         }
         section = section.row(label_value(c::INSPECTOR_STATE, state, cx));
         Some(section.into_any_element())
@@ -845,10 +893,9 @@ impl TopicRail {
             let version = crate::views::artifacts::host::latest(&a.id, cx)
                 .map_or(a.version, |v| v.max(a.version));
             // A2-21: the kind's own symbol (an image is not a document).
-            let sym = match a.kind {
-                crate::data::ArtifactKind::Image => Sym::Image,
-                _ => Sym::Document,
-            };
+            let sym =
+                crate::views::artifact_page::list::ListKind::of(self.services.provider.as_ref(), a)
+                    .sym();
             // T-16, E3, F3: a row opens its 产出 (a tab stop), and a cut
             // title shows whole in a tooltip.
             let open = RightPane::Artifact {
@@ -941,12 +988,50 @@ impl TopicRail {
         Some(section.into_any_element())
     }
 
-    /// 在哪干活: the team computer (or the cloud runner) the member uses.
+    /// 在哪干活: the team computer (or the cloud runner) each member at work
+    /// uses; with none at work, the one `run` used. The header's arrow opens
+    /// the only run; several runs each have their own on their row.
     pub(super) fn native_where(
         &self,
         d: &Data,
         run: &BotRunSummary,
         window: &mut gpui::Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let mut section = self.section(WHERE, c::WHERE_WORK, cx);
+        if d.at_work.len() > 1 {
+            for run in &d.at_work {
+                let open = self.open_button(
+                    ElementId::Name(format!("rail-see-machine-{}", run.id).into()),
+                    c::OPEN_MACHINE,
+                    RightPane::Live(run.id.clone()),
+                    window,
+                    cx,
+                );
+                section = section.row(self.where_row(d, run, Some(open), cx)?);
+            }
+            return Some(section.into_any_element());
+        }
+        let run = d.at_work.first().unwrap_or(run);
+        if run.status.is_active() {
+            section = section.action(self.open_button(
+                "rail-see-machine",
+                c::OPEN_MACHINE,
+                RightPane::Live(run.id.clone()),
+                window,
+                cx,
+            ));
+        }
+        section = section.row(self.where_row(d, run, None, cx)?);
+        Some(section.into_any_element())
+    }
+
+    /// One computer of 在哪干活: its symbol, name and badge, who uses it.
+    fn where_row(
+        &self,
+        d: &Data,
+        run: &BotRunSummary,
+        open: Option<AnyElement>,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let k = native_colors(cx);
@@ -966,42 +1051,24 @@ impl TopicRail {
                 ],
             )
         };
-        let lower = name.to_lowercase();
-        let sym = if run
-            .machine_id
-            .as_deref()
-            .is_some_and(|id| id.starts_with("cloud"))
-        {
-            Sym::Cloud
-        } else if lower.contains("mini") {
-            Sym::MacMini
-        } else if lower.contains("book") || lower.contains("laptop") {
-            Sym::Laptop
-        } else {
-            Sym::Computer
-        };
-        let mut section = self.section(WHERE, c::WHERE_WORK, cx);
-        if busy {
-            section = section.action(self.open_button(
-                "rail-see-machine",
-                c::OPEN_MACHINE,
-                RightPane::Live(run.id.clone()),
-                window,
-                cx,
-            ));
-        }
-        section = section.row(
+        let sym = crate::views::group_page::kit::machine_sym(&name, run.machine_id.as_deref());
+        Some(
             div()
                 .w_full()
                 .py(space::S2)
                 .flex()
                 .items_start()
                 .gap(space::S8)
-                .child(div().flex_none().pt(px(1.)).child(ui::sym(
-                    sym,
-                    SymSize::INLINE,
-                    k.secondary,
-                )))
+                // As tall as the badge that sets the first line's height, so
+                // every machine symbol centers on the name beside it.
+                .child(
+                    div()
+                        .flex_none()
+                        .h(ui::native::tokens::height::BADGE)
+                        .flex()
+                        .items_center()
+                        .child(ui::sym(sym, SymSize::INLINE, k.secondary)),
+                )
                 .child(
                     div()
                         .flex_1()
@@ -1013,25 +1080,41 @@ impl TopicRail {
                                 .min_h(px(18.))
                                 .child(div().min_w_0().flex_shrink(1.).one_line().child(name))
                                 .child(div().flex_1())
-                                .child(div().flex_none().child(StatusBadge::new(
-                                    if busy {
-                                        BadgeState::Working
-                                    } else {
-                                        BadgeState::Offline
-                                    },
-                                    // §2.12, A2-13: the machine at work
-                                    // says the working word, 在做.
-                                    if busy {
-                                        c::STATE_WORKING_SHORT
-                                    } else {
-                                        c::MACHINE_IDLE
-                                    },
-                                ))),
+                                .child(
+                                    div().flex_none().child(
+                                        StatusBadge::new(
+                                            if busy {
+                                                BadgeState::Working
+                                            } else {
+                                                BadgeState::Offline
+                                            },
+                                            // §2.12, A2-13: the machine at work
+                                            // says the working word, 在做.
+                                            if busy {
+                                                c::STATE_WORKING_SHORT
+                                            } else {
+                                                c::MACHINE_IDLE
+                                            },
+                                        )
+                                        .on_fill(true),
+                                    ),
+                                ),
                         )
                         .child(detail(line, cx)),
-                ),
-        );
-        Some(section.into_any_element())
+                )
+                // On the center line of the name and its badge; the glyph
+                // takes the group's content edge, its hover in the inset.
+                .children(open.map(|open| {
+                    div()
+                        .flex_none()
+                        .mr(-space::S8)
+                        .h(ui::native::tokens::height::BADGE)
+                        .flex()
+                        .items_center()
+                        .child(open)
+                }))
+                .into_any_element(),
+        )
     }
 
     pub(super) fn native_cost(&self, d: &Data, cx: &mut Context<Self>) -> Option<AnyElement> {
@@ -1059,18 +1142,12 @@ impl TopicRail {
             .and_then(|r| crate::views::topic_page::run_elapsed(self.services.provider.as_ref(), r))
             .unwrap_or(cost.duration_ms as i64);
         let used = crate::views::timeline::plan::span_text(crate::views::timeline::plan::TOOK, ms);
-        let mut section = self.section(COST, c::TOPIC_RAIL_COST, cx).row(label_value(
-            c::INSPECTOR_TIME,
-            used,
-            cx,
-        ));
-        if let Some(cents) = cost.cost_cents {
-            section = section.row(label_value(
-                c::INSPECTOR_COST,
-                money_text(cents, cost.currency),
-                cx,
-            ));
-        }
+        // The title promises only what the rows below show.
+        let title = if cost.cost_cents.is_some() {
+            c::TOPIC_RAIL_COST
+        } else {
+            c::INSPECTOR_TIME
+        };
         let when = match active {
             Some(at) => Some(run_since(at)),
             None => cost
@@ -1078,8 +1155,33 @@ impl TopicRail {
                 .zip(cost.ended_at)
                 .map(|(a, b)| when_range(a, b)),
         };
-        if let Some(when) = when {
-            section = section.row(label_value(c::INSPECTOR_WHEN, when, cx));
+        let mut section = self.section(COST, title, cx);
+        if let Some(cents) = cost.cost_cents {
+            section = section
+                .row(label_value(c::INSPECTOR_TIME, used, cx))
+                .row(label_value(
+                    c::INSPECTOR_COST,
+                    money_text(cents, cost.currency),
+                    cx,
+                ));
+            if let Some(when) = when {
+                section = section.row(label_value(c::INSPECTOR_WHEN, when, cx));
+            }
+        } else {
+            // The title already says 用时: one row, the duration and its
+            // range, never a second 用时 label under it.
+            let k = native_colors(cx);
+            section = section.row(row(cx).child(used).child(div().flex_1()).children(when.map(
+                |when| {
+                    div()
+                        .flex_none()
+                        .whitespace_nowrap()
+                        .n_subheadline()
+                        .n_figures()
+                        .text_color(k.secondary)
+                        .child(when)
+                },
+            )));
         }
         Some(section.into_any_element())
     }

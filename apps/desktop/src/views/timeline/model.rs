@@ -171,8 +171,7 @@ pub fn starts_day(prev: Option<&Message>, message: &Message) -> bool {
 pub fn day_label(day: chrono::NaiveDate, today: chrono::NaiveDate) -> String {
     use crate::copy::{fill, timeline as t};
     use chrono::Datelike as _;
-    const WEEKDAYS: [&str; 7] = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
-    let weekday = WEEKDAYS[day.weekday().num_days_from_monday() as usize];
+    let weekday = crate::copy::weekday(day.weekday());
     let ago = (today - day).num_days();
     if ago == 0 {
         t::TODAY.to_string()

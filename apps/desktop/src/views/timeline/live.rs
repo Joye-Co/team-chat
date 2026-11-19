@@ -99,6 +99,8 @@ pub fn duration_text(ms: i64) -> String {
     let s = (ms.max(0) / 1000) as u64;
     if s < 60 {
         fill(t::STEPS_DURATION_SEC, &[("s", &s.to_string())])
+    } else if s % 60 == 0 {
+        fill(t::STEPS_DURATION_WHOLE_MIN, &[("m", &(s / 60).to_string())])
     } else {
         fill(
             t::STEPS_DURATION_MIN,
@@ -686,6 +688,7 @@ mod tests {
     #[test]
     fn durations_read_as_minutes_and_seconds() {
         assert_eq!(duration_text(252_000), "4 分 12 秒");
+        assert_eq!(duration_text(180_000), "3 分钟");
         assert_eq!(duration_text(12_400), "12 秒");
         assert_eq!(elapsed(0, 134_000), "2:14");
         assert_eq!(elapsed(0, 3_599_000), "59:59");
