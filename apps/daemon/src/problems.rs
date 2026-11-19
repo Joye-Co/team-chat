@@ -10,13 +10,64 @@ use std::sync::Mutex;
 
 static RECENT: Mutex<VecDeque<DaemonProblem>> = Mutex::new(VecDeque::new());
 
-/// Keeps one problem line, logged `at` (machine clock); the oldest goes past the limit.
+/// The time of a log line: UTC, `2026-11-18T03:20:00.123Z`, from milliseconds since the epoch.
+pub fn stamp(ms: u64) -> String {
+    let (secs, millis) = (ms / 1000, ms % 1000);
+    let (days, rem) = (secs / 86_400, secs % 86_400);
+    // Days since 1970-01-01 to a date of the Gregorian calendar (eras of 400 years that start
+    // on a 1 March).
+    let z = days + 719_468;
+    let (era, doe) = (z / 146_097, z % 146_097);
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = yoe + era * 400 + u64::from(month <= 2);
+    format!(
+        "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}.{millis:03}Z",
+        rem / 3600,
+        rem % 3600 / 60,
+        rem % 60
+    )
+}
+
+/// One line of the daemon's log (stderr), with its time.
+pub fn log(line: std::fmt::Arguments) {
+    eprintln!("{} {line}", stamp(crate::proto::now_ms()));
+}
+
+/// A log line that is a warning or an error: also kept for 最近的问题. Never pass a secret: the
+/// log itself is not redacted.
+pub fn warn(line: std::fmt::Arguments) {
+    let at = crate::proto::now_ms();
+    let line = line.to_string();
+    eprintln!("{} {line}", stamp(at));
+    record(at, &line);
+}
+
+/// Keeps one problem line, logged `at` (machine clock); the oldest goes past the limit. The
+/// same line again right after itself (the link down on every retry of an outage) only moves
+/// the kept line's time, so it does not push every other line out.
 pub fn record(at: u64, line: &str) {
+    keep(
+        &mut RECENT.lock().unwrap_or_else(|e| e.into_inner()),
+        at,
+        line,
+    );
+}
+
+fn keep(recent: &mut VecDeque<DaemonProblem>, at: u64, line: &str) {
     let text = line.trim();
     if text.is_empty() {
         return;
     }
-    let mut recent = RECENT.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(last) = recent.back_mut()
+        && last.text == text
+    {
+        last.at = at;
+        return;
+    }
     while recent.len() >= MAX_DAEMON_PROBLEMS {
         recent.pop_front();
     }
@@ -53,6 +104,38 @@ pub fn recent(redactor: &Redactor) -> Vec<DaemonProblem> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stamps_are_utc_dates() {
+        assert_eq!(stamp(0), "1970-01-01T00:00:00.000Z");
+        assert_eq!(stamp(951_782_400_000), "2000-02-29T00:00:00.000Z");
+        assert_eq!(stamp(1_709_251_199_999), "2024-02-29T23:59:59.999Z");
+        assert_eq!(stamp(1_709_251_200_000), "2024-03-01T00:00:00.000Z");
+        assert_eq!(stamp(1_779_074_400_123), "2026-05-18T03:20:00.123Z");
+        assert_eq!(stamp(4_102_444_799_000), "2099-12-31T23:59:59.000Z");
+    }
+
+    #[test]
+    fn the_same_line_again_only_moves_its_time() {
+        let mut kept = VecDeque::new();
+        keep(&mut kept, 1, "link down: connect timed out");
+        keep(&mut kept, 2, "key OPENAI: refused");
+        for at in 3..200 {
+            keep(&mut kept, at, " link down: connect timed out ");
+        }
+        // Not the last line: kept as a new one.
+        keep(&mut kept, 200, "key OPENAI: refused");
+        let got: Vec<(u64, &str)> = kept.iter().map(|p| (p.at, p.text.as_str())).collect();
+        assert_eq!(
+            got,
+            [
+                (1, "link down: connect timed out"),
+                (2, "key OPENAI: refused"),
+                (199, "link down: connect timed out"),
+                (200, "key OPENAI: refused"),
+            ]
+        );
+    }
 
     #[test]
     fn keeps_the_last_lines_redacted_and_cut() {
