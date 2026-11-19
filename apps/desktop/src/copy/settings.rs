@@ -557,4 +557,7 @@ crate::copy! {
     // --- v14/t4 shared ---
     ROW_MORE = "更多",
     // --- end v14/t4 shared ---
+    SET_OWNER_CONFIRM_TITLE = "把 {name} 设为所有者？",
+    SET_OWNER_CONFIRM_BODY = "{name} 也能管理整个团队，包括你。\n你仍然是所有者。",
+    SET_OWNER_CONFIRM_OK = "设为所有者",
 }

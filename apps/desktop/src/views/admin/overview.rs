@@ -16,13 +16,13 @@ use super::{
 };
 use crate::{
     copy::{admin as m, fill},
-    theme::Type as _,
     ui::{
         MemberAvatar, Sym,
         icons::sym as sym_icon,
         native::{
-            NativeColors, NativeType as _, TruncText, card_surface, native_colors, skeleton,
-            tokens::{avatar, height, monitor as t, radius, space, text},
+            FocusRow as _, NativeColors, NativeType as _, PushSize, PushStyle, TruncText,
+            native_colors, panel_card_surface, push_button, skeleton,
+            tokens::{avatar, height, metrics, monitor as t, radius, space, text},
         },
         sf_symbols::SymSize,
     },
@@ -40,7 +40,7 @@ fn tone_color(tone: Tone, k: &NativeColors) -> Hsla {
 
 /// A card surface with the design's inner padding.
 fn panel(cx: &App) -> gpui::Div {
-    card_surface(cx).flex().flex_col()
+    panel_card_surface(cx).flex().flex_col()
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -81,7 +81,7 @@ pub fn page(
                         .w(relative(t::ATTENTION_SHARE))
                         .flex_none()
                         .flex()
-                        .child(attention(d, now, name, time, cx)),
+                        .child(attention(d, now, name, time, view.clone(), cx)),
                 ),
         )
         .child(members(d, sort, name, member, view, cx))
@@ -151,10 +151,13 @@ fn problems(d: &MachineMonitor, time: &dyn Fn(u64) -> String, cx: &App) -> Optio
 fn strip(d: &MachineMonitor, now: u64, cx: &App) -> impl IntoElement {
     let k = native_colors(cx);
     let cells = model::strip(d, now);
-    let n = cells.len();
-    panel(cx)
-        .flex_row()
-        .overflow_hidden()
+    // What to run on the computer: a line of its own under the cells, so they keep one width.
+    let hint = cells
+        .iter()
+        .find_map(|c| c.hint.clone().map(|h| (c.label.clone(), h)));
+    let row = div()
+        .w_full()
+        .flex()
         .children(cells.into_iter().enumerate().map(|(i, c)| {
             div()
                 .flex_1()
@@ -165,7 +168,6 @@ fn strip(d: &MachineMonitor, now: u64, cx: &App) -> impl IntoElement {
                 .flex_col()
                 .gap(space::S4)
                 .when(i > 0, |d| d.border_l_1().border_color(k.separator))
-                .when(i + 1 == n, |d| d)
                 .child(
                     div()
                         .flex()
@@ -189,16 +191,46 @@ fn strip(d: &MachineMonitor, now: u64, cx: &App) -> impl IntoElement {
                         .child(dot(tone_color(c.tone, &k)))
                         .child(TruncText::new(c.value)),
                 )
-                // Usable: what to run on the computer, wrapped, in the code font.
-                .when_some(c.hint, |d, h| {
-                    d.child(
-                        div()
-                            .n_footnote()
-                            .code_font()
-                            .text_color(k.secondary)
-                            .child(h),
-                    )
-                })
+        }));
+    panel(cx)
+        .overflow_hidden()
+        .child(row)
+        // Usable: the words in the text font, named for what they sign in to; the command in
+        // the code font in its box with copy, never broken (§1.4).
+        .children(hint.map(|(label, h)| {
+            let (prose, command) = model::hint_parts(&h);
+            div()
+                .w_full()
+                .px(space::S16)
+                .py(space::S12)
+                .border_t_1()
+                .border_color(k.separator)
+                .flex()
+                .items_center()
+                .gap(space::S8)
+                .child(
+                    div()
+                        .min_w(gpui::Pixels::ZERO)
+                        .flex()
+                        .items_center()
+                        .gap(space::S6)
+                        .n_footnote()
+                        .text_color(k.secondary)
+                        .child(sym_icon(Sym::Terminal, SymSize::INLINE_SMALL, k.secondary))
+                        // A sentence that names GitHub needs no label before it.
+                        .when(!prose.contains(label.as_str()), |d| {
+                            d.child(div().flex_none().text_color(k.label).child(label))
+                        })
+                        .child(TruncText::new(prose.to_string())),
+                )
+                .children(command.map(|c| {
+                    super::this_computer::command_box("github-hint-copy", c.to_string(), cx)
+                        .w_auto()
+                        .flex_none()
+                        .whitespace_nowrap()
+                }))
+                // The command follows its sentence; what is left of the line stays empty.
+                .child(div().flex_1())
         }))
 }
 
@@ -367,6 +399,9 @@ fn kpi(c: Kpi, range: &str, cx: &App) -> impl IntoElement {
             div()
                 .id(SharedString::from(format!("{}-spark", c.id)))
                 .mt(space::S8)
+                // Inside the card's rounded corners: the fill never reaches them.
+                .px(space::S16)
+                .pb(space::S12)
                 .tooltip(move |window, cx| {
                     gpui_component::tooltip::Tooltip::new(aria.clone()).build(window, cx)
                 })
@@ -396,9 +431,14 @@ fn capacity(d: &MachineMonitor, now: u64, cx: &App) -> impl IntoElement {
             .flex()
             .flex_wrap()
             .gap(space::S16)
-            .child(swatch(m::LEGEND_VM, &model::bytes(vb), k.label, cx))
-            .child(swatch(m::LEGEND_HOST, &model::bytes(hb), k.secondary, cx))
-            .child(swatch(m::LEGEND_FREE, &model::bytes(fb), k.fill, cx))
+            .child(swatch(m::LEGEND_VM, &model::bytes(vb), Some(k.label), cx))
+            .child(swatch(
+                m::LEGEND_HOST,
+                &model::bytes(hb),
+                Some(k.secondary),
+                cx,
+            ))
+            .child(swatch(m::LEGEND_FREE, &model::bytes(fb), None, cx))
     });
     let hint = match (cap.avg_vm_bytes, cap.reserve_bytes) {
         (Some(a), Some(r)) => fill(
@@ -477,35 +517,14 @@ fn capacity(d: &MachineMonitor, now: u64, cx: &App) -> impl IntoElement {
         .p(space::S24)
         .gap(space::S16)
         .child(
-            div()
-                .flex()
-                .items_center()
-                .child(
-                    div()
-                        .flex_1()
-                        .n_title3()
-                        .font_weight(gpui::FontWeight::SEMIBOLD)
-                        .child(m::CAPACITY),
-                )
-                .child(
-                    div()
-                        .id("capacity-all")
-                        .opacity(0.5)
-                        .flex()
-                        .items_center()
-                        .gap(space::S4)
-                        .n_body()
-                        .text_color(k.secondary)
-                        .tooltip(|window, cx| {
-                            gpui_component::tooltip::Tooltip::new(m::NAV_SOON).build(window, cx)
-                        })
-                        .child(m::SEE_ALL_VMS)
-                        .child(sym_icon(
-                            Sym::ChevronRight,
-                            SymSize::INLINE_SMALL,
-                            k.secondary,
-                        )),
-                ),
+            // One header height beside 要注意, so the two titles share a line.
+            div().h(height::SM).flex().items_center().child(
+                div()
+                    .flex_1()
+                    .n_title3()
+                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                    .child(m::CAPACITY),
+            ),
         )
         .child(
             div()
@@ -587,7 +606,9 @@ fn seg(share: f32, color: Hsla, cx: &App) -> gpui::Div {
         .when(share <= 0., |d| d.w(gpui::Pixels::ZERO))
 }
 
-fn swatch(label: &'static str, value: &str, color: Hsla, cx: &App) -> impl IntoElement {
+/// A legend entry. `None` is the free part: an outline swatch (the offline-dot recipe of
+/// §2.12), since the track's own fill disappears on a white card.
+fn swatch(label: &'static str, value: &str, color: Option<Hsla>, cx: &App) -> impl IntoElement {
     let k = native_colors(cx);
     div()
         .flex()
@@ -600,15 +621,16 @@ fn swatch(label: &'static str, value: &str, color: Hsla, cx: &App) -> impl IntoE
                 .flex_none()
                 .size(t::SWATCH)
                 .rounded(radius::CHECKBOX)
-                .bg(color)
-                .border_1()
-                .border_color(k.separator),
+                .map(|d| match color {
+                    Some(c) => d.bg(c),
+                    None => d.border_1().border_color(k.secondary),
+                }),
         )
         .child(label)
         .child(
             div()
                 .n_figures()
-                .font_weight(gpui::FontWeight::MEDIUM)
+                .font_weight(crate::theme::MEDIUM_WEIGHT)
                 .text_color(k.label)
                 .child(value.to_string()),
         )
@@ -622,13 +644,27 @@ fn attention(
     now: u64,
     name: &dyn Fn(&str) -> String,
     time: &dyn Fn(u64) -> String,
+    view: Entity<AdminView>,
     cx: &App,
 ) -> impl IntoElement {
-    attention_panel(model::attention(d, now, name, time), cx)
+    let mut items = model::attention(d, now, name, time);
+    // This computer's own page is already open: only a 话题 or another page is somewhere to go.
+    for a in &mut items {
+        a.target = a
+            .target
+            .take()
+            .filter(|t| t.topic.is_some() || t.page != super::AdminPage::Overview);
+    }
+    attention_panel(items, view, cx)
 }
 
-/// The 要注意 card: a list of items, or 没有要注意的事.
-pub(super) fn attention_panel(items: Vec<model::Attention>, cx: &App) -> gpui::Div {
+/// The 要注意 card: a list of items, or 没有要注意的事. A row with a target opens the page where
+/// it is dealt with.
+pub(super) fn attention_panel(
+    items: Vec<model::Attention>,
+    view: Entity<AdminView>,
+    cx: &App,
+) -> gpui::Div {
     let k = native_colors(cx);
     let n = items.len();
     panel(cx)
@@ -638,6 +674,8 @@ pub(super) fn attention_panel(items: Vec<model::Attention>, cx: &App) -> gpui::D
         .gap(space::S8)
         .child(
             div()
+                // One header height beside its neighbor, so the two titles share a line.
+                .h(height::SM)
                 .flex()
                 .items_center()
                 .gap(space::S8)
@@ -648,7 +686,7 @@ pub(super) fn attention_panel(items: Vec<model::Attention>, cx: &App) -> gpui::D
                         .child(m::ATTENTION),
                 )
                 .when(n > 0, |d| {
-                    d.child(crate::ui::native::CountPill::new(n as u32).tone(k.amber))
+                    d.child(crate::ui::native::CountPill::new(n as u32))
                 }),
         )
         .when(n == 0, |d| {
@@ -657,8 +695,8 @@ pub(super) fn attention_panel(items: Vec<model::Attention>, cx: &App) -> gpui::D
         .children(items.into_iter().enumerate().map(|(i, a)| {
             let icon = match a.kind {
                 AttentionKind::Waiting => Sym::Privacy,
-                AttentionKind::CliLoggedOut => Sym::Terminal,
-                AttentionKind::Queue => Sym::Hourglass,
+                AttentionKind::CliLoggedOut | AttentionKind::Github => Sym::Terminal,
+                AttentionKind::Queue => Sym::Waiting,
                 AttentionKind::Failed => Sym::Failed,
                 AttentionKind::Disk => Sym::Disk,
                 AttentionKind::Offline => Sym::Offline,
@@ -668,12 +706,18 @@ pub(super) fn attention_panel(items: Vec<model::Attention>, cx: &App) -> gpui::D
                 AttentionKind::AiService => Sym::AiMember,
             };
             let c = tone_color(a.tone, &k);
-            div()
+            let sign_in = a.kind == AttentionKind::CliLoggedOut;
+            let target = a.target.clone();
+            // The hover fill reaches 8 past the row's content, which stays on the card's inset.
+            let row = div()
                 .flex()
                 .items_center()
                 .gap(space::S12)
-                .py(space::S8)
-                .when(i > 0, |d| d.border_t_1().border_color(k.separator))
+                .my(space::S2)
+                .py(space::S6)
+                .mx(-space::S8)
+                .px(space::S8)
+                .rounded(radius::ITEM)
                 .child(
                     div()
                         .flex_none()
@@ -701,7 +745,48 @@ pub(super) fn attention_panel(items: Vec<model::Attention>, cx: &App) -> gpui::D
                                     .text_color(k.secondary),
                             )
                         }),
-                )
+                );
+            let row = match target {
+                None => row.into_any_element(),
+                Some(target) => {
+                    let open = {
+                        let (view, target) = (view.clone(), target.clone());
+                        move |window: &mut Window, cx: &mut App| {
+                            view.update(cx, |v, cx| v.open_attention(&target, window, cx))
+                        }
+                    };
+                    let trailing = if sign_in {
+                        let open = open.clone();
+                        div()
+                            .flex_none()
+                            // Pulled out by its padding: a ghost button has no edge at rest, and
+                            // its chevron stands over the other rows' chevrons.
+                            .mr(-metrics::BUTTON_SMALL_PAD)
+                            .child(
+                                push_button(
+                                    SharedString::from(format!("attention-sign-in-{i}")),
+                                    m::ATT_CLI_SIGN_IN,
+                                    PushStyle::Ghost,
+                                    PushSize::Small,
+                                    cx,
+                                )
+                                .child(sym_icon(Sym::ChevronRight, SymSize::INLINE, k.secondary))
+                                .on_click(move |_, window, cx| open(window, cx)),
+                            )
+                            .into_any_element()
+                    } else {
+                        sym_icon(Sym::ChevronRight, SymSize::INLINE, k.secondary).into_any_element()
+                    };
+                    row.id(SharedString::from(format!("attention-{i}")))
+                        .focus_row(false, cx)
+                        .on_click(move |_, window, cx| open(window, cx))
+                        .child(trailing)
+                        .into_any_element()
+                }
+            };
+            div()
+                .when(i > 0, |d| d.border_t_1().border_color(k.separator))
+                .child(row)
         }))
 }
 
@@ -718,7 +803,8 @@ fn members(
 ) -> impl IntoElement {
     let k = native_colors(cx);
     let rows = model::member_rows(d, sort, name);
-    let max_mem = rows.iter().map(|r| r.mem_bytes).max().unwrap_or(0);
+    // A bar is a share of the computer's memory, as on every other bar of these pages.
+    let mem_total = d.host.as_ref().and_then(|h| h.mem_total_bytes);
     let cols: [(SortKey, Option<gpui::Pixels>); 7] = [
         (SortKey::Name, None),
         (SortKey::Doing, Some(t::COL_COUNT)),
@@ -764,7 +850,10 @@ fn members(
                     .flex()
                     .items_center()
                     .gap(space::S4)
+                    // The hover fill reaches 4 past the label; the ink stays on the
+                    // column's edge, as in the 成员 table.
                     .px(space::S4)
+                    .mx(-space::S4)
                     .rounded(radius::ITEM)
                     .hover(|s| s.bg(k.fill_hover))
                     .n_section()
@@ -820,7 +909,8 @@ fn members(
                     .child(cell(Some(t::COL_COUNT), true).child(r.doing.to_string()))
                     .child(
                         cell(Some(t::COL_COUNT), true)
-                            .text_color(if r.waiting > 0 { k.amber } else { k.secondary })
+                            // Weight, not a state color, marks a count above zero (§1.3).
+                            .text_color(if r.waiting > 0 { k.label } else { k.secondary })
                             .when(r.waiting > 0, |d| d.font_weight(gpui::FontWeight::SEMIBOLD))
                             .child(r.waiting.to_string()),
                     )
@@ -832,16 +922,22 @@ fn members(
                     .child(
                         cell(Some(t::COL_MEM), false)
                             .gap(space::S8)
-                            .child(div().flex_none().w(t::MEMBER_BAR_WIDTH).child(
-                                crate::ui::native::progress(model::share(r.mem_bytes, max_mem), cx),
-                            ))
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .flex()
-                                    .justify_end()
-                                    .child(model::bytes(r.mem_bytes)),
-                            ),
+                            .when_some(mem_total, |d, total| {
+                                d.child(div().flex_none().w(t::MEMBER_BAR_WIDTH).child(
+                                    crate::ui::native::progress(
+                                        model::share(r.mem_bytes, total),
+                                        cx,
+                                    ),
+                                ))
+                            })
+                            // Nothing in use reads as "—", never "0 B" (F5).
+                            .child(div().flex_1().flex().justify_end().map(|d| {
+                                if r.mem_bytes == 0 {
+                                    d.text_color(k.secondary).child("—")
+                                } else {
+                                    d.child(model::bytes(r.mem_bytes))
+                                }
+                            })),
                     )
                     .child(cell(Some(t::COL_TOKENS), true).child(model::count_short(r.tokens)))
                     .child(

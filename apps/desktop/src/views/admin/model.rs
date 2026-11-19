@@ -5,6 +5,7 @@
 use chat_core::proto::machine::login_state;
 use chat_core::proto::monitor::{MachineMonitor, MonitorMember, run_state};
 
+use super::AdminPage;
 use crate::copy::{admin as m, fill};
 
 /// The ranges of the segmented control, in order.
@@ -107,7 +108,7 @@ pub fn duration(ms: u64) -> String {
     let s = ms / 1000;
     if s < 60 {
         fill(m::SECONDS, &[("n", &s.max(1).to_string())])
-    } else if s < 600 {
+    } else if s < 600 && s % 60 != 0 {
         fill(
             m::MINUTES_SECONDS,
             &[("m", &(s / 60).to_string()), ("s", &(s % 60).to_string())],
@@ -245,12 +246,24 @@ pub fn strip(d: &MachineMonitor, now: u64) -> Vec<StripCell> {
 /// report it.
 fn github_cell(d: &MachineMonitor) -> Option<StripCell> {
     let g = d.github.as_ref()?;
+    let vm = d.runs_in.as_deref() == Some("vm");
     let hint = || {
         Some(
-            if d.runs_in.as_deref() == Some("vm") {
+            if vm {
                 m::GITHUB_HINT_VM
             } else {
                 m::GITHUB_HINT_HOST
+            }
+            .to_string(),
+        )
+    };
+    // gh is not there to run: install it first.
+    let no_gh_hint = || {
+        Some(
+            if vm {
+                m::GITHUB_NO_GH_HINT_VM
+            } else {
+                m::GITHUB_NO_GH_HINT_HOST
             }
             .to_string(),
         )
@@ -265,7 +278,7 @@ fn github_cell(d: &MachineMonitor) -> Option<StripCell> {
             None,
         ),
         "signed_out" => (m::LOGIN_OUT.to_string(), Tone::Warn, hint()),
-        "no_gh" => (m::GITHUB_NO_GH.to_string(), Tone::Warn, hint()),
+        "no_gh" => (m::GITHUB_NO_GH.to_string(), Tone::Warn, no_gh_hint()),
         _ => (m::LOGIN_UNKNOWN.to_string(), Tone::Quiet, None),
     };
     Some(StripCell {
@@ -275,6 +288,21 @@ fn github_cell(d: &MachineMonitor) -> Option<StripCell> {
         cli: true,
         hint,
     })
+}
+
+/// The commands a GitHub hint ends with, longest first.
+const HINT_COMMANDS: [&str; 2] = ["sudo -iu runner gh auth login", "gh auth login"];
+
+/// A hint as its words and the command it ends with, so the page can set the words in the
+/// text font and the command in the code font.
+pub fn hint_parts(hint: &str) -> (&str, Option<&str>) {
+    HINT_COMMANDS
+        .iter()
+        .find_map(|c| {
+            hint.strip_suffix(c)
+                .map(|prose| (prose.trim_end(), Some(*c)))
+        })
+        .unwrap_or((hint, None))
 }
 
 /// What a 要注意 row is about (it picks the icon).
@@ -294,6 +322,36 @@ pub enum AttentionKind {
     Limit,
     /// 模 1.3: the team's AI 服务 is not set up.
     AiService,
+    /// A VM computer that cannot push: GitHub is signed out or gh is missing (§3.6).
+    Github,
+}
+
+impl AttentionKind {
+    /// The page where a row of this kind is dealt with.
+    pub fn page(self) -> AdminPage {
+        match self {
+            AttentionKind::CliLoggedOut | AttentionKind::Limit => AdminPage::Accounts,
+            AttentionKind::Budget => AdminPage::Usage,
+            // 活动记录 has the failed run, and its row opens the 话题.
+            AttentionKind::Failed => AdminPage::Activity,
+            AttentionKind::Invite => AdminPage::Members,
+            AttentionKind::AiService => AdminPage::Ai,
+            AttentionKind::Waiting
+            | AttentionKind::Queue
+            | AttentionKind::Disk
+            | AttentionKind::Offline
+            | AttentionKind::Github => AdminPage::Overview,
+        }
+    }
+}
+
+/// Where a 要注意 row leads: a page, on one computer when the page is per computer; or the 话题
+/// (group, topic) where it is dealt with, which goes before the page.
+#[derive(Clone, Debug, PartialEq)]
+pub struct AttentionTarget {
+    pub page: AdminPage,
+    pub machine: Option<String>,
+    pub topic: Option<(String, String)>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -302,6 +360,26 @@ pub struct Attention {
     pub title: String,
     pub meta: String,
     pub tone: Tone,
+    /// `None`: the row stays put (what it is about is on the page already open).
+    pub target: Option<AttentionTarget>,
+}
+
+/// Where a row stands in 要注意: work that has stopped on the owner first, then what failed,
+/// computers that are gone, what to watch, and last what needs nothing done.
+fn attention_rank(a: &Attention) -> u8 {
+    match (a.kind, a.tone) {
+        (AttentionKind::Budget, Tone::Bad) => 0,
+        (AttentionKind::Waiting, _) => 1,
+        (AttentionKind::Offline, _) => 3,
+        (_, Tone::Bad) => 2,
+        (_, Tone::Warn) => 4,
+        _ => 5,
+    }
+}
+
+/// Puts a 要注意 list in reading order, the most urgent first; rows of one rank keep their order.
+pub fn rank_attention(list: &mut [Attention]) {
+    list.sort_by_key(attention_rank);
 }
 
 /// 模 1.3: one 要注意 row while the team's AI 服务 is not set up (`Some(false)`); nothing
@@ -312,6 +390,11 @@ pub fn ai_service_attention(configured: Option<bool>) -> Option<Attention> {
         title: m::ATT_AI_UNSET.into(),
         meta: m::ATT_AI_UNSET_META.into(),
         tone: Tone::Warn,
+        target: Some(AttentionTarget {
+            page: AttentionKind::AiService.page(),
+            machine: None,
+            topic: None,
+        }),
     })
 }
 
@@ -353,6 +436,7 @@ fn near_limit(
         title,
         meta,
         tone: if full { Tone::Bad } else { Tone::Warn },
+        target: None,
     })
 }
 
@@ -369,13 +453,15 @@ pub fn attention(
     {
         out.push(Attention {
             kind: AttentionKind::Offline,
-            title: m::ATT_OFFLINE.into(),
+            title: fill(m::ATT_OFFLINE, &[("name", &d.machine.name)]),
             meta: fill(m::ATT_OFFLINE_META, &[("ago", &ago(now.saturating_sub(t)))]),
             tone: Tone::Bad,
+            target: None,
         });
     }
     let waiting: Vec<&MonitorMember> = d.members.iter().filter(|x| x.waiting > 0).collect();
     let n: u32 = waiting.iter().map(|x| x.waiting).sum();
+    let waiting_topic = oldest_waiting_topic(d);
     if n > 0 {
         let who: Vec<String> = waiting
             .iter()
@@ -389,8 +475,17 @@ pub fn attention(
         out.push(Attention {
             kind: AttentionKind::Waiting,
             title: fill(m::ATT_WAITING, &[("n", &n.to_string())]),
-            meta: who.join(" · "),
+            // Only a row that opens the 话题 may send the reader there.
+            meta: fill(
+                if waiting_topic.is_some() {
+                    m::ATT_WAITING_META
+                } else {
+                    m::ATT_WAITING_META_NO_TOPIC
+                },
+                &[("who", &who.join(" · "))],
+            ),
             tone: Tone::Warn,
+            target: None,
         });
     }
     for c in &d.clis {
@@ -407,6 +502,7 @@ pub fn attention(
                     m::ATT_CLI_OUT_HINT.into()
                 },
                 tone: Tone::Warn,
+                target: None,
             });
         }
     }
@@ -414,6 +510,22 @@ pub fn attention(
         if let Some(a) = near_limit(c, time) {
             out.push(a);
         }
+    }
+    // Only a VM computer: on a host git may push over SSH or the keychain (§3.6).
+    if d.runs_in.as_deref() == Some("vm")
+        && let Some(title) = d.github.as_ref().and_then(|g| match g.state.as_str() {
+            "signed_out" => Some(m::ATT_GITHUB_OUT),
+            "no_gh" => Some(m::GITHUB_NO_GH),
+            _ => None,
+        })
+    {
+        out.push(Attention {
+            kind: AttentionKind::Github,
+            title: title.into(),
+            meta: m::ATT_GITHUB_META.into(),
+            tone: Tone::Warn,
+            target: None,
+        });
     }
     if d.queue.count > 0 {
         out.push(Attention {
@@ -429,7 +541,9 @@ pub fn attention(
                     )
                 })
                 .unwrap_or_default(),
-            tone: Tone::Warn,
+            // A queue drains by itself: the resting state, as 排队 is everywhere else (§2.12).
+            tone: Tone::Quiet,
+            target: None,
         });
     }
     if let Some(f) = &d.last_failure {
@@ -442,6 +556,7 @@ pub fn attention(
                 None => when,
             },
             tone: Tone::Bad,
+            target: None,
         });
     }
     if let Some(h) = &d.host
@@ -453,9 +568,30 @@ pub fn attention(
             title: fill(m::ATT_DISK, &[("free", &bytes(h.disk_free_bytes))]),
             meta: m::ATT_DISK_META.into(),
             tone: Tone::Warn,
+            target: None,
         });
     }
+    for a in &mut out {
+        a.target = Some(AttentionTarget {
+            page: a.kind.page(),
+            machine: Some(d.machine.id.clone()),
+            topic: (a.kind == AttentionKind::Waiting)
+                .then(|| waiting_topic.clone())
+                .flatten(),
+        });
+    }
+    rank_attention(&mut out);
     out
+}
+
+/// The 话题 (group, topic) of the run that has waited longest for a reply.
+fn oldest_waiting_topic(d: &MachineMonitor) -> Option<(String, String)> {
+    d.runs
+        .iter()
+        .filter(|r| r.state == run_state::WAITING)
+        .filter_map(|r| Some((r.started_at, r.group_id.clone()?, r.topic_id.clone()?)))
+        .min_by_key(|(at, ..)| at.unwrap_or(u64::MAX))
+        .map(|(_, group, topic)| (group, topic))
 }
 
 /// A sortable column of 按成员.
@@ -627,7 +763,7 @@ mod tests {
         assert_eq!(cli_entry_name("acp", "gemini"), "gemini");
     }
     use chat_core::proto::monitor::{
-        MonitorCli, MonitorFailure, MonitorHost, MonitorMachine, MonitorQueue,
+        MonitorCli, MonitorFailure, MonitorHost, MonitorMachine, MonitorQueue, MonitorRun,
     };
 
     /// 模 1.3: 要注意 says so while the AI 服务 is not set up, and only once it was read.
@@ -749,6 +885,7 @@ mod tests {
         assert_eq!(count_short(14_200), "14K");
         assert_eq!(count_short(950), "950");
         assert_eq!(duration(130_000), "2 分 10 秒");
+        assert_eq!(duration(180_000), "3 分钟");
         assert_eq!(duration(3 * 3_600_000 + 5), "3 小时");
         assert_eq!(ago(4_000), "刚刚");
         assert_eq!(seconds(1300), "1.3 秒");
@@ -780,7 +917,7 @@ mod tests {
             (
                 "未登录".into(),
                 Tone::Warn,
-                Some("在主机上运行 sudo -iu runner gh auth login".into())
+                Some("要登录 GitHub，到主机上运行 sudo -iu runner gh auth login".into())
             )
         );
         assert_eq!(
@@ -788,7 +925,31 @@ mod tests {
             (
                 "没装 gh".into(),
                 Tone::Warn,
-                Some("用运行 AI 成员的系统用户运行 gh auth login".into())
+                Some(
+                    "先在那台电脑上装好 gh，再切到运行 AI 成员的系统账号，执行 gh auth login"
+                        .into()
+                )
+            )
+        );
+        assert_eq!(
+            hint_parts(m::GITHUB_NO_GH_HINT_VM),
+            (
+                "先在主机上装好 gh，再运行",
+                Some("sudo -iu runner gh auth login")
+            )
+        );
+        assert_eq!(
+            hint_parts(m::GITHUB_HINT_VM),
+            (
+                "要登录 GitHub，到主机上运行",
+                Some("sudo -iu runner gh auth login")
+            )
+        );
+        assert_eq!(
+            hint_parts(m::GITHUB_HINT_HOST),
+            (
+                "要登录 GitHub，切到运行 AI 成员的系统账号，执行",
+                Some("gh auth login")
             )
         );
         assert_eq!(cell("unknown", None, Some("vm")).2, None);
@@ -822,15 +983,128 @@ mod tests {
             titles,
             vec![
                 "3 个 VM 在等你",
-                "Codex 未登录",
-                "4 个任务在排队",
                 "Ledger 的任务没跑成",
-                "磁盘只剩 50 B"
+                "Codex 未登录",
+                "磁盘只剩 50 B",
+                "4 个任务在排队"
             ]
         );
-        assert_eq!(list[0].meta, "Forge 2 个 · Ledger 1 个");
-        assert_eq!(list[1].meta, "今天 2 个任务没跑成");
-        assert_eq!(list[3].meta, "对一下十月的账单 · 10:31");
+        // No run names its 话题 here, so the row promises no way there.
+        assert_eq!(list[0].meta, "Forge 2 个 · Ledger 1 个 在等回复");
+        assert_eq!(list[1].meta, "10:31 · 对一下十月的账单");
+        assert_eq!(list[2].meta, "今天 2 个任务没跑成");
+        assert_eq!(list[4].tone, Tone::Quiet);
+    }
+
+    /// 等你 opens the 话题 that has waited longest, and only then says to reply there.
+    #[test]
+    fn waiting_opens_the_oldest_waiting_topic() {
+        let run = |id: &str, state: &str, at: u64, topic: Option<&str>| MonitorRun {
+            run_id: id.into(),
+            member_id: Some("b".into()),
+            group_id: topic.map(|_| "g".to_string()),
+            topic_id: topic.map(str::to_string),
+            state: state.into(),
+            started_at: Some(at),
+            boot_ms: None,
+            cpu_cores: None,
+            mem_bytes: None,
+            scratch_bytes: None,
+        };
+        let mut d = sample();
+        d.runs = vec![
+            run("r1", run_state::WAITING, 30, Some("newer")),
+            run("r2", run_state::RUNNING, 10, Some("not-waiting")),
+            run("r3", run_state::WAITING, 20, Some("oldest")),
+            run("r4", run_state::WAITING, 5, None),
+        ];
+        let list = attention(&d, 10_000, &names, &|_| "10:31".into());
+        let row = list
+            .iter()
+            .find(|a| a.kind == AttentionKind::Waiting)
+            .expect("a row");
+        assert_eq!(row.meta, "Forge 2 个 · Ledger 1 个 · 到话题里回复");
+        let target = row.target.as_ref().expect("a target");
+        assert_eq!(target.topic, Some(("g".into(), "oldest".into())));
+        // Every other row keeps its page.
+        assert!(
+            list.iter()
+                .filter(|a| a.kind != AttentionKind::Waiting)
+                .all(|a| a.target.as_ref().is_some_and(|t| t.topic.is_none()))
+        );
+    }
+
+    /// Stopped work outranks a computer that is gone, and that outranks what is only worth watching.
+    #[test]
+    fn attention_rank_puts_stopped_work_above_offline_computers() {
+        let row = |kind, tone| Attention {
+            kind,
+            title: String::new(),
+            meta: String::new(),
+            tone,
+            target: None,
+        };
+        let mut list = vec![
+            row(AttentionKind::Invite, Tone::Info),
+            row(AttentionKind::Budget, Tone::Warn),
+            row(AttentionKind::Offline, Tone::Bad),
+            row(AttentionKind::Failed, Tone::Bad),
+            row(AttentionKind::Waiting, Tone::Warn),
+            row(AttentionKind::Budget, Tone::Bad),
+        ];
+        rank_attention(&mut list);
+        let kinds: Vec<(AttentionKind, Tone)> = list.iter().map(|a| (a.kind, a.tone)).collect();
+        assert_eq!(
+            kinds,
+            vec![
+                (AttentionKind::Budget, Tone::Bad),
+                (AttentionKind::Waiting, Tone::Warn),
+                (AttentionKind::Failed, Tone::Bad),
+                (AttentionKind::Offline, Tone::Bad),
+                (AttentionKind::Budget, Tone::Warn),
+                (AttentionKind::Invite, Tone::Info),
+            ]
+        );
+    }
+
+    /// A row leads to where it is dealt with, on the computer it is about.
+    #[test]
+    fn attention_rows_lead_to_their_page_on_their_computer() {
+        let list = attention(&sample(), 10_000, &names, &|_| "10:31".into());
+        let to = |kind: AttentionKind| {
+            let a = list.iter().find(|a| a.kind == kind).expect("a row");
+            a.target.clone().expect("a target")
+        };
+        assert_eq!(to(AttentionKind::CliLoggedOut).page, AdminPage::Accounts);
+        assert_eq!(to(AttentionKind::Queue).page, AdminPage::Overview);
+        assert_eq!(to(AttentionKind::Queue).machine.as_deref(), Some("m1"));
+        assert_eq!(to(AttentionKind::Failed).page, AdminPage::Activity);
+        assert_eq!(AttentionKind::Limit.page(), AdminPage::Accounts);
+        assert_eq!(AttentionKind::Budget.page(), AdminPage::Usage);
+        assert_eq!(AttentionKind::Invite.page(), AdminPage::Members);
+    }
+
+    #[test]
+    fn attention_lists_github_only_on_a_vm_computer() {
+        use chat_core::proto::machine::MachineGithub;
+        let rows = |state: &str, runs_in: &str| {
+            let mut d = sample();
+            d.github = Some(MachineGithub {
+                state: state.into(),
+                login: None,
+            });
+            d.runs_in = Some(runs_in.into());
+            attention(&d, 1_000, &|id| id.to_string(), &|_| "t".into())
+                .into_iter()
+                .filter(|a| a.kind == AttentionKind::Github)
+                .map(|a| a.title)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(rows("signed_out", "vm"), [m::ATT_GITHUB_OUT]);
+        assert_eq!(rows("no_gh", "vm"), [m::GITHUB_NO_GH]);
+        assert!(rows("signed_in", "vm").is_empty());
+        assert!(rows("signed_out", "host").is_empty());
+        assert!(rows("no_gh", "host").is_empty());
     }
 
     #[test]

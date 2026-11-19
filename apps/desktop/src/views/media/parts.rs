@@ -133,10 +133,17 @@ pub fn screen_tool(
 
 /// A done action (copied, saved, sent) as the kit Toast (§2.16): a success icon and the
 /// words.
-fn toast(text: &str, cx: &mut App) {
+pub fn toast(text: &str, cx: &mut App) {
     crate::ui::overlay::Toast::new(Sym::Check, text.to_string())
         .tone(crate::ui::overlay::Tone::Success)
         .push(cx);
+}
+
+/// Copies `text` and says so with the toast `done` (the caller's own 已复制), so a copy
+/// button never looks like it did nothing.
+pub fn copy_text(text: impl Into<String>, done: &'static str, cx: &mut App) {
+    cx.write_to_clipboard(gpui::ClipboardItem::new_string(text.into()));
+    toast(done, cx);
 }
 
 /// Copies an image file to the clipboard.

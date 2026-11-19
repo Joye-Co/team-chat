@@ -45,6 +45,10 @@ fn monitor_github() -> (Value, &'static str) {
     }
 }
 
+/// The 用这台电脑 scenes before anything can run: 0 this computer is the Mac mini, 1 a card of
+/// its own that is offline (the service has not started), 2 one that is online and idle.
+pub static THIS_COMPUTER: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+
 pub fn machine_monitor(machine_id: &str, range: &str) -> MachineMonitor {
     let now = now();
     let (n, step) = match range {
@@ -53,10 +57,22 @@ pub fn machine_monitor(machine_id: &str, range: &str) -> MachineMonitor {
         _ => (30, 30_000),
     };
     if machine_id != "mc-mini" {
+        // 团队 VPS is online in the machine list: its monitor says the same.
+        let idle_here = machine_id == super::settings::MY_COMPUTER
+            && THIS_COMPUTER.load(std::sync::atomic::Ordering::Relaxed) == 2;
+        let online = machine_id == "mc-vps" || idle_here;
+        // The idle computer has Claude Code, not signed in yet: what its setup card says.
+        let clis = if idle_here {
+            json!([{ "runtime": "claude", "kind": "claude", "available": true,
+                     "version": "2.1.0", "login": "logged_out", "failedToday": 0 }])
+        } else {
+            json!([])
+        };
         return parse(json!({
             "machine": {
-                "id": machine_id, "name": "旧笔记本", "connected": false,
-                "lastHeartbeatAt": now - 3 * DAY, "os": "macos", "arch": "aarch64",
+                "id": machine_id, "name": "旧笔记本", "connected": online,
+                "lastHeartbeatAt": if online { now - 8_000 } else { now - 3 * DAY },
+                "os": "macos", "arch": "aarch64",
                 "daemonVersion": "0.3.2"
             },
             "series": { "range": range, "from": now - n as u64 * step, "stepMs": step,
@@ -64,7 +80,7 @@ pub fn machine_monitor(machine_id: &str, range: &str) -> MachineMonitor {
             "capacity": { "slots": 1, "running": 0, "canTake": 0 },
             "queue": { "count": 0 },
             "today": { "finished": 0, "succeeded": 0, "failed": 0, "finishedYesterday": 0, "tokens": 0 },
-            "clis": [], "runs": [], "members": []
+            "clis": clis, "runs": [], "members": []
         }));
     }
     let gib = 1024_u64 * 1024 * 1024;
@@ -101,7 +117,8 @@ pub fn machine_monitor(machine_id: &str, range: &str) -> MachineMonitor {
         "runs": [
             { "runId": "r-1", "memberId": "m-coder", "state": "running", "startedAt": now - 12 * MIN,
               "cpuCores": 1.4, "memBytes": 2 * gib },
-            { "runId": "r-2", "memberId": "m-reviewer", "state": "waiting", "startedAt": now - 6 * MIN },
+            { "runId": "r-2", "memberId": "m-reviewer", "groupId": "g-dev", "topicId": "t-weibo",
+              "state": "waiting", "startedAt": now - 6 * MIN },
             { "runId": "r-3", "memberId": "m-docs", "state": "queued" }
         ],
         "members": [
@@ -305,7 +322,7 @@ pub fn team_activity() -> ActivityResponse {
             "run.failed",
             "m-taro",
             "t-weibo",
-            json!({ "machineId": "mc-mini", "details": { "title": "把这周的微博排期发出来", "requestedBy": "m-lixue" } }),
+            json!({ "machineId": "mc-mini", "details": { "groupId": "g-dev", "title": "把这周的微博排期发出来", "requestedBy": "m-lixue" } }),
         ),
         e(
             10,

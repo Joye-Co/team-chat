@@ -220,6 +220,30 @@ pub fn set_role_text(role: TeamRole) -> &'static str {
     }
 }
 
+/// Runs `apply`, which changes `name`'s 身份 to `role`. Making someone a
+/// 所有者 hands them power over everyone, so that one asks first.
+pub fn ask_before_role(
+    role: TeamRole,
+    name: &str,
+    apply: impl Fn(&mut Window, &mut App) + 'static,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    if role != TeamRole::Owner {
+        return apply(window, cx);
+    }
+    let name = crate::ui::avatar::name_beside_avatar(name).to_string();
+    crate::views::nav::dialogs::confirm_alert(
+        "set-owner",
+        crate::copy::fill(s::SET_OWNER_CONFIRM_TITLE, &[("name", &name)]),
+        crate::copy::fill(s::SET_OWNER_CONFIRM_BODY, &[("name", &name)]),
+        s::SET_OWNER_CONFIRM_OK,
+        apply,
+        window,
+        cx,
+    );
+}
+
 /// The 身份 a 所有者 can give `target` from its row (design-roles 3.9): the other two, and never
 /// 所有者 to an AI member. Empty for myself, a deactivated member, or when I am not the 所有者.
 pub fn roles_to_offer(

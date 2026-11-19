@@ -21,8 +21,9 @@ use crate::{
         MemberAvatar, Sym,
         icons::sym as sym_icon,
         native::{
-            Alert, AlertTone, Badge, NativeType as _, PushSize, PushStyle, SearchField, Segment,
-            Segmented, StatusBadge, TruncText, card_surface, native_colors, progress, push_button,
+            Alert, AlertTone, Badge, FocusRow as _, NativeType as _, PushSize, PushStyle,
+            SearchField, Segment, Segmented, StatusBadge, TruncText, native_colors,
+            panel_card_surface, progress, push_button,
             tokens::{avatar, height, monitor as t, radius, space},
         },
         sf_symbols::SymSize,
@@ -60,6 +61,12 @@ pub struct Team {
     pub selected: Option<String>,
     /// Why the last 「设为…」 did not go through.
     pub role_error: Option<String>,
+    /// Why the last 停用 or 重新启用 did not go through: the alert's title and the reason.
+    pub action_error: Option<(String, String)>,
+    /// The 「设为…」 that failed (who, which 身份), for its alert's 重试.
+    pub role_retry: Option<(String, TeamRole)>,
+    /// The 停用 (`true`) or 重新启用 that failed and for whom, for its alert's 重试.
+    pub action_retry: Option<(String, bool)>,
     search: Entity<InputState>,
 }
 
@@ -74,6 +81,9 @@ impl Team {
             sort: (TeamSortKey::Spend, true),
             selected: None,
             role_error: None,
+            action_error: None,
+            role_retry: None,
+            action_retry: None,
             search: cx.new(|cx| InputState::new(window, cx).placeholder(m::TEAM_SEARCH)),
         }
     }
@@ -165,7 +175,7 @@ impl AdminView {
         .detach();
     }
 
-    /// 在干活 / 等你 / 空闲 of an AI member, from the machines' runs.
+    /// 在做 / 等你 / 空闲 of an AI member, from the machines' runs.
     fn ai_state(&self, id: &str) -> &'static str {
         let (mut running, mut waiting) = (0, 0);
         for d in self.fleet.monitors.values() {
@@ -249,7 +259,7 @@ impl AdminView {
                     "team-add-ai",
                     m::TEAM_ADD_AI,
                     PushStyle::Outline,
-                    PushSize::Small,
+                    PushSize::Regular,
                     cx,
                 )
                 .on_click(move |_, window, cx| {
@@ -261,7 +271,7 @@ impl AdminView {
                     "team-invite",
                     m::TEAM_INVITE,
                     PushStyle::Default,
-                    PushSize::Small,
+                    PushSize::Regular,
                     cx,
                 )
                 .on_click(move |_, window, cx| {
@@ -289,6 +299,30 @@ impl AdminView {
             Some(i) => fill(m::TEAM_SUB, &[("n", &n.to_string()), ("i", &i.to_string())]),
             None => fill(m::TEAM_SUB_NO_INVITES, &[("n", &n.to_string())]),
         }
+    }
+
+    /// The close button of a failed action's alert: for someone who will not try it again.
+    fn dismiss_action(
+        id: &'static str,
+        run: impl Fn(&mut Self) + 'static,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> gpui_component::button::Button {
+        let view = cx.entity();
+        crate::ui::native::icon_button(
+            id,
+            Sym::Close,
+            crate::copy::common::CLOSE,
+            crate::ui::native::IconSize::Small,
+            window,
+            cx,
+        )
+        .on_click(move |_, _, cx| {
+            view.update(cx, |v, cx| {
+                run(v);
+                cx.notify();
+            })
+        })
     }
 
     pub(super) fn team_page(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
@@ -342,13 +376,78 @@ impl AdminView {
             .gap(space::S16)
             .children(self.team.error.clone().map(|e| {
                 Alert::new(Sym::Failed, m::TEAM_FAILED)
+                    .on_surface()
                     .tone(AlertTone::Destructive)
                     .description(e)
+                    .action(Self::retry_action(
+                        "team-retry",
+                        |v, cx| {
+                            v.team.error = None;
+                            v.fetch_team(cx);
+                        },
+                        cx,
+                    ))
+                    .action(Self::dismiss_action(
+                        "team-dismiss",
+                        |v| {
+                            v.team.error = None;
+                        },
+                        window,
+                        cx,
+                    ))
             }))
             .children(self.team.role_error.clone().map(|e| {
                 Alert::new(Sym::Failed, m::TEAM_ROLE_FAILED)
+                    .on_surface()
                     .tone(AlertTone::Destructive)
                     .description(e)
+                    // The same call again; the alert leaves while it runs.
+                    .action(Self::retry_action(
+                        "team-role-retry",
+                        |v, cx| {
+                            v.team.role_error = None;
+                            if let Some((id, role)) = v.team.role_retry.take() {
+                                let view = cx.entity();
+                                set_role(&v.services, &id, role, &view, cx);
+                            }
+                        },
+                        cx,
+                    ))
+                    .action(Self::dismiss_action(
+                        "team-role-dismiss",
+                        |v| {
+                            v.team.role_error = None;
+                            v.team.role_retry = None;
+                        },
+                        window,
+                        cx,
+                    ))
+            }))
+            .children(self.team.action_error.clone().map(|(title, e)| {
+                Alert::new(Sym::Failed, title)
+                    .on_surface()
+                    .tone(AlertTone::Destructive)
+                    .description(e)
+                    .action(Self::retry_action(
+                        "team-action-retry",
+                        |v, cx| {
+                            v.team.action_error = None;
+                            if let Some((id, off)) = v.team.action_retry.take() {
+                                let view = cx.entity();
+                                set_deactivated(&v.services, &id, off, &view, cx);
+                            }
+                        },
+                        cx,
+                    ))
+                    .action(Self::dismiss_action(
+                        "team-action-dismiss",
+                        |v| {
+                            v.team.action_error = None;
+                            v.team.action_retry = None;
+                        },
+                        window,
+                        cx,
+                    ))
             }))
             .child(
                 div()
@@ -358,7 +457,8 @@ impl AdminView {
                     .child(seg)
                     .child(div().flex_1())
                     .child(
-                        SearchField::new("team-search", &self.team.search).width(t::FLEET_ADD_TEXT),
+                        SearchField::new("team-search", &self.team.search)
+                            .width(t::MEMBER_INSPECTOR),
                     ),
             )
             .child(
@@ -381,7 +481,6 @@ impl AdminView {
         let k = native_colors(cx);
         let (key, desc) = self.team.sort;
         let rows = sort_rows(self.team_rows(cx), key, desc);
-        let max_spend = rows.iter().map(|r| r.spend).fold(0., f64::max);
         // One person alone sees no 身份 (design-roles 3.10).
         let solo = crate::views::settings::solo(&self.services);
         let cols: [(TeamSortKey, &'static str, Option<gpui::Pixels>, bool); 5] = [
@@ -402,7 +501,7 @@ impl AdminView {
                 TeamSortKey::Spend,
                 m::TEAM_COL_SPEND,
                 Some(t::TEAM_COL_SPEND),
-                false,
+                true,
             ),
             (
                 TeamSortKey::Recent,
@@ -443,13 +542,20 @@ impl AdminView {
                         } else {
                             Sym::Sort
                         };
-                        cell(*w, *right).child(
+                        // 本周花费 ends on the amounts, before the slot their budgets keep.
+                        let cell = cell(*w, *right).when(sk == TeamSortKey::Spend, |d| {
+                            d.pr(t::TEAM_CELL_PAD + t::TEAM_SPEND_BUDGET + space::S4)
+                        });
+                        cell.child(
                             div()
                                 .id(SharedString::from(format!("team-sort-{sk:?}")))
                                 .flex()
                                 .items_center()
                                 .gap(space::S4)
+                                // The hover fill reaches 4 past the label on both sides;
+                                // the ink itself stays on the column's edge.
                                 .px(space::S4)
+                                .mx(-space::S4)
                                 .rounded(radius::ITEM)
                                 .hover(|s| s.bg(k.fill_hover))
                                 .n_section()
@@ -490,43 +596,63 @@ impl AdminView {
                     (false, role) => role.unwrap_or_default().to_string(),
                 };
                 let level = role_word(r.role);
-                let recent = if r.member.deactivated {
-                    (m::TEAM_OFF.to_string(), k.secondary)
+                // A state is a StatusBadge (icon + word, §2.12), never a colored text run.
+                // 空闲 and 离线 wear the outline dot; how long is in the tooltip, the column
+                // has no room for it.
+                let badge = |state, word: &'static str| {
+                    StatusBadge::new(state, word)
+                        .dense()
+                        // The selected row's fill would swallow the badge's own.
+                        .on_fill(selected)
+                        .into_any_element()
+                };
+                let recent: AnyElement = if r.member.deactivated {
+                    badge(crate::ui::native::BadgeState::Deactivated, m::TEAM_OFF)
+                } else if r.ai_state == Some(m::TEAM_WAITING) {
+                    badge(crate::ui::native::BadgeState::NeedsYou, m::TEAM_WAITING)
+                } else if r.ai_state == Some(m::TEAM_WORKING) {
+                    badge(crate::ui::native::BadgeState::Working, m::TEAM_WORKING)
                 } else if let Some(s) = r.ai_state {
-                    (
-                        s.to_string(),
-                        if s == m::TEAM_WAITING {
-                            k.amber
-                        } else if s == m::TEAM_WORKING {
-                            k.green
-                        } else {
-                            k.secondary
-                        },
-                    )
+                    badge(crate::ui::native::BadgeState::Offline, s)
+                } else if r.member.online {
+                    badge(crate::ui::native::BadgeState::Online, m::TEAM_ONLINE_NOW)
                 } else {
                     match r.seen {
-                        Some(t) if now.saturating_sub(t) < 60_000 => {
-                            (m::TEAM_ONLINE_NOW.to_string(), k.secondary)
+                        Some(t) => {
+                            // The state is the badge; how long is in its tooltip, whole minutes
+                            // at the finest.
+                            let minutes = (now.saturating_sub(t) / 60_000).max(1);
+                            let d = model::duration(minutes * 60_000);
+                            let tip: SharedString = fill(m::FLEET_OFFLINE_FOR, &[("d", &d)]).into();
+                            div()
+                                .id(SharedString::from(format!("team-seen-{id}")))
+                                .tooltip(move |window, cx| {
+                                    gpui_component::tooltip::Tooltip::new(tip.clone())
+                                        .build(window, cx)
+                                })
+                                .child(badge(
+                                    crate::ui::native::BadgeState::Offline,
+                                    m::MACHINE_OFFLINE,
+                                ))
+                                .into_any_element()
                         }
-                        Some(t) => (model::ago(now.saturating_sub(t)), k.secondary),
-                        None => (m::TEAM_NEVER.to_string(), k.secondary),
+                        // 从没上线 only once the roster said so: unread, nothing is known.
+                        None if self.team.roster.is_some() => m::TEAM_NEVER.into_any_element(),
+                        None => "—".into_any_element(),
                     }
                 };
-                let spend = match r.budget_cents.filter(|b| *b > 0) {
-                    Some(b) => fill(
-                        m::TEAM_SPEND_OF,
-                        &[
-                            ("spend", &usd(r.spend)),
-                            ("budget", &format!("${}", b / 100)),
-                        ],
-                    ),
-                    None => usd(r.spend),
-                };
-                let share = match r.budget_cents.filter(|b| *b > 0) {
-                    Some(b) => Some((r.spend / (b as f64 / 100.)) as f32),
-                    None if bot && max_spend > 0. => Some((r.spend / max_spend) as f32),
-                    None => None,
-                };
+                let budget = r.budget_cents.filter(|b| *b > 0).map(|b| {
+                    fill(
+                        m::TEAM_SPEND_BUDGET,
+                        &[("budget", &format!("${}", b / 100))],
+                    )
+                });
+                // The bar means one thing: spend against the budget. No budget, no bar.
+                let share = r
+                    .budget_cents
+                    .filter(|b| *b > 0)
+                    .map(|b| (r.spend / (b as f64 / 100.)) as f32);
+                let over = share.is_some_and(|s| s > 1.);
                 let more = self.member_menu(&r.member, r.role, window, cx);
                 let view = cx.entity();
                 let sel_id = id.clone();
@@ -540,6 +666,9 @@ impl AdminView {
                     .n_figures()
                     .when(selected, |d| d.bg(k.selection))
                     .when(i + 1 < n, |d| d.border_b_1().border_color(k.separator))
+                    // Hover, a tab stop, the arrow keys, Enter and Space (§2.7).
+                    .focus_row(selected, cx)
+                    .framed_ring(cx)
                     .on_click(move |_, _, cx| {
                         let id = sel_id.clone();
                         view.update(cx, |v, cx| {
@@ -572,20 +701,51 @@ impl AdminView {
                     })
                     .child(cell(Some(t::TEAM_COL_TOPICS), true).child(r.topics.to_string()))
                     .child(
-                        cell(Some(t::TEAM_COL_SPEND), false).child(
+                        cell(Some(t::TEAM_COL_SPEND), true).child(
                             div()
                                 .w_full()
                                 .flex()
                                 .flex_col()
                                 .gap(space::S4)
-                                .child(div().n_headline().child(spend))
+                                .child(
+                                    div()
+                                        .flex()
+                                        .items_center()
+                                        .justify_end()
+                                        .gap(space::S4)
+                                        // Over the budget: a word and an icon, before the
+                                        // amount so every amount ends at one x (§1.3, F1).
+                                        .when(over, |d| {
+                                            d.child(
+                                                StatusBadge::new(
+                                                    crate::ui::native::BadgeState::NeedsYou,
+                                                    m::TEAM_OVER_BUDGET,
+                                                )
+                                                .dense()
+                                                .on_fill(selected),
+                                            )
+                                        })
+                                        .child(div().n_headline().child(usd(r.spend)))
+                                        .child(
+                                            div()
+                                                .flex_none()
+                                                .min_w(t::TEAM_SPEND_BUDGET)
+                                                .text_right()
+                                                .whitespace_nowrap()
+                                                .n_footnote()
+                                                .text_color(k.secondary)
+                                                .children(budget),
+                                        ),
+                                )
                                 .children(share.map(|s| progress(s, cx))),
                         ),
                     )
                     .child(
+                        // The ⋯ column beside it keeps the gap: the words get the padding.
                         cell(Some(t::TEAM_COL_RECENT), false)
-                            .text_color(recent.1)
-                            .child(recent.0),
+                            .pr(gpui::Pixels::ZERO)
+                            .text_color(k.secondary)
+                            .child(recent),
                     )
                     .child(
                         div()
@@ -641,7 +801,9 @@ impl AdminView {
         let team_owner = crate::views::settings::i_am_team_owner(&self.services);
         let me = self.services.me();
         let offer = crate::views::settings::roles_to_offer(x, role, me.as_deref(), team_owner);
-        let may_stop = crate::views::settings::may_deactivate(role, team_owner);
+        // Nobody stops themselves from here, as nobody changes their own 身份.
+        let may_stop = crate::views::settings::may_deactivate(role, team_owner)
+            && me.as_deref() != Some(x.id.as_str());
         if !crate::views::settings::has_member_menu(x, &offer, may_stop) {
             return div().into_any_element();
         }
@@ -652,7 +814,7 @@ impl AdminView {
             window,
             cx,
         )
-        .dropdown_menu(move |menu, _, _| {
+        .dropdown_menu_with_anchor(gpui::Anchor::TopRight, move |menu, _, _| {
             let (services, id, view) = (services.clone(), id.clone(), view.clone());
             // An AI member: 更换电脑… (常用设置) and 编辑… (everything). Without them 团队管理
             // had no way to change an AI member's computer.
@@ -674,7 +836,7 @@ impl AdminView {
                         ),
                     )
                     .item(
-                        PopupMenuItem::new(crate::copy::settings::EDIT).on_click(
+                        PopupMenuItem::new(crate::copy::native_kit::EDIT).on_click(
                             move |_, window, cx| {
                                 crate::views::settings::members::open_edit_bot(
                                     s2.clone(),
@@ -694,10 +856,21 @@ impl AdminView {
                 menu
             };
             let menu = offer.iter().fold(menu, |menu, &role| {
-                let (services, id, view) = (services.clone(), id.clone(), view.clone());
+                let (services, id, view, name) =
+                    (services.clone(), id.clone(), view.clone(), name.clone());
                 menu.item(
-                    PopupMenuItem::new(crate::views::settings::set_role_text(role))
-                        .on_click(move |_, _, cx| set_role(&services, &id, role, &view, cx)),
+                    PopupMenuItem::new(crate::views::settings::set_role_text(role)).on_click(
+                        move |_, window, cx| {
+                            let (services, id, view) = (services.clone(), id.clone(), view.clone());
+                            crate::views::settings::ask_before_role(
+                                role,
+                                &name,
+                                move |_, cx| set_role(&services, &id, role, &view, cx),
+                                window,
+                                cx,
+                            );
+                        },
+                    ),
                 )
             });
             if !may_stop {
@@ -715,14 +888,23 @@ impl AdminView {
                 } else {
                     m::TEAM_DEACTIVATE
                 })
-                .on_click(move |_, _, cx| {
-                    let reply = services.provider.set_member_deactivated(&id, !off);
-                    let view = view.clone();
-                    cx.spawn(async move |cx| {
-                        let _ = answer(reply).await;
-                        let _ = view.update(cx, |v, cx| v.fetch_team(cx));
-                    })
-                    .detach();
+                .on_click({
+                    let name = name.clone();
+                    move |_, window, cx| {
+                        // 重新启用 undoes itself; 停用… asks first (the "…" promises it).
+                        if off {
+                            set_deactivated(&services, &id, false, &view, cx);
+                        } else {
+                            confirm_deactivate(
+                                services.clone(),
+                                id.clone(),
+                                &name,
+                                view.clone(),
+                                window,
+                                cx,
+                            );
+                        }
+                    }
                 }),
             );
             // hide-delete/1: a deactivated AI member can leave the team for good.
@@ -827,11 +1009,10 @@ impl AdminView {
         let _ = window;
         let k = native_colors(cx);
         let Some(id) = self.team.selected.clone() else {
-            return card_surface(cx)
+            // The compact Empty (§2.13): an icon and the line, never a lone line.
+            return panel_card_surface(cx)
                 .p(space::S24)
-                .n_body()
-                .text_color(k.secondary)
-                .child(m::TEAM_PICK)
+                .child(crate::ui::native::EmptyLine::new(m::TEAM_PICK).icon(Sym::Members))
                 .into_any_element();
         };
         let Some(x) = self.services.provider.member(&id) else {
@@ -843,13 +1024,18 @@ impl AdminView {
             .into_iter()
             .find(|r| r.member.id.as_str() == id);
         let (topics, spend) = row.as_ref().map(|r| (r.topics, r.spend)).unwrap_or((0, 0.));
-        let week_ago = now_ms().saturating_sub(7 * 86_400_000);
+        // The week the other two tiles count: from Monday.
+        let (week_from, week_to) =
+            super::usage::UsageRange::Week.span(crate::selftest::clock::local_now());
         let artifacts = self
             .services
             .provider
             .all_artifacts()
             .iter()
-            .filter(|(_, a)| a.created_by.as_str() == id && a.updated_at as u64 >= week_ago)
+            .filter(|(_, a)| {
+                a.created_by.as_str() == id
+                    && (week_from..week_to).contains(&(a.updated_at.max(0) as u64))
+            })
             .count();
         // Recent 话题: the ones they asked for or worked on, newest first.
         let mut recent: Vec<(String, String, crate::ui::native::BadgeState, String, u64)> = vec![];
@@ -950,14 +1136,24 @@ impl AdminView {
             let services = self.services.clone();
             let view = cx.entity();
             let mid = id.clone();
+            let name = x.name.clone();
             crate::ui::native::pull_down("team-level", level_word, PushSize::Small, window, cx)
                 .dropdown_menu(move |menu, _, _| {
                     offer.iter().fold(menu, |menu, &role| {
-                        let (services, id, view) = (services.clone(), mid.clone(), view.clone());
+                        let (services, id, view, name) =
+                            (services.clone(), mid.clone(), view.clone(), name.clone());
                         menu.item(
                             PopupMenuItem::new(crate::views::settings::set_role_text(role))
-                                .on_click(move |_, _, cx| {
-                                    set_role(&services, &id, role, &view, cx)
+                                .on_click(move |_, window, cx| {
+                                    let (services, id, view) =
+                                        (services.clone(), id.clone(), view.clone());
+                                    crate::views::settings::ask_before_role(
+                                        role,
+                                        &name,
+                                        move |_, cx| set_role(&services, &id, role, &view, cx),
+                                        window,
+                                        cx,
+                                    );
                                 }),
                         )
                     })
@@ -968,7 +1164,8 @@ impl AdminView {
             div()
                 .flex_1()
                 .min_w(gpui::Pixels::ZERO)
-                .p(space::S12)
+                .px(space::S8)
+                .py(space::S12)
                 .rounded(radius::CONTAINER)
                 .bg(k.group)
                 .border_1()
@@ -976,11 +1173,11 @@ impl AdminView {
                 .flex()
                 .flex_col()
                 .child(
-                    div()
+                    // An amount stays on one line and inside its tile.
+                    TruncText::new(v)
                         .n_title3()
                         .font_weight(gpui::FontWeight::SEMIBOLD)
-                        .n_figures()
-                        .child(v),
+                        .n_figures(),
                 )
                 .child(div().n_footnote().text_color(k.secondary).child(l))
         };
@@ -991,7 +1188,7 @@ impl AdminView {
                 .justify_between()
                 .gap(space::S12)
                 .n_body()
-                .child(div().text_color(k.secondary).child(l))
+                .child(div().flex_none().text_color(k.secondary).child(l))
                 .child(v)
         };
         let devices: Vec<String> = roster
@@ -1004,7 +1201,7 @@ impl AdminView {
                     .collect()
             })
             .unwrap_or_default();
-        card_surface(cx)
+        panel_card_surface(cx)
             .p(space::S24)
             .flex()
             .flex_col()
@@ -1120,14 +1317,25 @@ impl AdminView {
                                         .flex_1()
                                         .child(progress(*n as f32 / max_use as f32, cx)),
                                 )
-                                .child(div().n_footnote().text_color(k.secondary).child(fill(
-                                    if by_topics {
-                                        m::HOME_WHO_TOPICS
-                                    } else {
-                                        m::TEAM_TIMES
-                                    },
-                                    &[("n", &n.to_string())],
-                                )))
+                                // A fixed, right-aligned count: the bar is the only part
+                                // that flexes, so every bar ends at one x.
+                                .child(
+                                    div()
+                                        .flex_none()
+                                        .w(t::TEAM_USE_COUNT)
+                                        .text_right()
+                                        .n_footnote()
+                                        .n_figures()
+                                        .text_color(k.secondary)
+                                        .child(fill(
+                                            if by_topics {
+                                                m::HOME_WHO_TOPICS
+                                            } else {
+                                                m::TEAM_TIMES
+                                            },
+                                            &[("n", &n.to_string())],
+                                        )),
+                                )
                         })),
                 )
             })
@@ -1153,7 +1361,10 @@ impl AdminView {
                         d.child(fact(
                             m::TEAM_MODELS,
                             if models.is_empty() {
-                                div().child(m::TEAM_NO_MODELS).into_any_element()
+                                div()
+                                    .text_color(k.secondary)
+                                    .child(m::TEAM_NO_MODELS)
+                                    .into_any_element()
                             } else {
                                 // One a line: names are long ("Claude Sonnet 5.5").
                                 div()
@@ -1173,6 +1384,12 @@ impl AdminView {
                             } else {
                                 devices.join("、")
                             })
+                            // Cut or short, the value ends on the card's edge like the rows
+                            // above it.
+                            .flex_1()
+                            .text_right()
+                            // Nothing to name: quieter than the facts above it.
+                            .when(devices.is_empty(), |t| t.text_color(k.secondary))
                             .into_any_element(),
                         ))
                     }),
@@ -1200,9 +1417,11 @@ fn set_role(
 ) {
     let reply = services.provider.set_member_role(id, role);
     let view = view.clone();
+    let id = id.to_string();
     cx.spawn(async move |cx| {
         let result = answer(reply).await;
         let _ = view.update(cx, |v, cx| {
+            v.team.role_retry = result.is_err().then_some((id, role));
             v.team.role_error = result
                 .err()
                 .map(|e| crate::views::settings::role_error_text(e).to_string());
@@ -1210,6 +1429,74 @@ fn set_role(
         });
     })
     .detach();
+}
+
+/// Deactivates or reactivates `id` and reads the team again; a refusal shows on the page.
+fn set_deactivated(
+    services: &crate::app::Services,
+    id: &str,
+    deactivated: bool,
+    view: &Entity<AdminView>,
+    cx: &mut gpui::App,
+) {
+    let reply = services.provider.set_member_deactivated(id, deactivated);
+    let view = view.clone();
+    // The alert outlives the dialog: it names whom 重试 is about.
+    let name = services
+        .provider
+        .member(id)
+        .map(|x| x.name)
+        .unwrap_or_else(|| m::UNKNOWN_MEMBER.to_string());
+    let title = fill(
+        if deactivated {
+            m::TEAM_DEACTIVATE_FAILED
+        } else {
+            m::TEAM_REACTIVATE_FAILED
+        },
+        &[("name", &name)],
+    );
+    let id = id.to_string();
+    cx.spawn(async move |cx| {
+        let result = answer(reply).await;
+        let _ = view.update(cx, |v, cx| {
+            v.team.action_retry = result.is_err().then_some((id, deactivated));
+            v.team.action_error = result.err().map(|e| {
+                (
+                    title,
+                    crate::views::settings::widgets::error_text(e).to_string(),
+                )
+            });
+            v.fetch_team(cx)
+        });
+    })
+    .detach();
+}
+
+/// Asks before deactivating a member; on 停用 deactivates and reads the team again.
+pub(super) fn confirm_deactivate(
+    services: crate::app::Services,
+    id: String,
+    name: &str,
+    view: Entity<AdminView>,
+    window: &mut Window,
+    cx: &mut gpui::App,
+) {
+    use crate::views::nav::dialogs;
+    // What stops differs: an AI member's work, a person's way in.
+    let body = if services.provider.member(&id).is_some_and(|x| x.is_bot()) {
+        m::TEAM_DEACTIVATE_CONFIRM_BODY_AI
+    } else {
+        m::TEAM_DEACTIVATE_CONFIRM_BODY_PERSON
+    };
+    dialogs::destructive_alert(
+        "deactivate-member",
+        m::TEAM_DEACTIVATE_CONFIRM_TITLE.to_string(),
+        fill(body, &[("name", name)]),
+        m::TEAM_DEACTIVATE_OK,
+        move |_, cx| set_deactivated(&services, &id, true, &view, cx),
+        window,
+        cx,
+    );
 }
 
 /// Asks before deleting a deactivated AI member for good (the 离开群 alert); on 删除 deletes
@@ -1225,11 +1512,8 @@ fn confirm_delete_member(
     use crate::views::nav::dialogs;
     dialogs::destructive_alert(
         "delete-member",
-        fill(
-            m::TEAM_DELETE_CONFIRM_TITLE,
-            &[("name", &dialogs::short_name(name))],
-        ),
-        m::TEAM_DELETE_CONFIRM_BODY.to_string(),
+        m::TEAM_DELETE_CONFIRM_TITLE.to_string(),
+        fill(m::TEAM_DELETE_CONFIRM_BODY, &[("name", name)]),
         m::TEAM_DELETE_OK,
         move |window, cx| {
             let reply = services.provider.delete_member(&id);
