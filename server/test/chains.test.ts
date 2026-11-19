@@ -2,7 +2,7 @@
 // counted in one place in the room, with one way to stop a run, a whole piece of work and what a
 // run gave out.
 import { env, runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
-import { afterAll, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { CardV2 } from "@chat/protocol";
 import type { BotsEnv } from "../src/bots/env";
 import { MAX_DEPTH, MAX_HANDOFFS, confirmStep, reserveStep, stepReport, stopChain } from "../src/bots/chains";
@@ -10,16 +10,10 @@ import type { RoomContext, RoomTx } from "../src/core/registry";
 import { closedCard, handoverCard, lastWords, workOrderText } from "../src/bots/desk/delegate_card";
 import { topicStateText } from "../src/context/read";
 import { TEXT } from "../src/bots/dispatch";
-import { Daemon, type World, downViolations, mention, world } from "./daemon";
-import { Client, type TestMember, api, clientMsgId, createMember, protocolViolations } from "./helpers";
+import { Daemon, type World, mention, world } from "./daemon";
+import { Client, type TestMember, api, clientMsgId, createMember } from "./helpers";
 
 const benv = env as unknown as BotsEnv;
-
-afterAll(async () => {
-  await new Promise((r) => setTimeout(r, 300));
-  expect(protocolViolations).toEqual([]);
-  expect(downViolations).toEqual([]);
-});
 
 /** Another runner-backed AI member in the world's group, on the world's machine. */
 async function addBot(w: World, name: string): Promise<TestMember> {

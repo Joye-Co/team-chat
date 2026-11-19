@@ -102,6 +102,7 @@ export class BotDesk extends DeskInteract {
       target: botId,
       details: {
         runId: r.id,
+        groupId: r.group_id,
         topicId: r.topic_id,
         budgetCents: state.budgetCents + state.extraCents,
         spentCents: state.spentCents,

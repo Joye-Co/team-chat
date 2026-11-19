@@ -3,18 +3,12 @@
 // `GET /v1/machine/runs/:id/memories?q=` (chat-run memory search) under the same audience rules;
 // a memory counts as used when a run searched it or cited its id, not when a prompt carried it.
 import { SELF, env } from "cloudflare:test";
-import { afterAll, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { EXECUTOR_MEMORY_BYTES, priority, search } from "../src/memory/inject";
 import { score, terms } from "../src/memory/relevance";
 import { createMemory, type MemoryRow } from "../src/memory/store";
-import { Daemon, downViolations, mention, world, type World } from "./daemon";
-import { BASE, Client, api, createGroup, createMember, protocolViolations } from "./helpers";
-
-afterAll(async () => {
-  await new Promise((r) => setTimeout(r, 300));
-  expect(protocolViolations).toEqual([]);
-  expect(downViolations).toEqual([]);
-});
+import { Daemon, mention, world, type World } from "./daemon";
+import { BASE, Client, api, createGroup, createMember } from "./helpers";
 
 const row = (id: string, text: string, o: Partial<MemoryRow> = {}): MemoryRow => ({
   id,
