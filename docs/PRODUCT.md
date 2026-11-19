@@ -136,8 +136,9 @@ The layout and look of every screen are in [DESIGN.md](DESIGN.md) v3 and its art
 - **话题**: the timeline (virtualized, anchored at the bottom, Markdown, images inline, cards
   rendered natively), the newest decision that waits on me pinned above the composer, and the
   composer (multi-line, Chinese IME, @mentions, quote a message, paste or drop images and files).
-  On the right, the topic rail (详情): 成员 (everyone in the 群, who all see the 话题, with the AI
-  the member a paused order is stuck at marked 卡住了, members at work marked 在做, those that took part 参与过, and the one who 提出 it), 计划, 改动, 产出, 用到的决定, 电脑, 用时和花费; a card
+  On the right, the topic rail (详情): 成员 (everyone in the 群, who all see the 话题, with the member
+  a paused order is stuck at marked 卡住了, the AI members at work marked 在做, those that took
+  part 参与过, and the one who 提出 it), 计划, 改动, 产出, 用到的决定, 电脑, 用时和花费; a card
   with no data is hidden.
 - **单独问** (⌘;): a side chat with a member (the main bot by default) beside a topic. The member has read
   the topic up to now. Only I see the questions and answers. A suggested step goes into the topic

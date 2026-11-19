@@ -176,6 +176,7 @@ pub fn people_marks(topic: &Topic) -> Vec<(MemberId, &'static str)> {
     // 参与过 would read as finished: the stuck member leads with the bar's word.
     if let Some(relay) = topic.relay.as_ref().filter(|r| r.state == "paused")
         && let Some(step) = relay.steps.get(relay.current as usize)
+        && !step.member_id.is_empty()
     {
         out.retain(|(id, _)| *id != step.member_id);
         out.insert(0, (step.member_id.clone(), r::PEOPLE_STUCK));
