@@ -83,6 +83,8 @@ describe("budget pause", () => {
     expect(note.body).toBe("Joye 这周给 dev 加了 $1 预算，接着做。");
     const a = ActivityResponse.parse((await api("/v1/activity?kind=budget", { token: w.owner.token })).body);
     expect(a.entries.map((e) => e.action)).toEqual(expect.arrayContaining(["budget.paused", "budget.raised"]));
+    // The log row leads to the 话题 with the card that decides the held run.
+    expect(a.entries.find((e) => e.action === "budget.paused")).toMatchObject({ details: { groupId: w.gid, topicId } });
     expect(a.entries.find((e) => e.action === "budget.raised")).toMatchObject({ actorId: w.owner.id, target: w.bot.id, details: { extraCents: 100 } });
   });
 

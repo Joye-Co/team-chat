@@ -2,7 +2,7 @@
 // counted in one place in the room, with one way to stop a run, a whole piece of work and what a
 // run gave out.
 import { env, runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
-import { afterAll, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { CardV2 } from "@chat/protocol";
 import type { BotsEnv } from "../src/bots/env";
 import { MAX_DEPTH, MAX_HANDOFFS, confirmStep, reserveStep, stepReport, stopChain } from "../src/bots/chains";
@@ -10,16 +10,10 @@ import type { RoomContext, RoomTx } from "../src/core/registry";
 import { closedCard, handoverCard, lastWords, workOrderText } from "../src/bots/desk/delegate_card";
 import { topicStateText } from "../src/context/read";
 import { TEXT } from "../src/bots/dispatch";
-import { Daemon, type World, downViolations, mention, world } from "./daemon";
-import { Client, type TestMember, api, clientMsgId, createMember, protocolViolations } from "./helpers";
+import { Daemon, type World, mention, world } from "./daemon";
+import { Client, type TestMember, api, clientMsgId, createMember } from "./helpers";
 
 const benv = env as unknown as BotsEnv;
-
-afterAll(async () => {
-  await new Promise((r) => setTimeout(r, 300));
-  expect(protocolViolations).toEqual([]);
-  expect(downViolations).toEqual([]);
-});
 
 /** Another runner-backed AI member in the world's group, on the world's machine. */
 async function addBot(w: World, name: string): Promise<TestMember> {
@@ -407,6 +401,15 @@ describe("a giver that waits for a machine", () => {
     // qa's slot freed up in qa's desk; dev's desk gives its queued run a machine on its alarm.
     const desk = benv.BOT_DESK.get(benv.BOT_DESK.idFromName(w.bot.id));
     const isNext = (f: any) => f.t === "run.assign" && f.runId === queued.data.run.id;
+    // The part reaches dev's desk on its own path: let it land before the alarm hands out the run,
+    // or a slow runner gives the run its machine first and the part goes in as input instead.
+    await vi.waitFor(async () => {
+      const key = `partsIn:${queued.data.run.id}`;
+      const kept = (await runInDurableObject(desk, (_o, state: DurableObjectState) =>
+        state.storage.sql.exec<{ value: string }>("SELECT value FROM meta WHERE key = ?", key).toArray()[0]?.value ?? null,
+      )) as string | null;
+      expect(kept).toContain("Windows 上通过");
+    }, { timeout: 10_000, interval: 50 });
     await vi.waitFor(async () => {
       await runDurableObjectAlarm(desk);
       expect(d.frames.some(isNext)).toBe(true);

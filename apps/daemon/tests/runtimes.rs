@@ -1716,7 +1716,7 @@ async fn claude_is_told_to_go_on_when_its_background_command_finished() {
     assert_eq!(o.status, Status::Succeeded, "{o:?}");
     let text = o.result_text.unwrap_or_default();
     assert!(text.starts_with("reply 2: "), "{text}");
-    assert!(text.contains(runtime::claude::BACKGROUND_DONE), "{text}");
+    assert!(text.contains(&runtime::claude::background_done()), "{text}");
 }
 
 /// A resumed session first clears the notification of a background command the restart
@@ -1758,7 +1758,10 @@ async fn claude_is_asked_once_about_a_background_command_that_still_runs() {
     assert_eq!(o.status, Status::Succeeded, "{o:?}");
     let text = o.result_text.unwrap_or_default();
     assert!(text.starts_with("reply 2: "), "{text}");
-    assert!(text.contains(runtime::claude::BACKGROUND_STILL), "{text}");
+    assert!(
+        text.contains(&runtime::claude::background_still()),
+        "{text}"
+    );
     let ended = evs
         .iter()
         .filter(|e| matches!(e, RunEvent::TurnCompleted { .. }))
@@ -1796,7 +1799,8 @@ async fn claude_gets_the_full_prompt_when_the_session_is_gone() {
     assert!(args.contains(&"--session-id".to_string()), "{args:?}");
     assert!(!args.contains(&"--resume".to_string()), "{args:?}");
 
-    // Gone, from an older server: the short prompt, nothing reported.
+    // Gone and no whole prompt (an older server, or a prompt over the frame limit): the short
+    // prompt after the word that this session does not remember the rest; nothing reported.
     let dir = tempfile::tempdir().unwrap();
     let mut s = spec(
         dir.path(),
@@ -1807,7 +1811,13 @@ async fn claude_gets_the_full_prompt_when_the_session_is_gone() {
     );
     s.resume_session_id = Some("gone".into());
     let (o, _) = drive(s, |_| None).await;
-    assert_eq!(o.result_text.as_deref(), Some("reply 1: only new"));
+    assert_eq!(
+        o.result_text,
+        Some(format!(
+            "reply 1: {}\n\nonly new",
+            runtime::LOST_SESSION_NOTE
+        ))
+    );
     assert!(!o.resume_missed);
     assert!(argv(dir.path()).contains(&"--session-id".to_string()));
 
@@ -1836,10 +1846,13 @@ async fn claude_gets_the_full_prompt_when_the_session_is_gone() {
 /// prompt; a thread it has, or no `fullPrompt`, keeps the short prompt.
 #[tokio::test]
 async fn codex_gets_the_full_prompt_when_the_thread_is_gone() {
+    // Gone and no whole prompt: the short prompt after the lost-session note.
+    let lost = format!("codex: {}\n\nonly new", runtime::LOST_SESSION_NOTE);
     for (tid, full, reply, missed) in [
         ("th-gone", Some("whole"), "codex: whole", true),
-        ("th-gone", None, "codex: only new", false),
+        ("th-gone", None, lost.as_str(), false),
         ("th-old", Some("whole"), "codex: only new", false),
+        ("th-old", None, "codex: only new", false),
     ] {
         let dir = tempfile::tempdir().unwrap();
         let mut s = spec(dir.path(), "codex", &fake("fake_codex.py"), &[], "only new");

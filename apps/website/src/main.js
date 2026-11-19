@@ -5,24 +5,33 @@
   function curTheme(){if(root.dataset.theme==="light"||root.dataset.theme==="dark")return root.dataset.theme;return window.matchMedia&&matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light";}
   var themeBtn=document.querySelector(".theme-btn");
   if(themeBtn){themeBtn.setAttribute("aria-pressed",curTheme()==="dark"?"true":"false");
+    /* the hidden theme's screenshots are lazy: fetch the ones on show as soon as a switch looks likely */
+    var warm=function(){[].forEach.call(document.querySelectorAll(".pl-layer.on img,.shot img"),function(im){im.loading="eager";});};
+    themeBtn.addEventListener("pointerenter",warm,{once:true});themeBtn.addEventListener("focus",warm,{once:true});
     themeBtn.addEventListener("click",function(){var next=curTheme()==="dark"?"light":"dark";root.classList.add("theme-swap");root.dataset.theme=next;themeBtn.setAttribute("aria-pressed",next==="dark"?"true":"false");void root.offsetWidth;root.classList.remove("theme-swap");try{localStorage.setItem("theme",next);}catch(e){}});}
   var nav=document.querySelector("nav"),navSc=null;
   function syncNav(){if(!nav)return;var s=scrollY>12;if(s!==navSc){navSc=s;nav.classList.toggle("scrolled",s);}}
   syncNav();addEventListener("scroll",syncNav,{passive:true});
   var reduce=window.matchMedia&&matchMedia("(prefers-reduced-motion: reduce)").matches;
+  /* the web fonts load without blocking the first paint, so measured layout is redone when they arrive */
+  function fontsIn(fn){if(!document.fonts)return;if(document.fonts.ready)document.fonts.ready.then(fn);if(document.fonts.addEventListener)document.fonts.addEventListener("loadingdone",fn);}
   var io2="IntersectionObserver" in window;
   /* sliding pill behind the selected tab of a tab row */
   function slider(box){var ind=document.createElement("span");ind.className="ind still";box.insertBefore(ind,box.firstChild);box.classList.add("has-ind");
     function place(){var t=box.querySelector('[aria-selected="true"]');if(!t)return;ind.style.width=t.offsetWidth+"px";ind.style.height=t.offsetHeight+"px";ind.style.transform="translate("+t.offsetLeft+"px,"+t.offsetTop+"px)";if(box.scrollWidth>box.clientWidth+1)box.scrollTo({left:t.offsetLeft-(box.clientWidth-t.offsetWidth)/2,behavior:ind.classList.contains("still")?"auto":"smooth"});}
     place();requestAnimationFrame(function(){requestAnimationFrame(function(){ind.classList.remove("still");});});
-    addEventListener("resize",place);addEventListener("load",place);if(document.fonts&&document.fonts.ready)document.fonts.ready.then(place);return place;}
+    addEventListener("resize",place);addEventListener("load",place);fontsIn(place);return place;}
   /* screenshot tours: each step names an image (data-img, without -light/-dark) and the part to ring (data-f: left, top, width, height in percent).
      The frame zooms toward that part; when the step's bar fills, the next step starts. Pointing at the tour or scrolling it out of view holds it. */
   [].forEach.call(document.querySelectorAll(".player"),function(el){
     var steps=[].slice.call(el.querySelectorAll(".ps")),pf=el.querySelector(".pf"),fit=el.classList.contains("fit"),layers={},order=[],cur=-1;
     pf.innerHTML="";
-    steps.forEach(function(st){var k=st.dataset.img;if(layers[k])return;var d=document.createElement("div");d.className="pl-layer";
-      d.innerHTML='<img class="l" alt="" src="'+k+'-light.webp"><img class="d" alt="" src="'+k+'-dark.webp">'+(fit?"":'<span class="pl-ring"></span>');pf.appendChild(d);layers[k]=d;order.push(k);});
+    /* lazy images: the hidden theme (display:none) and the tours further down are not fetched until they show.
+       Only the first screen of the hero's tour, in the theme on show, loads at once. */
+    var hero=!!el.closest(".hero-tour"),dark=curTheme()==="dark";
+    function shot(cls,src,first){return '<img class="'+cls+'" alt="" decoding="async" '+(first?'fetchpriority="high"':'loading="lazy"')+' src="'+src+'">';}
+    steps.forEach(function(st){var k=st.dataset.img;if(layers[k])return;var d=document.createElement("div"),first=hero&&!order.length;d.className="pl-layer";
+      d.innerHTML=shot("l",k+"-light.webp",first&&!dark)+shot("d",k+"-dark.webp",first&&dark)+(fit?"":'<span class="pl-ring"></span>');pf.appendChild(d);layers[k]=d;order.push(k);});
     function geo(f){if(!f)return null;var p=f.split(",").map(function(v){return parseFloat(v)/100;});var phone=matchMedia("(max-width:760px)").matches;
       var s=Math.max(1,Math.min(phone?2.4:1.32,(phone?.94:.86)/Math.max(p[2],p[3])));
       var x=Math.min(0,Math.max(1-s,.5-s*(p[0]+p[2]/2))),y=Math.min(0,Math.max(1-s,.5-s*(p[1]+p[3]/2)));return {s:s,x:x*100,y:y*100,p:p};}
@@ -60,13 +69,15 @@
   function scrolled(){tours.forEach(function(c){if(!c.classList.contains("scrolly"))return;var st=c.querySelector(".stick"),r=c.getBoundingClientRect(),top=stickTop(c),total=c.offsetHeight-st.offsetHeight;if(total<=0)return;
     var pr=Math.min(Math.max((top-r.top)/total,0),.999),pl=st.querySelector(".player"),i=Math.floor(pr*pl._n),vis=r.top<innerHeight&&r.bottom>0;if(vis&&(i!==c._last||!c._in))pl._go(i);c._last=i;c._in=vis;});}
   if(tours.length){var sTick=false;addEventListener("scroll",function(){if(!sTick){sTick=true;requestAnimationFrame(function(){sTick=false;scrolled();});}},{passive:true});
-    addEventListener("resize",fits);addEventListener("load",fits);if(document.fonts&&document.fonts.ready)document.fonts.ready.then(fits);fits();}
+    addEventListener("resize",fits);addEventListener("load",fits);fontsIn(fits);fits();}
   /* comparison: pick which alternative's panel shows */
   var cmp=document.querySelector(".cmp");
   if(cmp){cmp.classList.add("js");var ct=[].slice.call(cmp.querySelectorAll(".ctab")),vs=[].slice.call(cmp.querySelectorAll(".vs")),cPlace=slider(cmp.querySelector(".tabs"));
-    var cpick=function(t){if(t.getAttribute("aria-selected")==="true")return;ct.forEach(function(x){x.setAttribute("aria-selected",x===t?"true":"false");});
+    /* one tab stop for the row: only the picked tab is in the Tab order, the arrow keys move between tabs */
+    ct.forEach(function(x){x.tabIndex=x.getAttribute("aria-selected")==="true"?0:-1;});
+    var cpick=function(t){if(t.getAttribute("aria-selected")==="true")return;ct.forEach(function(x){x.setAttribute("aria-selected",x===t?"true":"false");x.tabIndex=x===t?0:-1;});
       vs.forEach(function(v){v.classList.toggle("on",v.dataset.i===t.dataset.i);});cPlace();};
-    ct.forEach(function(t,i){t.addEventListener("click",function(){cpick(t);});t.addEventListener("keydown",function(e){var n=e.key==="ArrowRight"?1:e.key==="ArrowLeft"?-1:0;if(n){var x=ct[(i+n+ct.length)%ct.length];x.focus();cpick(x);}});});}
+    ct.forEach(function(t,i){t.addEventListener("click",function(){cpick(t);});t.addEventListener("keydown",function(e){var x=e.key==="ArrowRight"?ct[(i+1)%ct.length]:e.key==="ArrowLeft"?ct[(i-1+ct.length)%ct.length]:e.key==="Home"?ct[0]:e.key==="End"?ct[ct.length-1]:null;if(x){e.preventDefault();x.focus();cpick(x);}});});}
   /* nav: mark the section in view */
   if(io2){var nl={};[].forEach.call(document.querySelectorAll(".links a"),function(a){nl[a.getAttribute("href").slice(1)]=a;});
     var spy=new IntersectionObserver(function(es){es.forEach(function(e){if(e.isIntersecting){for(var k in nl)nl[k].classList.toggle("on",k===e.target.id);}});},{rootMargin:"-40% 0px -55% 0px"});
@@ -86,6 +97,8 @@
   addEventListener("scroll",function(){if(!tick){tick=true;requestAnimationFrame(upd);}},{passive:true});upd();
 })();
 var EN=document.documentElement.lang==="en";
+/* shortcuts: the page is written with the Mac keys; on Windows each one shows its Ctrl/Alt form (data-win) */
+if(/Windows/.test(navigator.userAgent||""))[].forEach.call(document.querySelectorAll("[data-win]"),function(k){k.textContent=k.dataset.win;});
 /* waitlist: GET /api/waitlist gives {count}; POST {email} books and gives the new {count}. The host serves that endpoint. */
 (function(){
   var form=document.querySelector(".wl");if(!form)return;
@@ -122,7 +135,7 @@ var EN=document.documentElement.lang==="en";
     /* a space between Chinese and Latin text, none before punctuation */
     put("mk-s",text.replace(/([\u4e00-\u9fff])([A-Za-z])/g,"$1 $2").replace(/([A-Za-z])([\u4e00-\u9fff])/g,"$1 $2"));}
   function set(g,vals){opts(g).forEach(function(b){b.setAttribute("aria-pressed",vals.indexOf(b.dataset.v)>=0?"true":"false");});}
-  pres.forEach(function(b){b.addEventListener("click",function(){cur=P[b.dataset.p];pres.forEach(function(x){x.setAttribute("aria-selected",x===b?"true":"false");});set("m",[cur[2]]);set("h",[cur[3]]);set("t",cur[4]);render();});});
+  pres.forEach(function(b){b.addEventListener("click",function(){cur=P[b.dataset.p];pres.forEach(function(x){x.setAttribute("aria-pressed",x===b?"true":"false");});set("m",[cur[2]]);set("h",[cur[3]]);set("t",cur[4]);render();});});
   ["m","h"].forEach(function(g){opts(g).forEach(function(b){b.addEventListener("click",function(){set(g,[b.dataset.v]);render();});});});
   opts("t").forEach(function(b){b.addEventListener("click",function(){b.setAttribute("aria-pressed",b.getAttribute("aria-pressed")==="true"?"false":"true");render();});});
 })();

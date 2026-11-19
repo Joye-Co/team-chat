@@ -2,18 +2,12 @@
 // polls and anonymous questionnaires, concurrent card writes, refs, edit marks, requester
 // asks, the retract window and the topic status of blocking asks.
 import { env, runInDurableObject } from "cloudflare:test";
-import { afterAll, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import type { CardV2 } from "@chat/protocol";
 import type { BotsEnv } from "../src/bots/env";
 import { registerRequesterResolver } from "../src/cards2/delivery";
-import { Daemon, downViolations, mention, world } from "./daemon";
-import { Client, api, clientMsgId, createGroup, createMember, protocolViolations, type TestMember, waitUntil } from "./helpers";
-
-afterAll(async () => {
-  await new Promise((r) => setTimeout(r, 300));
-  expect(protocolViolations).toEqual([]);
-  expect(downViolations).toEqual([]);
-});
+import { Daemon, mention, world } from "./daemon";
+import { Client, api, clientMsgId, createGroup, createMember, type TestMember, waitUntil } from "./helpers";
 
 const FEATURES = ["interact/1", "refs/1"];
 

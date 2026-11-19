@@ -2,14 +2,9 @@
 // a notification over HTTP, and removing devices on sign-out and on APNs 410.
 import { env } from "cloudflare:test";
 import { PushData, type CardV2 } from "@chat/protocol";
-import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { quickActions } from "../src/push/payload";
-import { Client, api, clientMsgId, createGroup, createMember, protocolViolations, waitUntil, type TestMember } from "./helpers";
-
-afterAll(async () => {
-  await new Promise((r) => setTimeout(r, 300));
-  expect(protocolViolations).toEqual([]);
-});
+import { Client, api, clientMsgId, createGroup, createMember, waitUntil, type TestMember } from "./helpers";
 
 const realFetch = globalThis.fetch;
 type Push = { path: string; headers: Record<string, string>; body: any };

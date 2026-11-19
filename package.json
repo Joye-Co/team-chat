@@ -15,9 +15,16 @@
     "dev:desktop": "bash scripts/dev-desktop.sh",
     "dev:website": "bun run --cwd apps/website dev",
     "build:website": "bun run --cwd apps/website build",
+    "check:website": "bun run --cwd apps/website check",
     "test:server": "bun run --cwd server test",
     "typecheck:server": "bun run --cwd server typecheck",
     "admin": "bun server/scripts/admin.ts",
-    "prepare": "bash scripts/hooks-path.sh || true"
+    "prepare": "bash scripts/hooks-path.sh || true",
+    "typecheck:scripts": "tsc --noEmit -p scripts"
+  },
+  "devDependencies": {
+    "@chat/protocol": "workspace:*",
+    "@types/bun": "^1.4.4",
+    "typescript": "^7.0.2"
   }
 }

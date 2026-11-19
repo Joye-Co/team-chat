@@ -763,16 +763,15 @@ impl Job {
             return;
         }
         crate::metrics::vm_booted(&self.run_id(), booted.elapsed().as_millis() as u64);
-        eprintln!(
-            "{} run {}: VM {} up in {} ms",
-            crate::proto::now_ms(),
+        crate::problems::log(format_args!(
+            "run {}: VM {} up in {} ms",
             self.run_dir
                 .file_name()
                 .unwrap_or_default()
                 .to_string_lossy(),
             self.slot,
             booted.elapsed().as_millis()
-        );
+        ));
 
         let mut stdout_open = true;
         let mut stdin_open = true;
@@ -896,7 +895,7 @@ impl Job {
         }
         crate::metrics::vm_gone(&self.run_id());
         if let Err(e) = helper(&self.cfg, &["down", &self.slot.to_string()]).await {
-            eprintln!("{} vm slot {}: {e}", crate::proto::now_ms(), self.slot);
+            crate::problems::log(format_args!("vm slot {}: {e}", self.slot));
         }
         let _ = tokio::fs::remove_dir_all(&self.vm_dir).await;
         let mut s = self.slots.lock().unwrap_or_else(|e| e.into_inner());
