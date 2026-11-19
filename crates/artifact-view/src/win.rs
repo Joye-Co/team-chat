@@ -35,10 +35,11 @@ use serde_json::{Value, json};
 use webview2_com::Microsoft::Web::WebView2::Win32::*;
 use webview2_com::{
     AcceleratorKeyPressedEventHandler, AddScriptToExecuteOnDocumentCreatedCompletedHandler,
-    CallDevToolsProtocolMethodCompletedHandler, ContextMenuRequestedEventHandler,
-    CoreWebView2CustomSchemeRegistration, CoreWebView2EnvironmentOptions,
-    CreateCoreWebView2ControllerCompletedHandler, CreateCoreWebView2EnvironmentCompletedHandler,
-    DownloadStartingEventHandler, ExecuteScriptCompletedHandler, FocusChangedEventHandler,
+    CallDevToolsProtocolMethodCompletedHandler, ContentLoadingEventHandler,
+    ContextMenuRequestedEventHandler, CoreWebView2CustomSchemeRegistration,
+    CoreWebView2EnvironmentOptions, CreateCoreWebView2ControllerCompletedHandler,
+    CreateCoreWebView2EnvironmentCompletedHandler, DownloadStartingEventHandler,
+    ExecuteScriptCompletedHandler, FocusChangedEventHandler,
     LaunchingExternalUriSchemeEventHandler, MoveFocusRequestedEventHandler,
     NavigationCompletedEventHandler, NavigationStartingEventHandler,
     NewWindowRequestedEventHandler, PermissionRequestedEventHandler, ProcessFailedEventHandler,
@@ -77,7 +78,7 @@ use crate::page::{self, Nav, State};
 use crate::resolve::{self, SCHEME};
 use crate::win_support::decode_base64;
 use crate::{
-    ArtifactEvent, Capabilities, Chrome, Error, OpenOptions, Presentation, Rect, Reject, Snapshot,
+    ArtifactEvent, Capabilities, Chrome, Error, OpenOptions, Presentation, Rect, Snapshot,
     VersionItem, VersionSpec, bridge, gate,
 };
 
@@ -584,22 +585,22 @@ const PAGE_LOOK_CSS: &str = concat!(
     "@layer tc-system{*{scrollbar-width:thin}",
     "html{scrollbar-color:transparent transparent}",
     "html:hover{scrollbar-color:rgba(128,128,128,.5) transparent}}",
-    "@font-face{font-family:\"-apple-system\";src:local(\"Segoe UI\");font-weight:100 500}",
-    "@font-face{font-family:\"-apple-system\";src:local(\"Segoe UI Semibold\");font-weight:600}",
-    "@font-face{font-family:\"-apple-system\";src:local(\"Segoe UI Bold\");font-weight:700 900}",
-    "@font-face{font-family:\"BlinkMacSystemFont\";src:local(\"Segoe UI\");font-weight:100 500}",
-    "@font-face{font-family:\"BlinkMacSystemFont\";src:local(\"Segoe UI Semibold\");font-weight:600}",
-    "@font-face{font-family:\"BlinkMacSystemFont\";src:local(\"Segoe UI Bold\");font-weight:700 900}",
+    "@font-face{font-family:\"-apple-system\";src:local(\"Segoe UI Variable Text\"),local(\"Segoe UI\");font-weight:100 500}",
+    "@font-face{font-family:\"-apple-system\";src:local(\"Segoe UI Variable Text Semibold\"),local(\"Segoe UI Semibold\");font-weight:600}",
+    "@font-face{font-family:\"-apple-system\";src:local(\"Segoe UI Variable Text Bold\"),local(\"Segoe UI Bold\");font-weight:700 900}",
+    "@font-face{font-family:\"BlinkMacSystemFont\";src:local(\"Segoe UI Variable Text\"),local(\"Segoe UI\");font-weight:100 500}",
+    "@font-face{font-family:\"BlinkMacSystemFont\";src:local(\"Segoe UI Variable Text Semibold\"),local(\"Segoe UI Semibold\");font-weight:600}",
+    "@font-face{font-family:\"BlinkMacSystemFont\";src:local(\"Segoe UI Variable Text Bold\"),local(\"Segoe UI Bold\");font-weight:700 900}",
     "@font-face{font-family:\"PingFang SC\";src:local(\"Microsoft YaHei UI\");font-weight:100 500}",
     "@font-face{font-family:\"PingFang SC\";src:local(\"Microsoft YaHei UI Bold\");font-weight:600 900}",
-    "@font-face{font-family:\"Menlo\";src:local(\"Consolas\");font-weight:100 500}",
-    "@font-face{font-family:\"Menlo\";src:local(\"Consolas Bold\");font-weight:600 900}",
-    "@font-face{font-family:\"SF Mono\";src:local(\"Consolas\");font-weight:100 500}",
-    "@font-face{font-family:\"SF Mono\";src:local(\"Consolas Bold\");font-weight:600 900}",
-    "@font-face{font-family:\"Monaco\";src:local(\"Consolas\");font-weight:100 500}",
-    "@font-face{font-family:\"Monaco\";src:local(\"Consolas Bold\");font-weight:600 900}",
-    "@font-face{font-family:\"ui-monospace\";src:local(\"Consolas\");font-weight:100 500}",
-    "@font-face{font-family:\"ui-monospace\";src:local(\"Consolas Bold\");font-weight:600 900}",
+    "@font-face{font-family:\"Menlo\";src:local(\"Cascadia Mono\"),local(\"Consolas\");font-weight:100 500}",
+    "@font-face{font-family:\"Menlo\";src:local(\"Cascadia Mono Bold\"),local(\"Consolas Bold\");font-weight:600 900}",
+    "@font-face{font-family:\"SF Mono\";src:local(\"Cascadia Mono\"),local(\"Consolas\");font-weight:100 500}",
+    "@font-face{font-family:\"SF Mono\";src:local(\"Cascadia Mono Bold\"),local(\"Consolas Bold\");font-weight:600 900}",
+    "@font-face{font-family:\"Monaco\";src:local(\"Cascadia Mono\"),local(\"Consolas\");font-weight:100 500}",
+    "@font-face{font-family:\"Monaco\";src:local(\"Cascadia Mono Bold\"),local(\"Consolas Bold\");font-weight:600 900}",
+    "@font-face{font-family:\"ui-monospace\";src:local(\"Cascadia Mono\"),local(\"Consolas\");font-weight:100 500}",
+    "@font-face{font-family:\"ui-monospace\";src:local(\"Cascadia Mono Bold\"),local(\"Consolas Bold\");font-weight:600 900}",
 );
 
 /// Adds [`PAGE_LOOK_CSS`] to the document before the page's own code runs, as a
@@ -959,6 +960,22 @@ impl Page {
             }));
             webview.add_NavigationStarting(&navigate, &mut token)?;
 
+            // A new document of the page shown (its first load, its own reload, a link
+            // inside the origin): the old one is gone, and its open requests with it.
+            // `ContentLoading` comes before the new document's first script, and not for
+            // a navigation inside the document (`#part`, `history.pushState`), which
+            // `NavigationStarting` also reports: the page lives on there, with its
+            // requests and its data subscription. The same moment as WebKit's
+            // `didCommitNavigation`.
+            let weak = Rc::downgrade(self);
+            let loading = ContentLoadingEventHandler::create(Box::new(move |_, _| {
+                if let Some(page) = weak.upgrade() {
+                    page.document_starts();
+                }
+                Ok(())
+            }));
+            webview.add_ContentLoading(&loading, &mut token)?;
+
             // Frames: the CSP allows none, so no frame navigation is ever allowed, not even
             // inside the origin. A frame then only ever holds `about:blank` or `srcdoc`
             // content, whose messages `on_message` drops by their source: the bridge
@@ -1278,14 +1295,36 @@ impl Page {
             forget_environment(self.config.autoplay);
             self.controller.borrow_mut().take();
             self.webview.borrow_mut().take();
+            // Nothing can answer the page's requests any more.
+            self.document_starts();
             self.fail("web content process ended".into());
         } else if kind == COREWEBVIEW2_PROCESS_FAILED_KIND_RENDER_PROCESS_EXITED {
-            self.fail("web content process ended".into());
+            // The document is gone with its process: nothing can answer its requests.
+            self.document_starts();
             let n = self.reloads.get();
             if n < 1 {
+                // One reload by itself; the host hears of a failure only when the page
+                // does not come back.
                 self.reloads.set(n + 1);
                 self.load_current();
+            } else {
+                self.fail("web content process ended".into());
             }
+        }
+    }
+
+    /// A new document replaces the page's one (or the page is gone with its process):
+    /// tells the host which open requests ended.
+    fn document_starts(&self) {
+        if let Some(ended) = page::document_started_event(&self.state) {
+            self.emit(ended);
+        }
+    }
+
+    /// See [`ArtifactWindow::set_ref_menu`].
+    pub(crate) fn set_ref_menu(&self, menu: crate::RefMenu) {
+        if let Some(script) = page::ref_menu_script(&self.state, menu) {
+            self.evaluate(&script);
         }
     }
 
@@ -1455,7 +1494,7 @@ impl Page {
         &self,
         version: u32,
         reply_id: &Value,
-        result: Result<Value, Reject>,
+        result: Result<Value, crate::Failure>,
     ) -> bool {
         match page::finish_script(&self.state, version, reply_id, result) {
             Some(script) => {
@@ -2273,10 +2312,18 @@ impl ArtifactWindow {
     /// that version's bridge capabilities.
     pub fn show_version(&self, spec: VersionSpec, caps: Capabilities) -> Result<(), Error> {
         let version = spec.version;
-        page::switch_version(&self.state, spec, caps)?;
+        if let Some(ended) = page::switch_version(&self.state, spec, caps)? {
+            self.page.emit(ended);
+        }
         self.select_in_picker(version);
         self.page.load_current();
         Ok(())
+    }
+
+    /// Gives the page other colours and words for its `就这里提问` menu (the app's theme
+    /// changed), now and for its next load.
+    pub fn set_ref_menu(&self, menu: crate::RefMenu) {
+        self.page.set_ref_menu(menu);
     }
 
     fn select_in_picker(&self, version: u32) {
@@ -2444,7 +2491,12 @@ impl ArtifactWindow {
 
     /// Finishes an open `emit` / `ask` of the page of `version`. False when it is no longer
     /// open (a late reply after a timeout or reload): the host drops it.
-    pub fn finish(&self, version: u32, reply_id: &Value, result: Result<Value, Reject>) -> bool {
+    pub fn finish(
+        &self,
+        version: u32,
+        reply_id: &Value,
+        result: Result<Value, crate::Failure>,
+    ) -> bool {
         self.page.finish(version, reply_id, result)
     }
 

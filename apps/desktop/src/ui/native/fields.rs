@@ -7,12 +7,13 @@
 //! (py 8, a height of whole lines), the same edge, fill and rings.
 
 use gpui::{
-    AnyElement, App, BoxShadow, ElementId, Entity, Focusable as _, Hsla, InteractiveElement as _,
-    IntoElement, ParentElement, Pixels, RenderOnce, Styled, TextAlign, Window, div, point,
-    prelude::FluentBuilder as _, px,
+    AnyElement, App, AppContext as _, BoxShadow, ElementId, Entity, Focusable as _, Hsla,
+    InteractiveElement as _, IntoElement, ParentElement, Pixels, RenderOnce, Styled, TextAlign,
+    Window, div, point, prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
-    Sizable as _,
+    Disableable as _, Sizable as _,
+    date_picker::{DatePicker, DatePickerEvent, DatePickerState},
     input::{Input, InputState, Textarea, TextareaState},
 };
 
@@ -31,11 +32,8 @@ pub enum FieldSize {
     Regular,
     /// h28: inside a dense row.
     Small,
-    /// h36: the login card.
+    /// h36: the login card and the one field of a verification step.
     Large,
-    /// h44, the height of a code slot: the one field of a verification
-    /// step, beside a full-width button of the same height.
-    Hero,
 }
 
 impl FieldSize {
@@ -44,7 +42,6 @@ impl FieldSize {
             FieldSize::Regular => metrics::FIELD,
             FieldSize::Small => metrics::BUTTON_SMALL,
             FieldSize::Large => metrics::FIELD_LARGE,
-            FieldSize::Hero => metrics::CODE_SLOT.1,
         }
     }
 }
@@ -473,6 +470,8 @@ pub struct SearchField {
     width: Option<Pixels>,
     focused: Option<bool>,
     clearable: bool,
+    small: bool,
+    disabled: bool,
 }
 
 impl SearchField {
@@ -484,7 +483,16 @@ impl SearchField {
             width: None,
             focused: None,
             clearable: false,
+            small: false,
+            disabled: false,
         }
+    }
+
+    /// The sm field (§1.8: h28), for a bar only 40 tall: its 3 px focus ring
+    /// keeps 3 px of air to the bar's lines.
+    pub fn small(mut self) -> Self {
+        self.small = true;
+        self
     }
 
     /// A clear × at the trailing edge while the field has text (it empties
@@ -509,6 +517,12 @@ impl SearchField {
         self.focused = Some(focused);
         self
     }
+
+    /// Nothing to search (§1.8): 50 % and no typing.
+    pub fn disabled(mut self, disabled: bool) -> Self {
+        self.disabled = disabled;
+        self
+    }
 }
 
 impl RenderOnce for SearchField {
@@ -516,7 +530,8 @@ impl RenderOnce for SearchField {
         let k = native_colors(cx);
         let focused = self
             .focused
-            .unwrap_or_else(|| self.state.read(cx).focus_handle(cx).is_focused(window));
+            .unwrap_or_else(|| self.state.read(cx).focus_handle(cx).is_focused(window))
+            && !self.disabled;
         let (edge, shadows) = field_edge(&k, focused, false);
         let shadows = if self.sidebar && !focused {
             Vec::new()
@@ -530,7 +545,11 @@ impl RenderOnce for SearchField {
                 Some(w) => d.w(w),
                 None => d.w_full(),
             })
-            .h(metrics::SEARCH)
+            .h(if self.small {
+                super::tokens::height::SM
+            } else {
+                metrics::SEARCH
+            })
             .pl(metrics::FIELD_PAD)
             .pr(metrics::FIELD_PAD)
             .rounded_full()
@@ -541,7 +560,8 @@ impl RenderOnce for SearchField {
             .flex()
             .items_center()
             .gap(space::S8)
-            .cursor_text()
+            .when(self.disabled, |d| d.opacity(0.5))
+            .when(!self.disabled, |d| d.cursor_text())
             .child(symbol(
                 Sf::Search,
                 icon::MD,
@@ -558,6 +578,7 @@ impl RenderOnce for SearchField {
                         Input::new(&self.state)
                             .appearance(false)
                             .cleanable(self.clearable)
+                            .disabled(self.disabled)
                             .with_size(gpui_component::Size::Small)
                             .px_0()
                             .py_0()
@@ -568,6 +589,104 @@ impl RenderOnce for SearchField {
                     )),
             )
     }
+}
+
+/// The wire form of a date field's value.
+pub const DATE_FORMAT: &str = "%Y-%m-%d";
+
+struct DateHost {
+    state: Entity<DatePickerState>,
+    _changes: gpui::Subscription,
+}
+
+/// The calendar speaks the interface's language (its month and week names are the
+/// component's own).
+fn date_locale() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        gpui_component::set_locale(if crate::selftest::english::on() {
+            "en"
+        } else {
+            "zh-CN"
+        })
+    });
+}
+
+/// The value of a date field: `text` when it is a date.
+pub fn parse_date(text: &str) -> Option<chrono::NaiveDate> {
+    chrono::NaiveDate::parse_from_str(text.trim(), DATE_FORMAT).ok()
+}
+
+/// A date field: gpui-component's date picker without its own edge, to sit in the caller's
+/// field box. `value` is the text the form holds (`YYYY-MM-DD`); `on_pick` gets the new text.
+/// Returns the picker and whether it has the focus, for the box's ring.
+pub fn date_field(
+    id: impl Into<ElementId>,
+    value: &str,
+    placeholder: &str,
+    disabled: bool,
+    on_pick: impl Fn(String, &mut Window, &mut App) + 'static,
+    window: &mut Window,
+    cx: &mut App,
+) -> (AnyElement, bool) {
+    date_locale();
+    let date = parse_date(value);
+    let host = window.use_keyed_state(id.into(), cx, |window, cx| {
+        let state = cx.new(|cx| {
+            let mut s = DatePickerState::new(window, cx)
+                .date_format(DATE_FORMAT)
+                .first_day_of_week(chrono::Weekday::Mon);
+            if let Some(d) = date {
+                s.set_date(d, window, cx);
+            }
+            s
+        });
+        let changes = cx.subscribe_in(&state, window, move |_, _, e, window, cx| {
+            let DatePickerEvent::Change(v) = e;
+            let text = v.start().map(|d| d.date().format(DATE_FORMAT).to_string());
+            on_pick(text.unwrap_or_default(), window, cx);
+        });
+        DateHost {
+            state,
+            _changes: changes,
+        }
+    });
+    let state = host.read(cx).state.clone();
+    // The form has the last word: a new rev or 用新的 changes the text under the picker.
+    if state.read(cx).date_time().start().map(|d| d.date()) != date {
+        state.update(cx, |s, cx| match date {
+            Some(d) => s.set_date(d, window, cx),
+            None => s.set_date(gpui_component::calendar::Date::Single(None), window, cx),
+        });
+    }
+    let focused = state.focus_handle(cx).contains_focused(window, cx);
+    (
+        // The picker starts on the field's outer edge, so its calendar opens in line with the
+        // field; its leading padding keeps the text on the field column.
+        div()
+            .h_full()
+            .ml(-(metrics::FIELD_PAD + metrics::HAIRLINE))
+            // The trailing icon ends where the select's chevron does in the fields around it.
+            .mr(-space::S12)
+            .child(
+                DatePicker::new(&state)
+                    // It fills the field's height, so the calendar is measured from the
+                    // field's edge and stays clear of the focus ring around it.
+                    .h_full()
+                    .flex()
+                    .items_center()
+                    .popup_gap(space::S6 + metrics::FOCUS_RING)
+                    .pl(metrics::FIELD_PAD + metrics::HAIRLINE - space::S8)
+                    .appearance(false)
+                    // A date can be taken back: a required field then says it is missing.
+                    .cleanable(true)
+                    .placeholder(placeholder.to_string())
+                    .disabled(disabled)
+                    .with_size(gpui_component::Size::Small),
+            )
+            .into_any_element(),
+        focused,
+    )
 }
 
 #[cfg(test)]
@@ -589,5 +708,147 @@ mod tests {
             let (_, s) = field_edge(&k, true, false);
             assert!(s.iter().all(|s| !s.inset));
         }
+    }
+}
+
+#[cfg(test)]
+mod date_tests {
+    use super::*;
+
+    struct Picker {
+        text: std::rc::Rc<std::cell::RefCell<String>>,
+    }
+
+    impl gpui::Render for Picker {
+        fn render(
+            &mut self,
+            window: &mut Window,
+            cx: &mut gpui::Context<Self>,
+        ) -> impl IntoElement {
+            let value = self.text.borrow().clone();
+            let text = self.text.clone();
+            let (picker, _) = date_field(
+                "date",
+                &value,
+                "年-月-日",
+                false,
+                move |picked, _, _| *text.borrow_mut() = picked,
+                window,
+                cx,
+            );
+            div().w(px(320.)).h(px(32.)).child(picker)
+        }
+    }
+
+    /// Opens the calendar and clicks down its days: the form gets the wire form of the day.
+    #[gpui::test]
+    fn a_picked_day_reaches_the_form_as_text(cx: &mut gpui::TestAppContext) {
+        use gpui::{Modifiers, VisualTestContext, point};
+        cx.update(gpui_component::init);
+        let text = std::rc::Rc::new(std::cell::RefCell::new(String::new()));
+        let shared = text.clone();
+        let window = cx.update(|cx| {
+            cx.open_window(Default::default(), |window, cx| {
+                let view = cx.new(|_| Picker { text: shared });
+                cx.new(|cx| gpui_base::Root::new(view, window, cx))
+            })
+            .unwrap()
+        });
+        let cx = &mut VisualTestContext::from_window(window.into(), cx);
+        cx.run_until_parked();
+        // A click that misses the days closes the calendar: open it again for each try.
+        for y in (60..360).step_by(16) {
+            for x in (24..300).step_by(32) {
+                if text.borrow().is_empty() {
+                    cx.simulate_keystrokes("escape");
+                    cx.simulate_click(point(px(40.), px(12.)), Modifiers::default());
+                    cx.run_until_parked();
+                    cx.simulate_click(point(px(x as f32), px(y as f32)), Modifiers::default());
+                    cx.run_until_parked();
+                }
+            }
+        }
+        let picked = text.borrow().clone();
+        assert!(parse_date(&picked).is_some(), "picked {picked:?}");
+    }
+
+    /// The keyboard alone picks a day: Enter opens on the value, the arrows move, Enter picks,
+    /// and a move past the month's end follows into the next month.
+    #[gpui::test]
+    fn the_keyboard_picks_a_day(cx: &mut gpui::TestAppContext) {
+        use gpui::VisualTestContext;
+        cx.update(gpui_component::init);
+        let text = std::rc::Rc::new(std::cell::RefCell::new("2026-03-31".to_string()));
+        let shared = text.clone();
+        let window = cx.update(|cx| {
+            cx.open_window(Default::default(), |window, cx| {
+                let view = cx.new(|_| Picker { text: shared });
+                cx.new(|cx| gpui_base::Root::new(view, window, cx))
+            })
+            .unwrap()
+        });
+        let cx = &mut VisualTestContext::from_window(window.into(), cx);
+        cx.run_until_parked();
+        cx.update(|window, cx| window.focus_next(cx));
+        cx.run_until_parked();
+        cx.simulate_keystrokes("enter right enter");
+        cx.run_until_parked();
+        assert_eq!(*text.borrow(), "2026-04-01");
+        // Esc leaves the value alone.
+        cx.simulate_keystrokes("enter down escape");
+        cx.run_until_parked();
+        assert_eq!(*text.borrow(), "2026-04-01");
+        cx.simulate_keystrokes("enter down space");
+        cx.run_until_parked();
+        assert_eq!(*text.borrow(), "2026-04-08");
+    }
+
+    /// A fresh field opens on its first Enter once Tab has put the focus on it.
+    #[gpui::test]
+    fn the_first_enter_opens_a_fresh_calendar(cx: &mut gpui::TestAppContext) {
+        use gpui::{Modifiers, VisualTestContext, point};
+        cx.update(gpui_component::init);
+        let text = std::rc::Rc::new(std::cell::RefCell::new(String::new()));
+        let shared = text.clone();
+        let window = cx.update(|cx| {
+            cx.open_window(Default::default(), |window, cx| {
+                let view = cx.new(|_| Picker { text: shared });
+                cx.new(|cx| gpui_base::Root::new(view, window, cx))
+            })
+            .unwrap()
+        });
+        let cx = &mut VisualTestContext::from_window(window.into(), cx);
+        cx.run_until_parked();
+        cx.update(|window, cx| window.focus_next(cx));
+        cx.run_until_parked();
+        cx.simulate_keystrokes("enter");
+        cx.run_until_parked();
+        // Open now: one click on a day is enough, without clicking the field first.
+        'days: for y in (60..360).step_by(16) {
+            for x in (24..300).step_by(32) {
+                cx.simulate_click(point(px(x as f32), px(y as f32)), Modifiers::default());
+                cx.run_until_parked();
+                if !text.borrow().is_empty() {
+                    break 'days;
+                }
+                // A miss closes the calendar: Enter opens it again.
+                cx.simulate_keystrokes("escape");
+                cx.update(|window, cx| window.focus_next(cx));
+                cx.run_until_parked();
+                cx.simulate_keystrokes("enter");
+                cx.run_until_parked();
+            }
+        }
+        let picked = text.borrow().clone();
+        assert!(parse_date(&picked).is_some(), "picked {picked:?}");
+    }
+
+    #[test]
+    fn a_date_field_reads_only_the_wire_form() {
+        let d = parse_date(" 2026-11-10 ").expect("a date");
+        assert_eq!(d.format(DATE_FORMAT).to_string(), "2026-11-10");
+        assert_eq!(parse_date("2026-13-01"), None);
+        assert_eq!(parse_date("11/10"), None);
+        assert_eq!(parse_date(""), None);
     }
 }

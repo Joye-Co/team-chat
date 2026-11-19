@@ -1135,7 +1135,14 @@ async fn pause_resume_answer_acceptance_and_aside() {
             _ => None,
         })
         .collect();
-    assert!(replies.contains(&"reply 2: go on"), "{replies:?}");
+    // The person's words come framed: the CLI learns it was paused and who writes.
+    assert!(
+        replies.iter().any(|t| {
+            t.starts_with("reply 2: [team-chat] A person paused you and resumed you now.")
+                && t.ends_with("\nTheir note: go on")
+        }),
+        "{replies:?}"
+    );
     let answer = replies.iter().find(|t| t.starts_with("reply 3:")).unwrap();
     assert!(answer.contains("untrusted data"), "{answer}");
     assert!(answer.contains("\"actionId\": \"pick\""), "{answer}");
@@ -1507,7 +1514,7 @@ async fn a_person_takes_over_runs_commands_and_hands_back() {
         .find(|t| t.starts_with("reply 2:"))
         .expect("hand-back note");
     assert!(
-        note.contains("[team-chat] A person held your computer. Member u1 paused you"),
+        note.contains("[team-chat] A person held your computer. They (member id u1) paused you"),
         "{note}"
     );
     assert!(note.contains("ran 2 commands in"), "{note}");
@@ -1517,7 +1524,7 @@ async fn a_person_takes_over_runs_commands_and_hands_back() {
         "{note}"
     );
     assert!(note.contains("changed: made.txt"), "{note}");
-    assert!(note.contains("Member u1's note: I made made.txt"), "{note}");
+    assert!(note.contains("Their note: I made made.txt"), "{note}");
     assert!(
         replies.contains(&"reply 3: after the hand-back"),
         "{replies:?}"

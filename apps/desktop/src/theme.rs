@@ -570,9 +570,9 @@ pub const MEDIUM_WEIGHT: FontWeight = FontWeight(501.);
 /// the Windows CI screenshots). Regular is the nearer miss.
 #[cfg(target_os = "windows")]
 pub const MEDIUM_WEIGHT: FontWeight = FontWeight(499.);
-/// The monospace font every version of this system has. Prefer
-/// [`mono_font_family`]: the best installed one.
-pub const MONO_FONT_FAMILY: &str = MONO_FONT_STACK[MONO_FONT_STACK.len() - 1];
+/// The monospace font every version of this system has. Private: views take
+/// [`mono_font_family`], the best installed one.
+const MONO_FONT_FAMILY: &str = MONO_FONT_STACK[MONO_FONT_STACK.len() - 1];
 
 static UI_FONT: OnceLock<SharedString> = OnceLock::new();
 static MONO_FONT: OnceLock<SharedString> = OnceLock::new();

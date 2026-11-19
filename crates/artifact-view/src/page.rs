@@ -9,7 +9,7 @@ use serde_json::Value;
 
 use crate::resolve::{self, Content};
 use crate::{
-    ArtifactEvent, Capabilities, Error, RefMenu, Reject, Snapshot, VersionSpec, Viewer,
+    ArtifactEvent, Capabilities, Error, Failure, RefMenu, Snapshot, VersionSpec, Viewer,
     bridge::{self, Bridge, Request},
 };
 
@@ -85,18 +85,22 @@ fn new_bridge(
     max_bytes: usize,
     max_payload_bytes: usize,
 ) -> Bridge {
-    let initial = (!spec.live).then(|| Snapshot::new(spec.data.clone(), 0));
+    let initial = spec
+        .initial
+        .clone()
+        .or_else(|| (!spec.live).then(|| Snapshot::new(spec.data.clone(), 0)));
     Bridge::new(caps, spec.events.clone(), initial)
         .with_max_bytes(max_bytes)
         .with_max_payload_bytes(max_payload_bytes)
 }
 
 /// Loads another version (new origin, content and data) into an existing page state.
+/// Returns the event for the host when requests of the page that goes away were open.
 pub(crate) fn switch_version(
     state: &RefCell<State>,
     spec: VersionSpec,
     caps: Capabilities,
-) -> Result<(), Error> {
+) -> Result<Option<ArtifactEvent>, Error> {
     let host = {
         let st = state.borrow();
         if st.closed {
@@ -115,7 +119,11 @@ pub(crate) fn switch_version(
     let mut st = state.borrow_mut();
     // The bridge follows the version shown: another author may grant other capabilities,
     // and the old page's open asks end (the page reloads).
-    st.bridge.reset();
+    let reply_ids = st.bridge.reset();
+    let ended = (!reply_ids.is_empty()).then_some(ArtifactEvent::RequestsEnded {
+        version: st.version,
+        reply_ids,
+    });
     st.bridge = fresh;
     st.host = host;
     st.version = spec.version;
@@ -123,7 +131,7 @@ pub(crate) fn switch_version(
     st.entry = spec.entry;
     // Input in the previous page does not count for this one.
     st.last_input = None;
-    Ok(())
+    Ok(ended)
 }
 
 /// Changes what the page bridge allows, for the page that shows now.
@@ -165,13 +173,47 @@ pub(crate) fn finish_script(
     state: &RefCell<State>,
     version: u32,
     reply_id: &Value,
-    result: Result<Value, Reject>,
+    result: Result<Value, Failure>,
 ) -> Option<String> {
     let mut st = state.borrow_mut();
     if st.closed || st.version != version {
         return None;
     }
     st.bridge.finish(reply_id, result)
+}
+
+/// A new document starts in the page (its own reload, a link inside the origin, or the
+/// reload after its web content process ended): the bridge forgets the old document's
+/// requests, keeps the data, and input in the old document does not count for the new
+/// one. Returns the ids of the `emit` and `ask` requests that ended, for
+/// [`ArtifactEvent::RequestsEnded`].
+pub(crate) fn document_started(state: &RefCell<State>) -> Vec<Value> {
+    let mut st = state.borrow_mut();
+    if st.closed {
+        return Vec::new();
+    }
+    st.last_input = None;
+    st.bridge.reset()
+}
+
+/// [`document_started`] as the event for the host, or `None` when nothing was open.
+pub(crate) fn document_started_event(state: &RefCell<State>) -> Option<ArtifactEvent> {
+    let reply_ids = document_started(state);
+    let version = state.borrow().version;
+    (!reply_ids.is_empty()).then_some(ArtifactEvent::RequestsEnded { version, reply_ids })
+}
+
+/// Gives the page other colours and words for its `就这里提问` menu (the app's theme
+/// changed): kept for the next load, and returned as the script for the loaded page.
+/// `None` when the page is closed or has no menu.
+pub(crate) fn ref_menu_script(state: &RefCell<State>, menu: RefMenu) -> Option<String> {
+    let mut st = state.borrow_mut();
+    if st.closed || st.ref_menu.is_none() || st.ref_menu.as_ref() == Some(&menu) {
+        return None;
+    }
+    let script = bridge::ref_menu_script(&menu);
+    st.ref_menu = Some(menu);
+    Some(script)
 }
 
 /// The host event for a bridge request the page may make.
@@ -210,6 +252,7 @@ pub(crate) fn request_event(request: Request, version: u32, user_action: bool) -
             label,
             value,
             selector,
+            user_action,
         },
     }
 }
@@ -323,6 +366,104 @@ mod tests {
         .unwrap();
         let o = state.borrow_mut().bridge.handle(get, Instant::now());
         assert!(o.reply.unwrap().contains("\"result\":[1]"));
+    }
+
+    #[test]
+    fn a_new_document_ends_the_old_one_s_requests_and_reads_the_data_at_once() {
+        let v = spec(1)
+            .live_data()
+            .with_events(vec![crate::EventDecl::new("q", crate::EventKind::Ask)]);
+        let state = new_state("a1".into(), v, Capabilities::ALL).unwrap();
+        let now = Instant::now();
+        state
+            .borrow_mut()
+            .bridge
+            .push_data(Snapshot::new(serde_json::json!({"n":1}), 2));
+        state.borrow_mut().last_input = Some(now);
+        // The old document's second call is an ask that stays open.
+        let ask = br#"{"id":"__ab2","method":"ask","params":{"name":"q"}}"#;
+        assert!(state.borrow_mut().bridge.handle(ask, now).request.is_some());
+        // Nothing open: no event. An open ask: the host hears which one ended.
+        assert_eq!(
+            document_started_event(&state),
+            Some(ArtifactEvent::RequestsEnded {
+                version: 1,
+                reply_ids: vec![serde_json::json!("__ab2")]
+            })
+        );
+        assert_eq!(document_started_event(&state), None);
+        assert_eq!(state.borrow().last_input, None);
+        // The new document uses the same ids: its subscribe gets the snapshot at once,
+        // its ask is taken, and the old ask's late reply finds nothing of the old page.
+        let sub = br#"{"id":"__ab1","method":"subscribe"}"#;
+        let o = state.borrow_mut().bridge.handle(sub, now);
+        assert!(
+            o.reply
+                .unwrap()
+                .contains(r#""result":{"data":{"n":1},"rev":2}"#)
+        );
+        assert!(state.borrow_mut().bridge.handle(ask, now).request.is_some());
+        // Closed: nothing to end.
+        assert!(close(&state));
+        assert!(document_started(&state).is_empty());
+    }
+
+    #[test]
+    fn a_version_switch_tells_the_host_which_requests_ended() {
+        let v = spec(1).with_events(vec![crate::EventDecl::new("q", crate::EventKind::Ask)]);
+        let state = new_state("a1".into(), v, Capabilities::ALL).unwrap();
+        let ask = br#"{"id":7,"method":"ask","params":{"name":"q"}}"#;
+        state.borrow_mut().bridge.handle(ask, Instant::now());
+        assert_eq!(
+            switch_version(&state, spec(2), Capabilities::READ),
+            Ok(Some(ArtifactEvent::RequestsEnded {
+                version: 1,
+                reply_ids: vec![serde_json::json!(7)]
+            }))
+        );
+        assert_eq!(
+            switch_version(&state, spec(3), Capabilities::READ),
+            Ok(None)
+        );
+    }
+
+    #[test]
+    fn a_live_version_can_start_with_the_snapshot_the_host_has() {
+        let seeded = spec(1)
+            .live_data()
+            .with_snapshot(Some(Snapshot::new(serde_json::json!({"n":5}), 5)));
+        let state = new_state("a1".into(), seeded, Capabilities::READ).unwrap();
+        let get = br#"{"id":"g","method":"getData"}"#;
+        let o = state.borrow_mut().bridge.handle(get, Instant::now());
+        assert!(o.reply.unwrap().contains(r#""result":{"n":5}"#));
+        // The host's fetch after the load reaches the page only with a higher rev.
+        let same = push_data_scripts(&state, 1, Snapshot::new(serde_json::json!({"n":5}), 5));
+        assert_eq!(same, Some(Vec::new()));
+        state
+            .borrow_mut()
+            .bridge
+            .handle(br#"{"id":"s","method":"subscribe"}"#, Instant::now());
+        let newer = push_data_scripts(&state, 1, Snapshot::new(serde_json::json!({"n":6}), 6));
+        assert_eq!(newer.map(|s| s.len()), Some(1));
+    }
+
+    #[test]
+    fn the_ref_menu_follows_the_theme_now_and_on_the_next_load() {
+        let menu = |bg: &str| RefMenu {
+            label: "就这里提问".into(),
+            bg: bg.into(),
+            ink: "#111111".into(),
+            line: "#e5e5e5".into(),
+            accent: "#000000".into(),
+        };
+        let state = new_state("a1".into(), spec(1), Capabilities::READ).unwrap();
+        // A page without the menu (it may not `ref`) gets none later either.
+        assert_eq!(ref_menu_script(&state, menu("#ffffff")), None);
+        state.borrow_mut().ref_menu = Some(menu("#ffffff"));
+        assert_eq!(ref_menu_script(&state, menu("#ffffff")), None);
+        let script = ref_menu_script(&state, menu("#171717")).unwrap();
+        assert!(script.contains("teamchatrefmenu") && script.contains("#171717"));
+        assert_eq!(state.borrow().ref_menu, Some(menu("#171717")));
     }
 
     #[test]

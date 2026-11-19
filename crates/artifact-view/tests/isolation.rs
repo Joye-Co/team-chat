@@ -126,12 +126,55 @@ mod isolation {
     </script>
     </body></html>"#;
 
+    /// v2 loads twice. Its first document leaves an `ask` open under a fixed request id and
+    /// then navigates inside its origin; the second one must be able to use that id again
+    /// (the bridge starts clean for a new document), must get the data at once, and reports.
+    /// It also draws a picture into a blob (allowed) and tries to fetch it (not allowed),
+    /// and checks that `confirm()` is the host's stub.
     const V2_HTML: &str = r#"<!doctype html><html><head><meta charset="utf-8"></head><body><h1>Sample 产出 v2</h1>
     <script>
     (async function () {
+      function post(m) {
+        if (window.webkit && window.webkit.messageHandlers) window.webkit.messageHandlers.bridge.postMessage(m);
+        else window.chrome.webview.postMessage(m);
+      }
+      function raw(m, ms) {
+        return new Promise(function (res) {
+          function on(e) { if (e.detail && e.detail.id === m.id) { window.removeEventListener('artifactbridgereply', on); res(e.detail); } }
+          window.addEventListener('artifactbridgereply', on);
+          post(m);
+          setTimeout(function () { res({ late: true }); }, ms);
+        });
+      }
+      if (location.search !== '?again') {
+        post({ id: 'fixed-1', method: 'ask', params: { name: 'v2-hold', timeoutMs: 60000 } });
+        setTimeout(function () { location.href = 'index.html?again'; }, 300);
+        return;
+      }
       var r = { host: location.host };
+      var again = await raw({ id: 'fixed-1', method: 'getData', params: null }, 3000);
+      r.idFreeAgain = !again.late && !again.error;
+      r.subscribed = await Promise.race([
+        new Promise(function (res) { window.teamchat.onData(function (d, meta) { res(typeof meta.rev === 'number'); }); }),
+        new Promise(function (res) { setTimeout(function () { res(false); }, 3000); })
+      ]);
       r.data = await window.artifact.getData();
       try { await fetch('https://example.com/'); r.fetchHttpsFails = false; } catch (e) { r.fetchHttpsFails = true; }
+      try {
+        var c = document.createElement('canvas'); c.width = 3; c.height = 2;
+        var blob = await new Promise(function (res) { c.toBlob(res); });
+        var url = URL.createObjectURL(blob);
+        r.blobImage = await new Promise(function (res) {
+          var i = new Image();
+          i.onload = function () { res(i.naturalWidth === 3); };
+          i.onerror = function () { res(false); };
+          i.src = url;
+          setTimeout(function () { res(false); }, 5000);
+        });
+        try { await fetch(url); r.blobFetchBlocked = false; } catch (e) { r.blobFetchBlocked = true; }
+      } catch (e) { r.blobError = String(e); }
+      r.confirmStub = confirm('?') === false && prompt('?') === null && alert('!') === undefined
+        && !/native code/.test(Function.prototype.toString.call(window.confirm));
       await window.artifact.emitEvent('v2-results', r);
     })();
     </script></body></html>"#;
@@ -321,6 +364,8 @@ mod isolation {
         denied_events: u32,
         frame_events: u32,
         closed: u32,
+        /// The request ids the host was told ended when v2 loaded its second document.
+        v2_ended: Vec<Value>,
         late_seen: bool,
         /// The escape page's last reported step, whether its results arrived, how often
         /// it was loaded again, and the step each stalled load had reached.
@@ -505,6 +550,7 @@ mod isolation {
             denied_events: 0,
             frame_events: 0,
             closed: 0,
+            v2_ended: Vec::new(),
             late_seen: false,
             v4_step: String::new(),
             v4_done: false,
@@ -703,6 +749,15 @@ mod isolation {
                             r.check("v2OwnOrigin", payload["host"] == json!(v2_host));
                             r.check("v2GetData", payload["data"] == v2_data());
                             r.check("v2FetchFails", b("fetchHttpsFails"));
+                            // The second document of v2: the first one's open ask ended
+                            // (the host heard it), and its request id is free again.
+                            let ended = r.v2_ended == vec![json!("fixed-1")];
+                            r.check("reloadEndsOpenRequests", ended);
+                            r.check("reloadFreesRequestIds", b("idFreeAgain"));
+                            r.check("reloadKeepsData", b("subscribed"));
+                            r.check("blobImageLoads", b("blobImage"));
+                            r.check("blobFetchBlocked", b("blobFetchBlocked"));
+                            r.check("dialogsAreStubs", b("confirmStub"));
                             drop(r);
                             let spec = VersionSpec::new(
                                 3,
@@ -876,6 +931,11 @@ mod isolation {
                     drop(r);
                     let _ = std::fs::remove_dir_all(&dir2);
                     std::process::exit(if ok { 0 } else { 1 });
+                }
+                ArtifactEvent::RequestsEnded { version, reply_ids } => {
+                    if version == 2 {
+                        r.v2_ended.extend(reply_ids);
+                    }
                 }
                 ArtifactEvent::VersionSelected { .. } | ArtifactEvent::FocusChanged { .. } => {}
             }

@@ -13,22 +13,21 @@
 # managed settings you need: an existing file is refused.
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# shellcheck source=scripts/lib.sh
+. "$(dirname "$0")/lib.sh"
 cd "$ROOT"
 
 managed=0
 for a in "$@"; do
   case "$a" in
     --managed-hooks) managed=1 ;;
-    -h | --help) sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h | --help) usage; exit 0 ;;
     *) echo "unknown argument: $a" >&2; exit 2 ;;
   esac
 done
 
-# shellcheck disable=SC1091
-[ -f "$HOME/.cargo/env" ] && . "$HOME/.cargo/env"
-export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$ROOT/target}"
-if command -v sccache >/dev/null; then export RUSTC_WRAPPER=sccache; fi
+cargo_env
+warn_low_disk
 export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-6}" CARGO_PROFILE_DEV_DEBUG=0 CARGO_INCREMENTAL=0
 
 t() { cargo test --locked -p daemon "$@"; }

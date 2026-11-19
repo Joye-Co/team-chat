@@ -112,6 +112,8 @@ pub struct CodeInput {
     group: usize,
     error: bool,
     locked: Option<SharedString>,
+    /// The code is being checked: edits are undone and no slot is active.
+    busy: bool,
     keep: fn(&str) -> bool,
     /// The slot text after the last edit.
     prev: String,
@@ -136,6 +138,7 @@ impl CodeInput {
             cx.subscribe_in(&state, window, |this, _, event: &InputEvent, window, cx| {
                 match event {
                     InputEvent::PressEnter { .. } => cx.emit(CodeInputEvent::Submit),
+                    InputEvent::Change if this.busy => this.restore(window, cx),
                     InputEvent::Change => {
                         this.fold(window, cx);
                         cx.emit(CodeInputEvent::Change);
@@ -153,6 +156,7 @@ impl CodeInput {
             group: group.max(1),
             error: false,
             locked: None,
+            busy: false,
             keep: |_| false,
             prev: String::new(),
             kept: false,
@@ -224,6 +228,26 @@ impl CodeInput {
         }
     }
 
+    /// While the code is being checked it cannot change and no slot shows
+    /// the caret; a refusal clears this, so retyping works again.
+    pub fn set_busy(&mut self, busy: bool, cx: &mut Context<Self>) {
+        if self.busy != busy {
+            self.busy = busy;
+            cx.notify();
+        }
+    }
+
+    /// Puts back the text an edit changed while busy.
+    fn restore(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let text = self.prev.clone();
+        if self.state.read(cx).value().as_ref() != text {
+            self.state.update(cx, |st, cx| {
+                st.set_value(text.clone(), window, cx);
+                st.set_selected_range(text.len()..text.len(), cx);
+            });
+        }
+    }
+
     /// Folds the field text into the slots after an edit.
     fn fold(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let (raw, cursor) = {
@@ -257,6 +281,9 @@ impl CodeInput {
     /// A click in slot `ix`: the caret goes there (or after the last
     /// character when the slot is still empty).
     fn place(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
+        if self.busy {
+            return;
+        }
         self.state.update(cx, |st, cx| {
             let at = ix.min(st.value().len());
             st.focus(window, cx);
@@ -275,7 +302,7 @@ impl Render for CodeInput {
             let st = self.state.read(cx);
             let value = st.value();
             (
-                st.focus_handle(cx).is_focused(window),
+                st.focus_handle(cx).is_focused(window) && !self.busy,
                 value.chars().collect::<Vec<char>>(),
                 st.selected_range(),
                 st.cursor(),
@@ -360,7 +387,7 @@ impl Render for CodeInput {
                             .items_center()
                             .justify_center()
                             .n_style(text::TITLE)
-                            .font_weight(gpui::FontWeight::MEDIUM)
+                            .font_weight(crate::theme::MEDIUM_WEIGHT)
                             .code_font()
                             .text_color(k.label)
                             .children(ch.map(|c| c.to_string()))

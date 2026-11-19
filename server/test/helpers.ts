@@ -70,6 +70,16 @@ export async function createGroup(owner: TestMember, memberIds: string[], name =
   return r.body.group.id as string;
 }
 
+/**
+ * What a person wrote in a `run.input` frame: the text after its `Follow-up from <name>:` line
+ * (the desk says who wrote a message it passes to a working run).
+ */
+export function inputBody(f: { text?: unknown }): string {
+  const text = String(f.text ?? "");
+  const nl = text.indexOf("\n");
+  return nl >= 0 && /^Follow-up from .+:$/.test(text.slice(0, nl)) ? text.slice(nl + 1) : text;
+}
+
 /** Polls `fn` (sync or async) every 10 ms until it returns a truthy value. */
 export async function waitUntil<T>(fn: () => T | undefined | false | PromiseLike<T | undefined | false>, ms = 5000, what = "condition"): Promise<T> {
   const start = Date.now();
@@ -81,8 +91,13 @@ export async function waitUntil<T>(fn: () => T | undefined | false | PromiseLike
   }
 }
 
-/** Every server frame a test client got that does not parse with the protocol schema. */
+/** Every server frame a test client got that does not parse with the protocol schema. The
+ *  afterAll of setup.ts expects it empty in every test file. */
 export const protocolViolations: unknown[] = [];
+
+/** How many test sockets (clients and fake daemons) this file opened: setup.ts waits for their
+ *  close handlers only when there are some. */
+export const sockets = { opened: 0 };
 
 export class Client {
   frames: any[] = [];
@@ -90,6 +105,7 @@ export class Client {
   closed: { code: number } | null = null;
   private n = 0;
   constructor(readonly ws: WebSocket) {
+    sockets.opened += 1;
     ws.addEventListener("message", (e) => {
       const f = JSON.parse(e.data as string);
       const check = ServerFrame.safeParse(f);

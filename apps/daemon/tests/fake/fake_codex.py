@@ -6,7 +6,7 @@ prompt says "late", the turn waits for a steer and then completes before it answ
 with an error (a steer that arrives as the turn ends). When the prompt says "chatrun", the turn
 runs `chat-run resolve` from PATH and writes its exit code, output, `CHAT_RUN_DIR`,
 `CHAT_RUN_SOCKET` and the folder's mode and files to chatrun.json; "chatcard" posts a card from
-`chat-run card schema` twice and patches it, with the answers in chatcard.json; "chatdone" posts
+`chat-run card schema --full` twice and patches it, with the answers in chatcard.json; "chatdone" posts
 its own done card and reports done (chatdone.json), "chatblocked" reports blocked
 (chatblocked.json), each before its final answer. `thread/resume` knows only
 the thread "th-old" (any other id is an error, like a thread Codex no longer has); each thread
@@ -73,7 +73,7 @@ def run_turn(tid, text):
         open("chatrun.json", "w").write(json.dumps({"code": r.returncode, "out": r.stdout, "err": r.stderr, "dir": d,
             "socket": os.environ.get("CHAT_RUN_SOCKET"), "mode": mode, "files": files}))
     if "chatcard" in text:
-        # As the fake Claude CLI: a card from `chat-run card schema`, posted twice (a retry) and
+        # As the fake Claude CLI: a card from `chat-run card schema --full`, posted twice (a retry) and
         # patched at its rev, through the request folder; the answers go to chatcard.json.
         def run(*a):
             r = subprocess.run(["chat-run", *a], capture_output=True, text=True)
@@ -82,8 +82,8 @@ def run_turn(tid, text):
             except ValueError:
                 v = None
             return {"code": r.returncode, "out": v, "err": r.stderr[-400:]}
-        schema = run("card", "schema")["out"] or {}
-        kinds = [b["properties"]["type"]["const"] for b in schema.get("properties", {}).get("blocks", {}).get("items", {}).get("oneOf", [])]
+        schema = run("card", "schema", "--full")["out"] or {}
+        kinds = [b["$ref"].rsplit("/", 1)[-1] for b in schema.get("$defs", {}).get("block", {}).get("oneOf", [])]
         card = {"v": 2, "rev": 1, "title": "chat-run codex card", "fallback": "chat-run codex card", "intent": "working", "blocks": [{"type": kinds[0], "id": "note", "text": "working"}]}
         open("card.json", "w").write(json.dumps(card))
         post = run("card", "post", "--file", "card.json")

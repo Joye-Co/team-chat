@@ -450,7 +450,7 @@ impl AccountPage {
                             s::EMAIL_SHEET_HINT.to_string(),
                             NativeTextField::new("email-field", &page.email_input)
                                 .full_width()
-                                .size(crate::ui::native::FieldSize::Hero)
+                                .size(crate::ui::native::FieldSize::Large)
                                 .leading(crate::ui::icons::icon(
                                     Sym::Mention,
                                     tokens::icon::MD,

@@ -32,11 +32,14 @@ const DROPDOWN_ENTER_DURATION: Duration = Duration::from_millis(150);
 /// `2` is `0.5rem`, which is 8px at the default root size.
 const DROPDOWN_ENTER_OFFSET: Pixels = px(-8.);
 
-fn dropdown_positioner(bounds: Bounds<Pixels>) -> gpui_base::Positioner {
+/// The space between a dropdown and its trigger.
+pub(crate) const DROPDOWN_GAP: Pixels = px(6.);
+
+fn dropdown_positioner(bounds: Bounds<Pixels>, gap: Pixels) -> gpui_base::Positioner {
     gpui_base::Positioner::side(bounds)
         .placement(gpui_base::Placement::Bottom)
         .align(gpui_base::Align::Start)
-        .offset(px(6.))
+        .offset(gap)
         .margin(px(8.))
 }
 
@@ -87,11 +90,23 @@ pub(crate) fn dropdown_popup(
     surface: impl IntoElement + Styled + 'static,
     cx: &App,
 ) -> gpui_base::Positioner {
+    dropdown_popup_with_gap(id, bounds, DROPDOWN_GAP, surface, cx)
+}
+
+/// A [`dropdown_popup`] set `gap` away from its trigger, for a trigger whose focus ring
+/// would otherwise take up the space.
+pub(crate) fn dropdown_popup_with_gap(
+    id: impl Into<ElementId>,
+    bounds: Bounds<Pixels>,
+    gap: Pixels,
+    surface: impl IntoElement + Styled + 'static,
+    cx: &App,
+) -> gpui_base::Positioner {
     let travel: f32 = DROPDOWN_ENTER_OFFSET.into();
     // Read out here: the animation runs long after `cx` is gone.
     let ring = popover_ring(cx);
 
-    dropdown_positioner(bounds).child(surface.with_animation(
+    dropdown_positioner(bounds, gap).child(surface.with_animation(
         id,
         Animation::new(DROPDOWN_ENTER_DURATION).with_easing(ease_out_cubic),
         move |surface, delta| {

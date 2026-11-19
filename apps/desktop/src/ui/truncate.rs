@@ -96,6 +96,27 @@ pub fn truncating(
         .tooltip(tip_when_cut(vec![layout], move || text_tip(text.clone())))
 }
 
+/// `text` on at most `lines` lines, cut with `…` after the last one; hovering
+/// a cut text shows all of it in a tooltip (§2.21: no cut value without its
+/// full text). Style the returned box (type, color): the text inherits it.
+pub fn clamped(
+    id: impl Into<ElementId>,
+    text: impl Into<SharedString>,
+    lines: usize,
+) -> gpui::Stateful<gpui::Div> {
+    let text: SharedString = text.into();
+    let styled = StyledText::new(text.clone());
+    let layout = styled.layout().clone();
+    div()
+        .id(id)
+        .min_w_0()
+        .overflow_hidden()
+        .text_ellipsis()
+        .line_clamp(lines)
+        .child(styled)
+        .tooltip(tip_when_cut(vec![layout], move || text_tip(text.clone())))
+}
+
 /// Where [`TruncText`] cuts a line that does not fit (COMPLETENESS.md §2.21).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Cut {

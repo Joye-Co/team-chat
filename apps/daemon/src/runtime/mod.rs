@@ -456,6 +456,18 @@ impl PlanTracker {
     }
 }
 
+/// What a run tells a CLI whose earlier session could not be continued when the server sent no
+/// whole prompt: its prompt carries only what is new since that session.
+pub const LOST_SESSION_NOTE: &str = "Your earlier conversation in this topic could not be \
+continued: this is a new session and you do not remember it. The messages below are only what \
+is new since then. Before you act, read the topic and what was decided with `chat-run topic \
+history`.";
+
+/// The short prompt for a session that is new although the run was to continue one.
+pub fn lost_session_prompt(prompt: &str) -> String {
+    format!("{LOST_SESSION_NOTE}\n\n{prompt}")
+}
+
 #[cfg(test)]
 mod output_tests {
     use super::*;

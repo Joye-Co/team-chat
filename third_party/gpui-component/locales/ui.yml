@@ -13,6 +13,16 @@ Attachment:
     zh-HK: 重試
     zh-TW: 重試
 Calendar:
+  month_toggle:
+    en: "%{month}"
+    zh-CN: "%{month} 月"
+    zh-HK: "%{month} 月"
+    zh-TW: "%{month} 月"
+  year_toggle:
+    en: "%{year}"
+    zh-CN: "%{year} 年"
+    zh-HK: "%{year} 年"
+    zh-TW: "%{year} 年"
   week.0:
     en: Su
     pt-BR: "Do"

@@ -250,7 +250,11 @@ export abstract class DeskInput extends DeskRelay {
       text,
       Date.now(),
     );
-    if (link) await link.toRun({ t: "run.input", runId: r.id, inputId, text, authorId: m.authorId } as never);
+    if (!link) return;
+    // The CLI reads who wrote it, as in the first prompt. Only the frame says so: the stored
+    // body stays as written, because a later run gets it as a follow-up with the same line.
+    const who = (await this.names([m.authorId])).get(m.authorId) ?? m.authorId;
+    await link.toRun({ t: "run.input", runId: r.id, inputId, text: `Follow-up from ${who}:\n${text}`, authorId: m.authorId } as never);
   }
 
   protected async answerProgress(r: RunRow, m: TopicMessage): Promise<void> {

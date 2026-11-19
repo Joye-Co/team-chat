@@ -31,6 +31,10 @@ pub struct TextViewStyle {
     /// long code inside the block, e.g.
     /// `TextViewStyle::default().code_block({ let mut s = StyleRefinement::default().max_h(px(320.)); s.overflow.y = Some(Overflow::Scroll); s })`.
     pub code_block: StyleRefinement,
+    /// The refinement over `code_block` for a block of one line.
+    pub code_block_one_line: StyleRefinement,
+    /// The top of the actions of a block of one line, when not the default.
+    pub code_block_one_line_actions_top: Option<Pixels>,
     /// Style refinement applied to the table container (the bordered wrapper
     /// in wrap mode, the scroll viewport in horizontal-scroll mode).
     ///
@@ -66,6 +70,8 @@ impl Default for TextViewStyle {
             heading_font_size: None,
             highlight_theme: HighlightTheme::default_light().clone(),
             code_block: StyleRefinement::default(),
+            code_block_one_line: StyleRefinement::default(),
+            code_block_one_line_actions_top: None,
             table: StyleRefinement::default(),
             table_head: StyleRefinement::default(),
             table_cell: StyleRefinement::default(),
@@ -89,6 +95,8 @@ impl PartialEq for TextViewStyle {
             }
             && self.highlight_theme == other.highlight_theme
             && self.code_block == other.code_block
+            && self.code_block_one_line == other.code_block_one_line
+            && self.code_block_one_line_actions_top == other.code_block_one_line_actions_top
             && self.table == other.table
             && self.table_head == other.table_head
             && self.table_cell == other.table_cell
@@ -118,6 +126,16 @@ impl TextViewStyle {
     /// refinement to scroll long code inside the block instead of growing it.
     pub fn code_block(mut self, style: StyleRefinement) -> Self {
         self.code_block = style;
+        self
+    }
+    /// Set the refinement for a code block of one line, and where its actions sit.
+    pub fn code_block_one_line(
+        mut self,
+        style: StyleRefinement,
+        actions_top: Option<Pixels>,
+    ) -> Self {
+        self.code_block_one_line = style;
+        self.code_block_one_line_actions_top = actions_top;
         self
     }
     /// Set style for inline code spans.

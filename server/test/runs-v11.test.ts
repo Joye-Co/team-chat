@@ -3,21 +3,15 @@
 // chat runs, against a fake daemon that reports the 1.1 features.
 import { SELF, env, runInDurableObject } from "cloudflare:test";
 import { MachineDownFrame } from "@chat/protocol";
-import { afterAll, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { STALL_MS, TEXT } from "../src/bots/dispatch";
 import type { BotsEnv } from "../src/bots/env";
 import { ACK_EMOJI } from "@chat/protocol";
 import { PROOF_TEXT, doneCard, prRefs, testCounts } from "../src/bots/proof";
-import { BASE, Client, type TestMember, api, clientMsgId, createGroup, createMember, protocolViolations, waitUntil } from "./helpers";
+import { BASE, Client, type TestMember, api, clientMsgId, createGroup, createMember, sockets, waitUntil } from "./helpers";
+import { downViolations } from "./daemon";
 
 const benv = env as unknown as BotsEnv;
-const downViolations: unknown[] = [];
-
-afterAll(async () => {
-  await new Promise((r) => setTimeout(r, 300));
-  expect(protocolViolations).toEqual([]);
-  expect(downViolations).toEqual([]);
-});
 
 const HEALTH = { diskFreeBytes: 100e9, diskTotalBytes: 500e9, load1: 0.5, load5: 0.5, load15: 0.5, cpuCount: 8, activeRuns: 0 };
 
@@ -25,6 +19,7 @@ class Daemon {
   frames: any[] = [];
   seq = new Map<string, number>();
   constructor(readonly ws: WebSocket) {
+    sockets.opened += 1;
     ws.addEventListener("message", (e) => {
       const f = JSON.parse(e.data as string);
       const check = MachineDownFrame.safeParse(f);

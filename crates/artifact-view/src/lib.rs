@@ -43,7 +43,7 @@ pub mod win_support;
 use std::path::PathBuf;
 
 pub use bridge::{
-    Capabilities, DataCause, EventDecl, EventKind, RefMenu, Reject, Snapshot, Viewer,
+    Capabilities, DataCause, EventDecl, EventKind, Failure, RefMenu, Reject, Snapshot, Viewer,
 };
 pub use embed::{EmbedOptions, Placement, Rect};
 pub use resolve::{Content, origin_host};
@@ -106,6 +106,10 @@ pub struct VersionSpec {
     /// (self-tests and the diagram renderer); `Some` lets only these names out, each with
     /// its kind.
     pub events: Option<Vec<EventDecl>>,
+    /// A live version's snapshot the host has already (from an earlier open of the same
+    /// version): `getData` and `onData` answer with it from the first script on, and the
+    /// host's later snapshot reaches the page only when its rev is higher.
+    pub initial: Option<Snapshot>,
 }
 
 impl VersionSpec {
@@ -117,7 +121,14 @@ impl VersionSpec {
             data: Value::Null,
             live: false,
             events: None,
+            initial: None,
         }
+    }
+
+    /// The snapshot the page starts with (see [`VersionSpec::initial`]).
+    pub fn with_snapshot(mut self, snapshot: Option<Snapshot>) -> Self {
+        self.initial = snapshot;
+        self
     }
 
     /// The host pushes the first snapshot (see [`VersionSpec::live`]).
@@ -245,8 +256,14 @@ impl OpenOptions {
 pub enum ArtifactEvent {
     /// The page of `version` finished loading.
     Loaded { version: u32 },
-    /// The page could not load, or its web content process ended.
+    /// The page could not load, or its web content process ended and the one automatic
+    /// reload was used up already.
     LoadFailed { version: u32, reason: String },
+    /// A new document replaced the page's one (the page reloaded itself, followed a link
+    /// inside its origin, or its web content process was started again): the open `emit`
+    /// and `ask` requests with these `reply_id`s ended, and nothing can answer them. The
+    /// host drops what it keeps for them.
+    RequestsEnded { version: u32, reply_ids: Vec<Value> },
     /// The page called `emit(name, payload)` (or the legacy `emitEvent`) with a declared
     /// name. `user_action` is true when the viewer clicked, dragged or typed in this web
     /// view at most [`gate::USER_ACTION_WINDOW`] before; the host forwards only those
@@ -271,12 +288,14 @@ pub enum ArtifactEvent {
         user_action: bool,
     },
     /// The page pointed at one of its parts (`ref`, or ⌥-click on `data-ref-label`): the
-    /// host puts it into the viewer's composer (REFS §A7). Checked already.
+    /// host puts it into the viewer's composer (REFS §A7). Checked already. Same
+    /// `user_action` rule as `Emit`: a page cannot fill the composer by itself.
     Ref {
         version: u32,
         label: String,
         value: Option<Value>,
         selector: Option<String>,
+        user_action: bool,
     },
     /// The user activated a link to an `http`, `https` or `mailto` URL. The navigation was
     /// cancelled; the host may ask the user and then call [`open_external_url`].

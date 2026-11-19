@@ -64,7 +64,7 @@ impl PushSize {
         metrics::BUTTON_REGULAR_RADIUS
     }
 
-    fn pad(self) -> Pixels {
+    pub fn pad(self) -> Pixels {
         match self {
             PushSize::Regular => metrics::BUTTON_REGULAR_PAD,
             PushSize::Small => metrics::BUTTON_SMALL_PAD,
@@ -95,7 +95,9 @@ pub(super) fn look(style: PushStyle, k: &NativeColors) -> Look {
             border: None,
         },
         // A Mac push button: a soft tint, no frame (owner review: a border
-        // on every 编辑… / 取消 is noise).
+        // on every 编辑… / 取消 is noise; COMPLETENESS.md D11). The tint is
+        // of the text color, so unlike Secondary's opaque `muted` it shows
+        // on a group box and a sheet too.
         PushStyle::Outline => Look {
             fill: k.push,
             text: k.label,
@@ -180,7 +182,10 @@ fn styled(b: Button, style: PushStyle, cx: &App) -> Button {
     let k = native_colors(cx);
     let l = look(style, &k);
     b.custom(variant(l, cx))
-        .bg(l.fill)
+        // A clear fill is not set on the button itself: gpui-component replays the button's
+        // own style inside each state, and a clear one there would erase the fill of an open
+        // menu trigger (a ⋯ whose menu is showing).
+        .when(l.fill.a > 0., |b| b.bg(l.fill))
         .text_color(l.text)
         .map(|b| match l.border {
             Some(edge) => b.border_1().border_color(edge).shadow(shadow::xs()),
@@ -233,16 +238,38 @@ pub fn ghost_button(
 
 /// A disabled button: the same variant at 50 % (§1.8, D11), so a disabled
 /// primary never looks like Cancel.
-pub fn disabled_push(b: Button, disabled: bool, _cx: &App) -> Button {
-    b.disabled(disabled).when(disabled, |b| b.opacity(0.5))
+///
+/// A filled variant (primary, destructive) fades its fill only and keeps
+/// its label at full strength: element opacity fades each primitive on its
+/// own, so the label would be dimmed twice, once itself and once through
+/// the fill under it. The tinted and ghost variants have next to no fill,
+/// so there the opacity fades the label, which is what reads as disabled.
+pub fn disabled_push(mut b: Button, disabled: bool, cx: &App) -> Button {
+    if !disabled {
+        return b.disabled(false);
+    }
+    let k = native_colors(cx);
+    let fill = b.style().background.clone();
+    let filled = [k.primary, k.destructive_fill]
+        .into_iter()
+        .find(|c| fill == Some((*c).into()));
+    match filled {
+        Some(c) => b.disabled(true).bg(c.opacity(metrics::DISABLED_OPACITY)),
+        None => b.disabled(true).opacity(metrics::DISABLED_OPACITY),
+    }
 }
 
 /// The primary of a short form that is not complete yet (the login, §2.20):
-/// inert, primary at 30 %, so it reads light and turns solid once the form
-/// is filled. Use [`disabled_push`] for any other disabled button.
-pub fn waiting_push(b: Button, waiting: bool) -> Button {
-    b.disabled(waiting)
-        .when(waiting, |b| b.opacity(metrics::PRIMARY_WAITING_OPACITY))
+/// inert, its fill primary at 30 %, so it reads light and turns solid once
+/// the form is filled. Only the fill is tinted: the label stays in the
+/// foreground color, readable on the light fill in both modes. Use
+/// [`disabled_push`] for any other disabled button.
+pub fn waiting_push(b: Button, waiting: bool, cx: &App) -> Button {
+    let k = native_colors(cx);
+    b.disabled(waiting).when(waiting, |b| {
+        b.bg(k.primary.opacity(metrics::PRIMARY_WAITING_OPACITY))
+            .text_color(k.label)
+    })
 }
 
 /// A loading button (§1.8): a 16 spinner in the icon slot, the label and
@@ -394,6 +421,19 @@ pub fn popup_button(
     chevron_button(id, title, Sf::ChevronDown, size, window, cx)
 }
 
+/// A [`popup_button`] with nothing chosen yet: its title is the placeholder, in the muted
+/// ink of every empty field (COMPLETENESS 1.2).
+pub fn popup_button_placeholder(
+    id: impl Into<ElementId>,
+    title: impl Into<SharedString>,
+    size: PushSize,
+    window: &Window,
+    cx: &App,
+) -> Button {
+    let ink = native_colors(cx).tertiary;
+    chevron_button_inked(id, title, Some(ink), Sf::ChevronDown, size, window, cx)
+}
+
 /// A pop-up that reads as part of the line it sits in (a pane header's
 /// member, a toolbar's version, a palette's target): no frame and no fill
 /// at rest, the title in `label`, a 12 `chevron.down` in `secondary` 4
@@ -450,6 +490,19 @@ fn chevron_button(
     window: &Window,
     cx: &App,
 ) -> Button {
+    chevron_button_inked(id, title, None, chevron, size, window, cx)
+}
+
+/// [`chevron_button`] whose title takes `ink` instead of the button's own.
+fn chevron_button_inked(
+    id: impl Into<ElementId>,
+    title: impl Into<SharedString>,
+    ink: Option<gpui::Hsla>,
+    chevron: Sf,
+    size: PushSize,
+    window: &Window,
+    cx: &App,
+) -> Button {
     let k = native_colors(cx);
     let b = Button::new(id)
         .with_size(gpui_component::Size::Medium)
@@ -471,7 +524,11 @@ fn chevron_button(
             .items_center()
             .justify_between()
             .gap(space::S8)
-            .child(TruncText::new(title).flex_1())
+            .child(
+                TruncText::new(title)
+                    .flex_1()
+                    .when_some(ink, |el, ink| el.text_color(ink)),
+            )
             .child(div().flex_none().child(symbol(
                 chevron,
                 metrics::POPUP_CHEVRON_SLOT,
@@ -674,8 +731,8 @@ pub fn tile_button(id: impl Into<ElementId>, side: Pixels, selected: bool, cx: &
         .when(selected, |b| b.bg(k.fill).border_1().border_color(k.label))
 }
 
-/// A tool on the dark media screen (lightbox, video): `ink` icon, white
-/// 10 % hover; a 32 square, or a `round` 36 circle for the pager arrows.
+/// A tool on the dark media screen (lightbox, video): `ink` icon, white fills from
+/// `tokens::lightbox`; a clear 32 square, or a `round` 36 circle for the pager arrows.
 pub fn screen_button(
     id: impl Into<ElementId>,
     sym: Sym,
@@ -690,8 +747,10 @@ pub fn screen_button(
     } else {
         metrics::BUTTON_REGULAR
     };
+    use super::tokens::lightbox as l;
+    let white = |alpha: f32| gpui::hsla(0., 0., 1., alpha);
     let rest = if round {
-        gpui::hsla(0., 0., 1., 0.10)
+        white(l::NAV_REST)
     } else {
         gpui::transparent_black()
     };
@@ -700,9 +759,11 @@ pub fn screen_button(
             ButtonCustomVariant::new(cx)
                 .color(rest)
                 .foreground(ink)
-                .hover(gpui::hsla(0., 0., 1., 0.18))
-                .active(gpui::hsla(0., 0., 1., 0.24)),
+                .hover(white(l::NAV_HOVER))
+                .active(white(l::NAV_PRESSED)),
         )
+        // The custom variant weakens its rest color; the fill is set on the button itself.
+        .when(round, |b| b.bg(rest))
         .icon(button_sym(sym, SymSize::for_slot(icon::MD), side))
         .with_size(side)
         .size(side)
@@ -713,6 +774,38 @@ pub fn screen_button(
                 b.rounded(metrics::BUTTON_REGULAR_RADIUS)
             }
         })
+        .accessibility_label(name.clone())
+        .tooltip(name)
+}
+
+/// A round icon button over a picture (the remove of a draft thumbnail): a white glyph
+/// on a black scrim that darkens under the pointer, so it reads on any picture in both
+/// themes. Sizes and opacities are the `gallery::OVER_*` tokens.
+pub fn over_image_button(
+    id: impl Into<ElementId>,
+    sym: Sym,
+    name: impl Into<SharedString>,
+    cx: &App,
+) -> Button {
+    use super::tokens::gallery as g;
+    let name = name.into();
+    let scrim = |alpha: f32| gpui::hsla(0., 0., 0., alpha);
+    Button::new(id)
+        .custom(
+            ButtonCustomVariant::new(cx)
+                .color(scrim(g::OVER_SCRIM))
+                .foreground(gpui::white())
+                .hover(scrim(g::OVER_SCRIM_HOVER))
+                .active(scrim(g::OVER_SCRIM_ACTIVE)),
+        )
+        .icon(button_sym(
+            sym,
+            SymSize::for_slot(g::OVER_GLYPH),
+            g::OVER_BUTTON,
+        ))
+        .with_size(g::OVER_BUTTON)
+        .size(g::OVER_BUTTON)
+        .rounded_full()
         .accessibility_label(name.clone())
         .tooltip(name)
 }
@@ -798,7 +891,10 @@ pub fn toolbar_item(
     let name = name.into();
     let (style, ink) = match kind {
         ToolbarItemKind::Prominent => (PushStyle::Default, k.on_primary),
-        ToolbarItemKind::Toggled => (PushStyle::Secondary, k.label),
+        // An inactive window dims every item's ink, the toggled one too;
+        // its `muted` fill still says which pane is open.
+        ToolbarItemKind::Toggled if emphasized => (PushStyle::Secondary, k.label),
+        ToolbarItemKind::Toggled => (PushStyle::Secondary, k.secondary),
         ToolbarItemKind::Plain if emphasized => (PushStyle::Ghost, k.label),
         ToolbarItemKind::Plain => (PushStyle::Ghost, k.secondary),
     };
@@ -830,8 +926,11 @@ pub fn toolbar_labeled_item(
     let k = native_colors(cx);
     let name = name.into();
     let (style, ink) = match (toggled, emphasized) {
-        (true, _) => (PushStyle::Secondary, k.label),
-        (false, true) => (PushStyle::Ghost, k.secondary),
+        (true, true) => (PushStyle::Secondary, k.label),
+        (true, false) => (PushStyle::Secondary, k.secondary),
+        // §1.4: an item of the active window draws in the foreground; the
+        // muted fill alone says which pane is open (D20).
+        (false, true) => (PushStyle::Ghost, k.label),
         (false, false) => (PushStyle::Ghost, k.secondary),
     };
     let b = Button::new(id)
@@ -850,7 +949,7 @@ pub fn toolbar_labeled_item(
             .child(
                 div()
                     .text_size(px(13.))
-                    .font_weight(gpui::FontWeight::MEDIUM)
+                    .font_weight(crate::theme::MEDIUM_WEIGHT)
                     .text_color(ink)
                     .whitespace_nowrap()
                     .child(label.into()),
@@ -871,7 +970,8 @@ pub fn toolbar_item_sym(
     let k = native_colors(cx);
     let name = name.into();
     let (style, ink) = match (toggled, emphasized) {
-        (true, _) => (PushStyle::Secondary, k.label),
+        (true, true) => (PushStyle::Secondary, k.label),
+        (true, false) => (PushStyle::Secondary, k.secondary),
         (false, true) => (PushStyle::Ghost, k.label),
         (false, false) => (PushStyle::Ghost, k.secondary),
     };

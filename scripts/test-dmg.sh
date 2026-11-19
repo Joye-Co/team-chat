@@ -12,21 +12,23 @@
 set -euo pipefail
 # shellcheck source=scripts/lib.sh
 . "$(dirname "$0")/lib.sh"
+
+DMG=""
+OTHER=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --same-as) OTHER="$(opt_value "$@")"; shift 2 ;;
+    -h | --help) usage; exit 0 ;;
+    -*) die "unknown option: $1" ;;
+    *) DMG="$1"; shift ;;
+  esac
+done
 need jq hdiutil codesign plutil shasum
 
 NAME="$(product name)"
 BUNDLE_ID="$(product bundleId)"
 SCHEME="$(product urlScheme)"
 VERSION="${APP_VERSION:-$(workspace_version)}"
-DMG=""
-OTHER=""
-while [ $# -gt 0 ]; do
-  case "$1" in
-    --same-as) OTHER="${2:-}"; shift 2 ;;
-    -*) die "unknown option: $1" ;;
-    *) DMG="$1"; shift ;;
-  esac
-done
 DMG="${DMG:-$DIST/$NAME-$VERSION.dmg}"
 [ -z "$OTHER" ] || [ -f "$OTHER" ] || die "no DMG at $OTHER"
 [ -f "$DMG" ] || die "no DMG at $DMG"

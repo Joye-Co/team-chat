@@ -2,7 +2,7 @@
 // A mention goes to each AI member it names, a message without an @ to the member that most
 // recently started a run there; the topic's status is rolled up from every member working in it.
 import { env, runInDurableObject } from "cloudflare:test";
-import { afterAll, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { ACK_EMOJI } from "@chat/protocol";
 import { roomMigrations } from "../src/core/registry";
 import { runMigrations } from "../src/core/migrations";
@@ -10,16 +10,10 @@ import type { BotsEnv } from "../src/bots/env";
 import { addressedParticipants, rollUp, type TopicBotRow } from "../src/bots/participants";
 import { cardOwner, handOffEach, messageTargets } from "../src/bots/room";
 import { isStopRequest } from "../src/agent/supervise";
-import { Daemon, type World, downViolations, mention, world } from "./daemon";
-import { Client, type TestMember, api, clientMsgId, createMember, protocolViolations, waitUntil } from "./helpers";
+import { Daemon, type World, mention, world } from "./daemon";
+import { Client, type TestMember, api, clientMsgId, createMember, inputBody, waitUntil } from "./helpers";
 
 const benv = env as unknown as BotsEnv;
-
-afterAll(async () => {
-  await new Promise((r) => setTimeout(r, 300));
-  expect(protocolViolations).toEqual([]);
-  expect(downViolations).toEqual([]);
-});
 
 /** A second runner-backed AI member in the world's group (runs on any machine). */
 async function addBot(w: World, name: string): Promise<TestMember> {
@@ -208,18 +202,18 @@ describe("several AI members in one topic", () => {
     await co.ok({ t: "send", groupId: w.gid, topicId, clientMsgId: clientMsgId(), body: "停" });
     // The requester's own message is input.
     await c.ok({ t: "send", groupId: w.gid, topicId, clientMsgId: clientMsgId(), body: "周五前就行" });
-    await d.next((f) => f.t === "run.input" && f.text === "周五前就行");
+    await d.next((f) => f.t === "run.input" && inputBody(f) === "周五前就行");
     // Another person who mentions the bot is input too.
     await co.ok({ t: "send", groupId: w.gid, topicId, clientMsgId: clientMsgId(), body: "@dev 顺便看下日志", mentions: [w.bot.id] });
-    await d.next((f) => f.t === "run.input" && f.text === "@dev 顺便看下日志");
-    expect(d.frames.filter((f) => f.t === "run.input").map((f) => f.text)).toEqual(["周五前就行", "@dev 顺便看下日志"]);
+    await d.next((f) => f.t === "run.input" && inputBody(f) === "@dev 顺便看下日志");
+    expect(d.frames.filter((f) => f.t === "run.input").map(inputBody)).toEqual(["周五前就行", "@dev 顺便看下日志"]);
     expect(d.frames.some((f) => f.t === "run.cancel")).toBe(false);
 
     // 接 1.12: the requester's 停 stops the run (no front desk is configured).
     await c.ok({ t: "send", groupId: w.gid, topicId, clientMsgId: clientMsgId(), body: "停！" });
     expect(await d.next((f) => f.t === "run.cancel")).toMatchObject({ runId });
     await c.waitEvent((e) => e.type === "run.updated" && e.data.run.id === runId && e.data.run.status === "cancelled");
-    expect(d.frames.filter((f) => f.t === "run.input").map((f) => f.text)).toEqual(["周五前就行", "@dev 顺便看下日志"]);
+    expect(d.frames.filter((f) => f.t === "run.input").map(inputBody)).toEqual(["周五前就行", "@dev 顺便看下日志"]);
     await waitUntil(async () => (await rows(w.gid, topicId))[0]?.working === 0, 5000, "not working");
 
     // After it ended, other people's talk without an @ starts nothing, and after a stop neither

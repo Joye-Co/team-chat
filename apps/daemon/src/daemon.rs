@@ -16,19 +16,69 @@ use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 
 macro_rules! log {
-    ($($a:tt)*) => {{
-        eprintln!("{} {}", crate::proto::now_ms(), format!($($a)*));
-    }};
+    ($($a:tt)*) => {
+        crate::problems::log(format_args!($($a)*))
+    };
 }
 
 /// A log line that is a warning or an error: also kept for 最近的问题 (机 5.4, `problems`).
 macro_rules! warn {
-    ($($a:tt)*) => {{
-        let at = crate::proto::now_ms();
-        let line = format!($($a)*);
-        eprintln!("{at} {line}");
-        crate::problems::record(at, &line);
-    }};
+    ($($a:tt)*) => {
+        crate::problems::warn(format_args!($($a)*))
+    };
+}
+
+/// What to do about a machine token the server does not take. Names the file, never the token.
+fn token_hint(cfg: &Config) -> String {
+    format!(
+        "check token_file {} or add this computer again in the app",
+        cfg.token_file.display()
+    )
+}
+
+/// Why the link did not open, with what to do when the server said no.
+fn connect_error(e: &tokio_tungstenite::tungstenite::Error, cfg: &Config) -> String {
+    use tokio_tungstenite::tungstenite::Error;
+    match e {
+        Error::Http(res) => match res.status().as_u16() {
+            s @ (401 | 403) => format!(
+                "connect: the server refused the machine token (HTTP {s}): {}",
+                token_hint(cfg)
+            ),
+            404 => format!(
+                "connect: HTTP 404: no machine link at {}: check server_url in the config",
+                cfg.server_url
+            ),
+            s => format!("connect: the server answered HTTP {s}"),
+        },
+        e => format!("connect: {e}"),
+    }
+}
+
+/// Why the server closed the link: its close code and reason (docs/machine-protocol.md,
+/// "Close codes"), with what to do for the codes that a retry does not cure.
+fn closed_reason(frame: Option<(u16, &str)>, cfg: &Config) -> String {
+    let Some((code, reason)) = frame else {
+        return "closed by server".into();
+    };
+    // The reason is the server's text: one line, cut.
+    let reason: String = reason
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(200)
+        .collect();
+    let said = if reason.is_empty() {
+        format!("closed by server (code {code})")
+    } else {
+        format!("closed by server (code {code}: {reason})")
+    };
+    match code {
+        4001 => format!("{said}: {}", token_hint(cfg)),
+        4002 => format!(
+            "{said}: another daemon is running with this computer's token; stop one of them"
+        ),
+        _ => said,
+    }
 }
 
 /// Frames buffered per run before message deltas are dropped (finals are always kept).
@@ -257,8 +307,13 @@ pub async fn run(cfg: Config, shutdown: impl Future<Output = ()>) -> Result<(), 
     // A daemon installed on its own (a Linux host) also fetches new releases itself.
     let mut updater = match crate::selfupdate::Updater::new(d.cfg.self_update) {
         Ok(u) => Some(u),
-        Err(why) => {
-            warn!("self-update off: {why}");
+        Err(off) => {
+            // Only what the owner should act on is one of 最近的问题.
+            if off.problem {
+                warn!("self-update off: {}", off.why);
+            } else {
+                log!("self-update off: {}", off.why);
+            }
             None
         }
     };
@@ -293,8 +348,10 @@ pub async fn run(cfg: Config, shutdown: impl Future<Output = ()>) -> Result<(), 
                 }
             }
             Some(r) = release_rx.recv() => {
-                if let Some(line) = updater.as_mut().and_then(|u| u.checked(r)) {
-                    log!("{line}");
+                match updater.as_mut().map(|u| u.checked(r)) {
+                    Some(Ok(Some(line))) => log!("{line}"),
+                    Some(Err(e)) => warn!("{e}"),
+                    _ => {}
                 }
             }
             _ = update_check.tick() => {
@@ -574,7 +631,7 @@ impl Daemon {
             let ws = match conn {
                 Ok(Ok((ws, _))) => ws,
                 Ok(Err(e)) => {
-                    let _ = tx.send(LinkEvent::Closed(epoch, format!("connect: {e}")));
+                    let _ = tx.send(LinkEvent::Closed(epoch, connect_error(&e, &cfg)));
                     return;
                 }
                 Err(_) => {
@@ -598,7 +655,15 @@ impl Daemon {
                     Some(Ok(Message::Text(t))) => {
                         let _ = tx.send(LinkEvent::Frame(epoch, t.to_string()));
                     }
-                    Some(Ok(Message::Close(_))) | None => break "closed by server".to_string(),
+                    Some(Ok(Message::Close(frame))) => {
+                        break closed_reason(
+                            frame
+                                .as_ref()
+                                .map(|f| (u16::from(f.code), f.reason.as_str())),
+                            &cfg,
+                        );
+                    }
+                    None => break closed_reason(None, &cfg),
                     Some(Ok(_)) => {}
                     Some(Err(e)) => break format!("read: {e}"),
                 }
@@ -683,8 +748,17 @@ impl Daemon {
                 if let Some(id) = &self.cfg.machine_id
                     && id != &machine_id
                 {
-                    warn!("server machine id differs from config machine_id");
+                    warn!(
+                        "the server knows this computer as machine {}, the config's machine_id is {}",
+                        crate::chat_run::safe_word(&machine_id),
+                        crate::chat_run::safe_word(id)
+                    );
                 }
+                log!(
+                    "connected to {} as machine {}",
+                    self.cfg.server_url,
+                    crate::chat_run::safe_word(&machine_id)
+                );
                 self.welcomed = true;
                 self.backoff_ms = 500;
                 let known: HashMap<String, u64> =
@@ -786,6 +860,12 @@ impl Daemon {
                     self.gc(&run_id);
                 }
             }
+            Down::Error { error } if error.code == "unauthorized" => warn!(
+                "server error {}: {}: {}",
+                error.code,
+                error.message,
+                token_hint(&self.cfg)
+            ),
             Down::Error { error } => warn!("server error {}: {}", error.code, error.message),
             // 1.1 interaction loop: one `<teamchat-event>` user turn; the runtime answers
             // `input.accepted` as for `run.input`. A run that has ended takes nothing (BotDesk
@@ -1077,7 +1157,15 @@ impl Daemon {
                         // The status only: the run's error is the CLI's text, and only the
                         // run's own redactor knows every value the run learned.
                         if d.status == "failed" {
-                            warn!("run {id} done: failed");
+                            // Fixed words only (the kind the daemon classified, never the
+                            // failure's text).
+                            let kind = d.failure.as_ref().map_or(failure_kind::OTHER, |f| &f.kind);
+                            warn!(
+                                "run {id} done: failed ({}, runtime {}, exit {})",
+                                crate::chat_run::safe_word(kind),
+                                crate::chat_run::safe_word(r.runtime.as_deref().unwrap_or("-")),
+                                d.exit_code.map_or("-".to_string(), |c| c.to_string())
+                            );
                         } else {
                             log!("run {id} done: {}", d.status);
                         }
@@ -1420,6 +1508,66 @@ fn note_sign_in(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn link_cfg() -> Config {
+        Config::parse(
+            "server_url = \"https://chat.example\"\ntoken_file = \"/etc/x/token\"\n[runtimes.claude]\nkind = \"claude\"\n",
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn a_closed_link_says_the_servers_code_and_what_to_do() {
+        let cfg = link_cfg();
+        assert_eq!(closed_reason(None, &cfg), "closed by server");
+        assert_eq!(
+            closed_reason(Some((4003, "no frames for 90 s")), &cfg),
+            "closed by server (code 4003: no frames for 90 s)"
+        );
+        assert_eq!(
+            closed_reason(Some((1006, "")), &cfg),
+            "closed by server (code 1006)"
+        );
+        let replaced = closed_reason(Some((4002, "replaced by a new link")), &cfg);
+        assert!(
+            replaced.starts_with("closed by server (code 4002: replaced by a new link)"),
+            "{replaced}"
+        );
+        assert!(replaced.contains("another daemon"), "{replaced}");
+        let refused = closed_reason(Some((4001, "unauthorized")), &cfg);
+        assert!(refused.contains("token_file"), "{refused}");
+        assert!(refused.contains("token"), "{refused}");
+        // One line, whatever the server sent.
+        let odd = closed_reason(Some((4000, "a\nb")), &cfg);
+        assert_eq!(odd, "closed by server (code 4000: ab)");
+    }
+
+    #[test]
+    fn a_refused_connect_names_the_token_file_or_the_server_url() {
+        use tokio_tungstenite::tungstenite::{Error, http::Response};
+        let cfg = link_cfg();
+        let http =
+            |s: u16| Error::Http(Box::new(Response::builder().status(s).body(None).unwrap()));
+        let refused = connect_error(&http(401), &cfg);
+        assert!(
+            refused.contains("refused the machine token (HTTP 401)"),
+            "{refused}"
+        );
+        assert!(
+            refused.contains(&cfg.token_file.display().to_string()),
+            "{refused}"
+        );
+        let missing = connect_error(&http(404), &cfg);
+        assert!(missing.contains("server_url") && missing.contains("https://chat.example"));
+        assert_eq!(
+            connect_error(&http(502), &cfg),
+            "connect: the server answered HTTP 502"
+        );
+        assert_eq!(
+            connect_error(&Error::ConnectionClosed, &cfg),
+            format!("connect: {}", Error::ConnectionClosed)
+        );
+    }
 
     /// The daemon answers `group.list` and `groupId` itself, so it says it reads other groups.
     #[test]

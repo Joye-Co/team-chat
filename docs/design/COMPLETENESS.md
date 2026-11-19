@@ -1,4 +1,4 @@
-# TeamChat completeness spec
+# Completeness spec
 
 Status: binding. Engineers implement this spec. Reviewers accept a screen only when it passes the checklist in section 4.
 It wins over `docs/design/NATIVE.md` and `docs/DESIGN.md` where they differ. The tokens of section 1 live in
@@ -7,7 +7,7 @@ It wins over `docs/design/NATIVE.md` and `docs/DESIGN.md` where they differ. The
 Note: the audit folders named below (`completeness/shadcn-bar/`, `component-system/`, `main-window/`, `audit-pages/`,
 `settings/`, `overlays/`, `content/`) hold the measurements and scripts behind this spec. They are not in this repository.
 
-Scope: the macOS client (Rust GPUI + gpui-component 0.8.1), branch `origin/v12/native`. The style stays pure black and white, like shadcn/ui new-york-v4 neutral. This spec does not ask for a new style. It asks for **finish**: every region designed, every state drawn, every value on one scale, nothing that reads as a draft.
+Scope: the desktop client on macOS and Windows (Rust GPUI + gpui-component 0.8.1; the Windows differences are in [WINDOWS.md](WINDOWS.md)), on `main`. The style stays pure black and white, like shadcn/ui new-york-v4 neutral. This spec does not ask for a new style. It asks for **finish**: every region designed, every state drawn, every value on one scale, nothing that reads as a draft.
 
 Keep the Mac client structure: the separate Settings window (640 wide, toolbar tab strip), sheets that drop from the toolbar edge, the toolbar title, the flush sidebar with traffic lights. Section 2.1 gives the coordinates.
 
@@ -33,7 +33,7 @@ The audits used two scales: the shadcn web scale (14 body, 36 controls) and a Ma
 | D8 | Form anatomy | One grouped FormRow in Settings **and** in every sheet (label left, control right). A textarea is a full-width row in the same group. | Settings and overlay audits both accept it; it keeps the Mac look. |
 | D9 | Page title | The Mac toolbar title (16 medium + 12 muted subtitle) is the page title of every main-window page. No second 24 px title in the content. 24 px titles appear only on full-window screens (login) and the member profile hero. | Keeps the Mac toolbar title; removes duplicate titles. |
 | D10 | Selected row | Muted fill (#f5f5f5 light / #262626 dark) + font-medium, radius 6 or 8. Never an inverted black row. | Today the palette, start-dm and mention popup use black rows and the sidebar uses gray. |
-| D11 | Cancel button | Outline variant (border + background). The secondary gray fill is not used for Cancel. | A disabled primary at 50% opacity must not look like Cancel. |
+| D11 | Cancel button | Outline variant. Owner decision 2026-11-06: the outline variant is a Mac push button, the foreground at 8 % as its fill (`push`; hover 12 %, pressed 16 %), with no border line and no shadow: a border on every 编辑… / 取消 is noise. Read every "outline" button in this file as this look. It is a tint of the text color, so it shows on the window, a group box and a sheet in both modes; secondary is the opaque `muted` fill and is not used for Cancel. | A disabled primary at 50% opacity must not look like Cancel. |
 | D12 | Progress | One Progress: h4, radius full, track = primary at 20%, value = primary. | Fixes the dark-mode inversion and the 3 progress styles. |
 | D13 | Right pane | One width for every right pane (inspector, 改动, side chat, 群资料, the live pane 实时查看 and the artifact pane): 400 by default. A drag on the pane's leading edge resizes it from 320 to 960 (rubber band past the bounds, double-click resets); the width is shared by every pane kind and remembered, so the column never jumps when one pane replaces another. Command and output boxes never wrap or clip a long line: it scrolls sideways inside the box, with a scrollbar on the box's bottom edge whenever a line is cut. (Owner decision 2026-11-10; replaces the 320 / 400 split of v14.) | Three widths (320 / 400 / 520) made the column jump between panes; a cut command line read as truncated. |
 | D14 | Error text (owner decision v16) | Every error says its words in the foreground color with a red icon, the failed message ("没有发出") too. Red text is never the only carrier. | One error recipe (2.15). |
@@ -51,7 +51,7 @@ The audits used two scales: the shadcn web scale (14 body, 36 controls) and a Ma
 
 ### 1.1 Tokens: one module
 
-- One token module: `ui/native/tokens.rs`. `theme.rs` `size::`, `radius::` and `type_scale::` become aliases, then are deleted.
+- One token module: `ui/native/tokens.rs`. Sizes, radii and text sizes live only there (`theme.rs` no longer has `size::`, `radius::` or `type_scale::`). Motion durations live in `theme::motion` (`apps/desktop/src/theme.rs`) and card timings in `tokens::card_v21`.
 - One color struct. `theme::apply` writes gpui-component `ThemeColor` in **one** pass (today 3 passes: base, v12/kit, v12/shell).
 - Check: `rg 'pub const' apps/desktop/src` finds heights, radii and text sizes only in `tokens.rs`.
 - Check: a test counts `px(` literals in `views/`. Today 1408. The count can only go down. Target for `.rounded(px(`, `.text_size(px(`, `.gap(px(` and `.h(px(` in views: 0.
@@ -68,7 +68,7 @@ The audits used two scales: the shadcn web scale (14 body, 36 controls) and a Ma
 | accent | #f5f5f5 | #262626 | Same value as muted. Menu and palette highlight |
 | muted-foreground | #737373 | #a1a1a1 | **All** secondary text, placeholders, meta, timestamps |
 | border | #e5e5e5 | rgb(255 255 255 / 16%) (owner decision v15: raised until ≥ 1.5:1) | **All** 1 px lines: toolbar border, pane borders, separators, frames |
-| input | #e5e5e5 | rgb(255 255 255 / 20%) | Input and outline button border, switch OFF track |
+| input | #e5e5e5 | rgb(255 255 255 / 20%) | Input and select border, switch OFF track |
 | ring | #a1a1a1 | #737373 | Focus ring, 3 px at 50% |
 | primary | #171717 | #e5e5e5 | Primary button, switch ON track, Progress value, selected chart bar |
 | primary-foreground | #fafafa | #171717 | Text on primary |
@@ -154,7 +154,7 @@ Agent avatars use a squircle at radius = size x 0.25 (8 at 32). Human avatars ar
 
 | Shadow | Value | On |
 |---|---|---|
-| xs | 0 1px 2px rgb(0 0 0 / .05) | input, outline button, KPI card |
+| xs | 0 1px 2px rgb(0 0 0 / .05) | input, select, KPI card |
 | sm | 0 1px 3px rgb(0 0 0 / .1), 0 1px 2px -1px rgb(0 0 0 / .1) | card, active segmented trigger |
 | md | 0 4px 6px -1px rgb(0 0 0 / .1), 0 2px 4px -2px rgb(0 0 0 / .1) | menu, popover, tooltip, toast, palette |
 | lg | 0 10px 15px -3px rgb(0 0 0 / .1), 0 4px 6px -4px rgb(0 0 0 / .1) | sheet, alert |
@@ -165,7 +165,7 @@ Elevation has 3 levels: content (none, xs, sm), float (md), modal (lg).
 
 | Control | Size | Detail |
 |---|---|---|
-| Button default | h32, px16 (px12 with icon), radius 8, 14 medium, icon 16, gap 8 | Variants: default (primary), outline, secondary (muted fill), ghost, destructive (red fill, white text), link. Outline hover (v16, K-04): `control_hover` = accent in light; in dark the input token at 50 % over the card fill, so the step over the dark control fill is visible |
+| Button default | h32, px16 (px12 with icon), radius 8, 14 medium, icon 16, gap 8 | Variants: default (primary), outline (D11: the foreground at 8 %, no border, no shadow; hover 12 %, pressed 16 %), secondary (muted fill), ghost, destructive (red fill, white text), link. Field-like buttons (a select) keep the input's fill, 1 px border and shadow xs; their hover (v16, K-04) is `control_hover` = accent in light; in dark the input token at 50 % over the card fill, so the step over the dark control fill is visible |
 | Button sm | h28, px12 | In form rows, table cells, card footers in dense cards |
 | Button lg | h36, px24 | Login, empty-state CTA in a full page, composer Send |
 | Icon button | 32 (sm 28), radius 8, icon 16 | Ghost in toolbars and rows |
@@ -261,7 +261,7 @@ y 0-52     traffic lights │ toolbar: title + actions (one band, border-b at y 
 - **Diagram viewer**: a 560 sheet (2.9) under the toolbar (y 52); text never below 12 (it scrolls instead).
 - **In-thread card**: width = min(640, text column width), x = text column (332). Every card, attachment item, reference block and embed in one thread has this one width. Galleries use the same width or exact halves (2 columns, gap 16).
 - **Card header slots** (every card kind: Card v2, in-thread, interact, web artifact): StatusBadge + title; meta 12 muted line; time 12 muted, right-aligned in one column; action top right. The author row stays outside the card in a thread and inside it on Home and in notifications, in the same slot.
-- **Working card** (one component, `views/timeline/plan.rs` `WorkingCard`, used by the thread and Card v2): header = avatar 24 + "<member> 正在做：<current step>" 14 medium (no plan: "<member> 在做") + StatusBadge (spinner, "在做 3/5") at the right; content = Progress h4 + "3/5" 12 muted tabular (only with a plan), then the steps; footer = elapsed and start time 12 muted + ghost sm 查看 and **outline** sm 停止… (owner decision v15). In a thread the card sits on the text column (x 332) and its header avatar names the member; the gutter stays empty. While 实时查看 shows the run, the thread keeps only the card's header (v16): the same avatar, title and StatusBadge (已暂停 while someone holds its computer) and "在右侧打开" 12 muted.
+- **Working card** (one component, `views/timeline/plan.rs` `WorkingCard`, used by the thread and Card v2): header = avatar 24 + "<member> 正在做：<current step>" 14 medium (no plan: "<member> 在做"; a run that is held reads "<member> 停在：<current step>" and one that waits "<member>：<current step>", so the title never says 正在做 beside a badge that says it is not) + StatusBadge (spinner, "在做 3/5") at the right; content = Progress h4 + "3/5" 12 muted tabular (only with a plan), then the steps; footer = elapsed and start time 12 muted + ghost sm 查看 and **outline** sm 停止… (owner decision v15). In a thread the card sits on the text column (x 332) and its header avatar names the member; the gutter stays empty. While 实时查看 shows the run, the thread keeps only the card's header (v16): the same avatar, title and StatusBadge (已暂停 while someone holds its computer) and "在右侧打开" 12 muted.
 - **KPI card**: description = label 14 muted; title = number 30 semibold tabular (24 when narrower than 250); action = trend Badge (outline, 12 icon); footer 2 lines (14 medium + icon 16, then 14 muted), gap 6. KPI cards sit in an equal grid, gap 16, shadow-xs.
 
 ### 2.5 Right pane (inspector, rail, side chat)
@@ -271,7 +271,7 @@ y 0-52     traffic lights │ toolbar: title + actions (one band, border-b at y 
 - Section: GroupLabel (12 medium muted, h32) with an optional 28 ghost action at the right; then a DescriptionList: label 14 muted in a 112 column at x 1136, value 14 foreground from x 1256, left-aligned, one line, truncate with tooltip; a person value = avatar 16 + name (the name keeps priority; the role truncates first).
 - **Topic inspector**: the same fixed sections in every topic, in this order (template: refs-card-step and topic-v2): 状态 (StatusBadge, Progress), 负责 / 提出 (people), 计划 (steps), 改动, 产出 (artifact rows), 决定, 在哪干活 (machine), 时间和花费. A section with no data shows one 16 icon + 14 muted line ("还没有计划"), and never disappears; its action ("指派" for an empty 负责) is the section header's ghost action. 计划 shows one block per member at work, each led by the member. Footer from the state: "标记完成" (primary) only while nothing waits on a review, an answer or a merge; "交给…" (outline) always, full width.
 - **Home rail**: only data the main pane does not show (排队 schedule, this week KPIs as DescriptionList, machines). Never the same items as the main list.
-- **Side chat**: header title "单独问 <name>", description "只有你能看到" 12 muted (once the member has read the 话题: "只有你能看到 · 读过 10:20 之前的话题", never a line in the body), member select h28 and close 32 in the header. Body: the same message rows as the main thread (no bubbles). Empty: an Empty state (2.13) centered in the body with 2-3 suggested questions as outline sm buttons. Composer docked at the bottom.
+- **Side chat**: header title "单独问 <name>", description "只有你能看到" 12 muted (once the member has read the 话题: "只有你能看到 · 读到 10:20", never a line in the body), member select h28 and close 32 in the header. Body: the same message rows as the main thread (no bubbles). Empty: an Empty state (2.13) centered in the body with 2-3 suggested questions as outline sm buttons. Composer docked at the bottom.
 
 ### 2.6 List row
 
@@ -329,7 +329,7 @@ y 0-52     traffic lights │ toolbar: title + actions (one band, border-b at y 
 
 - **Menu**: float surface, radius 8, p 4, border, shadow md, opaque, min-w 128. Item h32, px 8, radius 6, 14 text, icon 16, gap 8, shortcut 12 muted at the right. GroupLabel 12 medium muted h28 px 8. Separator 1 px, mx -4, my 4. If any item in a menu is checkable, every item reserves the 16 + 8 check column; otherwise none does. Highlight = accent fill.
 - **Mention popup**: a menu anchored to the caret (left edge = caret x - 8, above the composer), w 320, max 8 rows, GroupLabel per group, selected = accent fill.
-- **Command palette** (search, switcher, ask): w 600, radius 10, float surface, shadow md. Input row h48, search icon 16, 16 text, border-b. List p 4: GroupLabel 12 medium muted h32; rows h32, radius 6: leading 16 icon or 16 avatar for the kind (topic, group, DM), title 14, meta 14 muted, StatusBadge at the right if any, time 12 muted tabular right-aligned at one x in every row, then a reserved 20 column for the ↩ hint (shown only on the selected row). Selected row = accent fill. Footer h40, border-t, 12 muted Kbd hints: "↑↓ 选择 · ↩ 打开 · esc 关闭"; when no row can be chosen (no match, failed, loading) only "esc 关闭". Max 8.5 visible rows, so a half row signals scroll; the panel height is header + rows + footer, never a row cut by the panel edge.
+- **Command palette** (search, switcher, ask): w 600, radius 10, float surface, shadow md. Input row h48, search icon 16, 16 text, border-b. List p 4: GroupLabel 12 medium muted h32; rows h32, radius 6: leading 16 icon or 16 avatar for the kind (topic, group, DM), title 14, meta 14 muted, StatusBadge at the right if any, time 12 muted tabular right-aligned at one x in every row, then a reserved 20 column for the ↩ hint (shown only on the selected row). Selected row = accent fill. Footer h40, border-t, 12 muted Kbd hints: "↑↓ 选择 · ↩ 打开 · esc 关闭"; the ↩ word says what Enter does on the selected row, so on a 交给 row of the ask palette it is that row's title ("↩ 交给 Ledger"), and the "⌘↩ 交给 Jojo 安排" hint is left out while that row is the selected one; when no row can be chosen (no match, failed, loading) only "esc 关闭". Max 8.5 visible rows, so a half row signals scroll; the panel height is header + rows + footer, never a row cut by the panel edge.
 - Palette states: empty query = recent list; no match = compact Empty ("没有找到“X”", one action); loading = 3 skeleton rows h32; error = Alert row with Retry.
 - Scope and target chips: max 200, truncate at the end with "…", full value in a tooltip.
 
@@ -659,7 +659,7 @@ Run every check on the light, dark and worst-case 1x PNG of a scene before the s
 - E1. Every list, table, pane and card region has a loading (skeleton at the real row height), empty (Empty component) and error (Alert with Retry) design, captured as its own scene.
 - E2. Each named state capture differs from its base screen in the state region (`diff.py` npx > 0) and shows an element named for the state.
 - E3. Every control shows default, hover, focus (3 px ring), disabled (50%), loading (spinner, width kept) and, for fields, error. F6 / ⌥Tab (⇧ back) move the focus between the window's regions: sidebar, thread, composer (v16, K-10). [visual; hover and focus are not in the current capture set]
-- E4. A disabled primary differs from Cancel (outline vs primary at 50%).
+- E4. A disabled primary differs from Cancel (the outline tint with full-strength text, D11, vs primary at 50%).
 - E5. Sheet height does not change when an error appears.
 
 ### F. Content

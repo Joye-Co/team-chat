@@ -68,6 +68,35 @@ expect ok "health check takes the expected version" "$D" staging --check-health 
 expect ok "release-check passes for the workspace version" "$ROOT/scripts/release-check.sh" "$(workspace_version)" --env staging
 expect fail "release-check fails for another version" "$ROOT/scripts/release-check.sh" 9.9.9
 
+# --- what a script says about a wrong call ------------------------------------------------------
+# An option without its value is named, not a silent exit 1.
+expect fail "release.sh --env without a value fails" "$ROOT/scripts/release.sh" 9.9.9 --env
+expect ok "and says which option" grep -qx 'error: --env needs a value' "$WORK/prev.log"
+expect fail "release.sh --asset without a value fails" "$ROOT/scripts/release.sh" 9.9.9 --dry-run --asset
+expect ok "and says which option" grep -qx 'error: --asset needs a value' "$WORK/prev.log"
+expect fail "test-dmg.sh --same-as without a value fails" "$ROOT/scripts/test-dmg.sh" --same-as
+expect ok "and says which option" grep -qx 'error: --same-as needs a value' "$WORK/prev.log"
+expect fail "github-webhook.sh --repo without a value fails" "$ROOT/scripts/github-webhook.sh" --repo
+expect ok "and says which option" grep -qx 'error: --repo needs a value' "$WORK/prev.log"
+# --help is the script's own header: all of it, no shell line, no comment sign.
+for s in release.sh release-check.sh deploy-server.sh setup-server.sh build-dmg.sh build-daemon.sh \
+  build-windows-installer.sh test-dmg.sh dev-desktop.sh ci-run.sh github-webhook.sh test-real-cli.sh; do
+  expect ok "$s --help" "$ROOT/scripts/$s" --help
+  expect ok "$s --help prints its header and nothing else" bash -c \
+    '[ -s "$1" ] && ! grep -qE "^#|^set -|^error:" "$1" && [ "$(tail -n 1 "$1")" = "$(awk "NR > 1 && !/^#/ { exit } { l = \$0 } END { sub(/^# ?/, \"\", l); print l }" "$2")" ]' \
+    _ "$WORK/prev.log" "$ROOT/scripts/$s"
+done
+expect ok "deploy-server.sh -h" "$D" -h
+# A missing tool: every one of the call is named, with where to get it.
+expect fail "need stops on missing tools" bash -c ". '$ROOT/scripts/lib.sh'; need jq no-such-tool-a no-such-tool-b"
+expect ok "and names each of them" bash -c "grep -q 'no-such-tool-a' '$WORK/prev.log' && grep -q 'no-such-tool-b' '$WORK/prev.log'"
+# ci-run.sh: a run that ran nothing is not a pass.
+expect fail "ci-run.sh fails when no directory ran the script" "$ROOT/scripts/ci-run.sh" test "$WORK/no-such-dir"
+expect ok "and names the directory it skipped" grep -q 'no-such-dir: no package.json, skipped' "$WORK/prev.log"
+mkdir -p "$WORK/pkg" && printf '{"scripts":{"hello":"true"}}\n' >"$WORK/pkg/package.json"
+expect ok "ci-run.sh runs a script that exists" "$ROOT/scripts/ci-run.sh" hello "$WORK/pkg" "$WORK/no-such-dir"
+expect fail "ci-run.sh fails when no package has the script" "$ROOT/scripts/ci-run.sh" no-such-script "$WORK/pkg"
+
 # --- release.sh --upload-only: each platform's file goes to its own route ---------------------
 # upload_stub <status>: answers every PUT with <status> when the admin secret is the test's
 # (401 otherwise) and writes what it got to $WORK/upload.json. STUB_MACOS and STUB_WINDOWS give
@@ -256,6 +285,7 @@ gh_stub() {
       if (p === "/v1/health") return Response.json({ ok: true, version: "gh" });
       if (p === "/repos/o/r/releases/latest" || p === "/repos/o/r/releases/tags/v9.9.9") return Response.json(v999);
       if (p === "/repos/o/r/releases/tags/v9.9.8") return Response.json(v998);
+      if (p.startsWith("/repos/o/limited/")) return new Response("rate limit", { status: 403 });
       if (p === `/dl/${name}`) return new Response(body);
       return new Response("not found", { status: 404 });
     } })' "$PORT" >"$WORK/stub.log" 2>&1 &
@@ -290,6 +320,22 @@ gh_stub
 expect ok "a matching download replaces the older daemon" install_daemon
 expect ok "with the release's file" is "$(cat "$HOST_DAEMON")" "$(printf '\177ELF the daemon of 9.9.9')"
 expect fail "a version that is not a release is refused" install_daemon --version 9.9
+# What stops the script says why, and never ends in a build of another version.
+expect fail "a named release that is not there stops" install_daemon --version 9.9.7
+cp "$WORK/out.log" "$WORK/said.log"
+expect ok "and says so, without building" bash -c "grep -q 'no release v9.9.7 in o/r' '$WORK/said.log' && ! grep -q building '$WORK/said.log'"
+expect fail "a GitHub that refuses stops" env DAEMON_REPO=o/limited GITHUB_API="http://127.0.0.1:$PORT" DAEMON_ARCH=x86_64 \
+  "$ROOT/scripts/runner/install-daemon.sh" --dest "$HOST_DAEMON"
+cp "$WORK/out.log" "$WORK/said.log"
+expect ok "and says the status" grep -q "GitHub answered HTTP 403 for o/limited" "$WORK/said.log"
+expect fail "a GitHub that cannot be reached stops" env DAEMON_REPO=o/r GITHUB_API="http://127.0.0.1:1" DAEMON_ARCH=x86_64 \
+  "$ROOT/scripts/runner/install-daemon.sh" --dest "$HOST_DAEMON"
+cp "$WORK/out.log" "$WORK/said.log"
+expect ok "and says it cannot reach it" grep -q "cannot reach http://127.0.0.1:1: " "$WORK/said.log"
+expect fail "an option without its value stops" install_daemon --version
+cp "$WORK/out.log" "$WORK/said.log"
+expect ok "and says which" grep -q -- "--version needs a value" "$WORK/said.log"
+expect ok "none of them touched the installed daemon" is "$(cat "$HOST_DAEMON")" "$(printf '\177ELF the daemon of 9.9.9')"
 # The service: none yet, one that starts a hand-built daemon elsewhere, one that starts this file.
 UNIT="$HOST/units/$(product slug)-daemon.service"
 expect ok "without a service" install_daemon

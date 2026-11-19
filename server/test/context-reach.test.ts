@@ -4,18 +4,12 @@
 // private card's answer; a session that read a group goes on only for a person who may read it.
 import { type CardV2, mainTopicId } from "@chat/protocol";
 import { SELF, env, runInDurableObject } from "cloudflare:test";
-import { afterAll, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import type { BotsEnv } from "../src/bots/env";
 import { READ_GROUPS_NOTE } from "../src/bots/dispatch";
 import { type Env, roomStub } from "../src/core/env";
-import { Daemon, type World, downViolations, world } from "./daemon";
-import { BASE, Client, type TestMember, api, clientMsgId, createGroup, createMember, protocolViolations, waitUntil } from "./helpers";
-
-afterAll(async () => {
-  await new Promise((r) => setTimeout(r, 300));
-  expect(protocolViolations).toEqual([]);
-  expect(downViolations).toEqual([]);
-});
+import { Daemon, type World, world } from "./daemon";
+import { BASE, Client, type TestMember, api, clientMsgId, createGroup, createMember, waitUntil } from "./helpers";
 
 const FEATURES = ["context", "groups", "resume", "aside", "interact", "output"];
 

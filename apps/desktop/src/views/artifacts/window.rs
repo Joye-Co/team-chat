@@ -323,7 +323,11 @@ fn on_event(
             notify_error(ca::LOAD_FAILED.to_string(), cx);
         }
         // inc-host: loads get the data; emits, asks and refs go to the page host.
-        e @ (E::Loaded { .. } | E::Emit { .. } | E::Ask { .. } | E::Ref { .. }) => {
+        e @ (E::Loaded { .. }
+        | E::Emit { .. }
+        | E::Ask { .. }
+        | E::Ref { .. }
+        | E::RequestsEnded { .. }) => {
             if provider.is_some() {
                 super::host::on_page_event(
                     super::host::PageRef::Window(artifact_id.to_string()),
@@ -362,7 +366,7 @@ pub(crate) fn finish_in_window(
     artifact_id: &str,
     version: u32,
     reply_id: &serde_json::Value,
-    result: Result<serde_json::Value, artifact_view::Reject>,
+    result: Result<serde_json::Value, artifact_view::Failure>,
     cx: &mut App,
 ) -> bool {
     #[cfg(any(target_os = "macos", windows))]

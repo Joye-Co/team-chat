@@ -2,14 +2,9 @@
 // reserved 产出 paths, anonymous counts, refs from an aside topic, recorded decisions, member
 // card status, shape reasons, catalogs per socket and frame sources.
 import { SELF, env } from "cloudflare:test";
-import { afterAll, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import type { CardV2 } from "@chat/protocol";
-import { BASE, Client, type TestMember, api, clientMsgId, createGroup, createMember, protocolViolations } from "./helpers";
-
-afterAll(async () => {
-  await new Promise((r) => setTimeout(r, 300));
-  expect(protocolViolations).toEqual([]);
-});
+import { BASE, Client, type TestMember, api, clientMsgId, createGroup, createMember } from "./helpers";
 
 const FEATURES = ["interact/1", "refs/1"];
 

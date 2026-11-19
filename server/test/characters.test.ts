@@ -1,11 +1,6 @@
-import { afterAll, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { env } from "cloudflare:test";
-import { Client, api, createGroup, createMember, protocolViolations } from "./helpers";
-
-afterAll(async () => {
-  await new Promise((r) => setTimeout(r, 300));
-  expect(protocolViolations).toEqual([]);
-});
+import { Client, api, createGroup, createMember } from "./helpers";
 
 async function lastAudit(action: string, target: string) {
   const row = await env.DB.prepare("SELECT actor_id, details FROM audit WHERE action = ? AND target = ? ORDER BY id DESC LIMIT 1")

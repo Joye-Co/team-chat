@@ -13,14 +13,15 @@ use gpui_component::menu::{DropdownMenu as _, PopupMenuItem};
 
 use chat_core::proto::usage::{Spend, TeamUsage};
 
-use super::{AdminView, model};
+use super::{AdminView, SymSize, model, sym_icon};
 use crate::{
     copy::{admin as m, fill},
     ui::{
         MemberAvatar, Sym,
         native::{
             Alert, AlertTone, Empty, NativeTextField, NativeType as _, PushSize, PushStyle,
-            Segment, Segmented, TruncText, card_surface, native_colors, progress, push_button,
+            Segment, Segmented, TruncText, native_colors, panel_card_surface, progress,
+            push_button,
             tokens::{avatar, height, layout, monitor as t, radius, space, text},
         },
     },
@@ -43,6 +44,15 @@ impl UsageRange {
             UsageRange::Week => m::USAGE_RANGE_WEEK,
             UsageRange::Month => m::USAGE_RANGE_MONTH,
             UsageRange::LastMonth => m::USAGE_RANGE_LAST_MONTH,
+        }
+    }
+
+    /// The range a number is compared with, in words: 上周, 上个月, 前一个月.
+    pub fn previous_word(self) -> &'static str {
+        match self {
+            UsageRange::Week => m::PREV_WEEK,
+            UsageRange::Month => m::PREV_MONTH,
+            UsageRange::LastMonth => m::PREV_LAST_MONTH,
         }
     }
 
@@ -134,7 +144,7 @@ pub(super) fn kpi_card(
     cx: &gpui::App,
 ) -> gpui::Div {
     let k = native_colors(cx);
-    card_surface(cx)
+    panel_card_surface(cx)
         .flex_1()
         .min_w(gpui::Pixels::ZERO)
         .p(space::S16)
@@ -404,8 +414,17 @@ impl AdminView {
         let Some(u) = self.usage.data.clone() else {
             return match &self.usage.error {
                 Some(e) => Alert::new(Sym::Failed, m::USAGE_FAILED)
+                    .on_surface()
                     .tone(AlertTone::Destructive)
                     .description(e.clone())
+                    .action(Self::retry_action(
+                        "usage-retry",
+                        |v, cx| {
+                            v.usage.error = None;
+                            v.fetch_usage(cx);
+                        },
+                        cx,
+                    ))
                     .into_any_element(),
                 None => super::overview::page_skeleton(cx).into_any_element(),
             };
@@ -494,12 +513,21 @@ impl AdminView {
                 m::USAGE_PER_TOPIC,
                 Sym::Topic,
                 usd(now_per),
-                if (now_per - prev_per).abs() < 0.005 {
-                    m::USAGE_PER_TOPIC_SAME.to_string()
-                } else if now_per < prev_per {
-                    fill(m::USAGE_PER_TOPIC_LESS, &[("d", &usd(prev_per - now_per))])
-                } else {
-                    fill(m::USAGE_PER_TOPIC_MORE, &[("d", &usd(now_per - prev_per))])
+                {
+                    let prev = self.usage.range.previous_word();
+                    if (now_per - prev_per).abs() < 0.005 {
+                        fill(m::USAGE_PER_TOPIC_SAME, &[("prev", prev)])
+                    } else if now_per < prev_per {
+                        fill(
+                            m::USAGE_PER_TOPIC_LESS,
+                            &[("prev", prev), ("d", &usd(prev_per - now_per))],
+                        )
+                    } else {
+                        fill(
+                            m::USAGE_PER_TOPIC_MORE,
+                            &[("prev", prev), ("d", &usd(now_per - prev_per))],
+                        )
+                    }
                 },
                 None,
                 cx,
@@ -539,8 +567,10 @@ impl AdminView {
         [
             k.label,
             k.label.opacity(0.62),
-            k.label.opacity(0.36),
-            k.label.opacity(0.16),
+            k.label.opacity(0.40),
+            // Even steps, so the two lightest can be told apart; the last still clears
+            // 1.5:1 on the card in both themes.
+            k.label.opacity(0.18),
         ]
     }
 
@@ -561,7 +591,6 @@ impl AdminView {
             .max(0.01)
             * 1.15;
         let days = u.daily.len().max(1);
-        let names: Vec<&str> = m::WEEKDAYS.split(',').collect();
         let today = crate::selftest::clock::local_now()
             .timestamp_millis()
             .max(0) as u64;
@@ -592,14 +621,8 @@ impl AdminView {
                 if today >= d.start && today < d.start + 86_400_000 {
                     m::ACTIVITY_TODAY.to_string()
                 } else if days <= 7 {
-                    t.map(|t| {
-                        names
-                            .get(t.weekday().num_days_from_monday() as usize)
-                            .copied()
-                            .unwrap_or("")
-                            .to_string()
-                    })
-                    .unwrap_or_default()
+                    t.map(|t| crate::copy::weekday(t.weekday()).to_string())
+                        .unwrap_or_default()
                 } else {
                     // A month's bars are too narrow for every date: the 1st and every 5th.
                     t.filter(|t| t.day() == 1 || t.day() % 5 == 0)
@@ -625,7 +648,11 @@ impl AdminView {
                         .items_center()
                         .when(days <= 7 && d.cost_usd > 0., |c| {
                             c.child(
+                                // On the card's own fill: the budget rule runs behind
+                                // the bars and never through a value.
                                 div()
+                                    .px(space::S2)
+                                    .bg(k.sheet)
                                     .n_footnote()
                                     .n_figures()
                                     .text_color(k.secondary)
@@ -652,6 +679,10 @@ impl AdminView {
                 )
                 .child(
                     div()
+                        .flex_none()
+                        .h(t::CHART_AXIS)
+                        .flex()
+                        .items_center()
                         .whitespace_nowrap()
                         .n_footnote()
                         .n_figures()
@@ -659,20 +690,20 @@ impl AdminView {
                         .child(label),
                 )
         });
-        // The budget per day, as a line across the bars.
-        let line = budget_cents.filter(|b| *b > 0).map(|b| {
-            let per_day = b as f64 / 100. / 7.;
+        // The budget per day, as a line across the bars. `budget_cents` is the budget of the
+        // whole range, so a day's share divides by the range's days.
+        let range_days = ((u.to.saturating_sub(u.from)) / 86_400_000).max(1) as f64;
+        let per_day = budget_cents
+            .filter(|b| *b > 0)
+            .map(|b| b as f64 / 100. / range_days);
+        let line = per_day.filter(|p| *p <= max).map(|per_day| {
             let frac = (1. - per_day / max).clamp(0., 1.) as f32;
-            let line = div()
-                .absolute()
-                .left_0()
-                .right_0()
-                .top(relative(frac * 0.86));
+            let line = div().absolute().left_0().right_0().top(relative(frac));
             // GPUI's Direct3D renderer draws nothing for a dashed border on a box
             // without a height (seen in the Windows screenshots): there the same
             // dashes are painted as quads across whatever width the chart has.
             if cfg!(target_os = "windows") {
-                let ink = k.amber;
+                let ink = k.secondary;
                 line.h(layout::BORDER).child(
                     gpui::canvas(
                         |_, _, _| {},
@@ -695,9 +726,37 @@ impl AdminView {
                     .size_full(),
                 )
             } else {
-                line.border_t_1().border_dashed().border_color(k.amber)
+                line.border_t_1().border_dashed().border_color(k.secondary)
             }
         });
+        // The rule lies over the bars' own area: the plot without its axis labels.
+        let line = line.map(|l| {
+            div()
+                .absolute()
+                .top_0()
+                .left_0()
+                .right_0()
+                .bottom(t::CHART_AXIS + space::S4)
+                .child(l)
+        });
+        // The rule is named in the legend: two dashes and 每日预算 $30.
+        let budget_legend =
+            per_day.map(|p| {
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(space::S6)
+                    .n_footnote()
+                    .n_figures()
+                    .text_color(k.secondary)
+                    .child(div().flex().gap(space::S2).children(
+                        (0..2).map(|_| div().w(space::S4).h(layout::BORDER).bg(k.secondary)),
+                    ))
+                    .child(fill(
+                        m::USAGE_BUDGET_LINE,
+                        &[("budget", &cents((p * 100.).round() as u64))],
+                    ))
+            });
         let legend = top
             .iter()
             .enumerate()
@@ -713,7 +772,7 @@ impl AdminView {
                     .child(div().size(t::SWATCH).rounded(radius::CHECKBOX).bg(c))
                     .child(n)
             });
-        card_surface(cx)
+        panel_card_surface(cx)
             .flex_1()
             .p(space::S24)
             .flex()
@@ -731,16 +790,20 @@ impl AdminView {
                             .font_weight(gpui::FontWeight::SEMIBOLD)
                             .child(m::USAGE_DAILY),
                     )
-                    .children(legend),
+                    .children(legend)
+                    .children(budget_legend),
             )
             .child(
+                // The plot grows with the card (it is as tall as 花在哪 beside it): no blank
+                // band under the axis.
                 div()
                     .relative()
-                    .h(height::LIST_ROW * 3.)
+                    .flex_1()
+                    .min_h(height::LIST_ROW * 3.)
                     .flex()
                     .gap(space::S4)
-                    .children(bars)
-                    .children(line),
+                    .children(line)
+                    .children(bars),
             )
             .into_any_element()
     }
@@ -811,11 +874,14 @@ impl AdminView {
             }
         }
         rows.sort_by(|a, b| b.2.total_cmp(&a.2));
-        let max = rows.iter().map(|r| r.2).fold(0., f64::max).max(0.01);
+        // Each bar is the model's share of the period: together they fill one track.
+        let total = rows.iter().map(|r| r.2).sum::<f64>().max(0.01);
         let any_estimate = rows.iter().any(|r| r.4 > 0.);
         let unpriced: u64 = rows.iter().map(|r| r.5).sum();
-        card_surface(cx)
+        panel_card_surface(cx)
             .flex_1()
+            // The notes wrap inside the card; a long one never widens it past the page.
+            .min_w(gpui::Pixels::ZERO)
             .p(space::S24)
             .flex()
             .flex_col()
@@ -860,23 +926,26 @@ impl AdminView {
                                         )
                                     })),
                             )
-                            .child(progress((cost / max) as f32, cx))
+                            .child(progress((cost / total) as f32, cx))
                     }),
             )
-            .when(any_estimate, |d| {
+            .when(any_estimate || unpriced > 0, |d| {
                 d.child(
                     div()
                         .mt(space::S4)
+                        .flex()
+                        .flex_col()
+                        .gap(space::S4)
                         .n_footnote()
                         .text_color(k.secondary)
-                        .child(m::USAGE_ESTIMATE_NOTE),
+                        .when(any_estimate, |d| d.child(m::USAGE_ESTIMATE_NOTE))
+                        .when(unpriced > 0, |d| {
+                            d.child(fill(
+                                m::USAGE_UNPRICED_NOTE,
+                                &[("tokens", &model::count_short(unpriced))],
+                            ))
+                        }),
                 )
-            })
-            .when(unpriced > 0, |d| {
-                d.child(div().n_footnote().text_color(k.secondary).child(fill(
-                    m::USAGE_UNPRICED_NOTE,
-                    &[("tokens", &model::count_short(unpriced))],
-                )))
             })
             .into_any_element()
     }
@@ -889,6 +958,8 @@ impl AdminView {
     ) -> AnyElement {
         let k = native_colors(cx);
         let tab = self.usage.tab;
+        let week = self.usage.range == UsageRange::Week;
+        let range_days = (u.to.saturating_sub(u.from) / 86_400_000).max(1);
         let view = cx.entity();
         let tabs = Segmented::new(
             "usage-tab",
@@ -976,7 +1047,15 @@ impl AdminView {
             ))
             .child(head_cell(m::USAGE_COL_COST, Some(t::COL_TOKENS), true))
             .when(tab == UsageTab::Bots, |d| {
-                d.child(head_cell(m::USAGE_COL_BUDGET, Some(t::COL_MEM), false))
+                d.child(head_cell(
+                    if week {
+                        m::USAGE_COL_BUDGET
+                    } else {
+                        m::USAGE_COL_BUDGET_RANGE
+                    },
+                    Some(t::COL_BUDGET),
+                    false,
+                ))
             })
             .child(head_cell(m::USAGE_COL_TOPICS, Some(t::COL_COUNT), true))
             .child(head_cell(m::USAGE_COL_PER_TOPIC, Some(t::COL_CPU), true))
@@ -995,9 +1074,16 @@ impl AdminView {
                 } else {
                     0.
                 };
+                // Budgets are weekly; a month's spend is set against the budget of its days,
+                // as the KPI card does.
+                let budget = budget.map(|b: u64| if week { b } else { b * range_days / 7 });
                 let pct = budget
                     .filter(|b| *b > 0)
                     .map(|b| s.cost_usd / (b as f64 / 100.));
+                let (near, over) = (
+                    pct.is_some_and(|p| (0.8..1.).contains(&p)),
+                    pct.is_some_and(|p| p >= 1.),
+                );
                 let view = cx.entity();
                 let (bid, bname) = (id.clone(), name.clone());
                 let more = (tab == UsageTab::Bots).then(|| {
@@ -1022,7 +1108,8 @@ impl AdminView {
                 });
                 let _ = bname;
                 div()
-                    .min_h(height::TABLE_ROW_COMPACT)
+                    // Two lines and an h28 button: the control row (§2.7).
+                    .min_h(height::TABLE_ROW_CONTROL)
                     .px(space::S4)
                     .flex()
                     .items_center()
@@ -1075,21 +1162,42 @@ impl AdminView {
                     .when(tab == UsageTab::Bots, |d| {
                         d.child(
                             div()
-                                .w(t::COL_MEM)
+                                .w(t::COL_BUDGET)
                                 .flex_none()
                                 .px(space::S12)
                                 .flex()
                                 .items_center()
                                 .gap(space::S8)
-                                .child(div().flex_1().child(progress(pct.unwrap_or(0.) as f32, cx)))
+                                // One track length in every row, so the bars compare: the
+                                // icon and the figures after it keep fixed slots. No budget,
+                                // no track: an empty one would read as 0 % used.
+                                .child(div().flex_1().children(pct.map(|p| progress(p as f32, cx))))
+                                // The state is on an icon, never on the text's color
+                                // (§1.3): amber when near the budget, red when at or over.
                                 .child(
                                     div()
+                                        .flex_none()
+                                        .w(SymSize::INLINE_SMALL.slot_px())
+                                        .flex()
+                                        .justify_center()
+                                        .when(near || over, |d| {
+                                            d.child(sym_icon(
+                                                Sym::Warning,
+                                                SymSize::INLINE_SMALL,
+                                                if over { k.red } else { k.amber },
+                                            ))
+                                        }),
+                                )
+                                .child(
+                                    div()
+                                        .flex_none()
+                                        .w(t::COL_BUDGET_LABEL)
+                                        .text_right()
+                                        .whitespace_nowrap()
                                         .n_footnote()
-                                        .text_color(if pct.is_some_and(|p| p >= 0.8) {
-                                            k.amber
-                                        } else {
-                                            k.secondary
-                                        })
+                                        .n_figures()
+                                        .text_color(if over { k.label } else { k.secondary })
+                                        .when(over, |d| d.font_weight(crate::theme::MEDIUM_WEIGHT))
                                         .child(match (pct, budget) {
                                             (Some(p), Some(b)) => fill(
                                                 m::USAGE_BUDGET_OF,
@@ -1136,23 +1244,48 @@ impl AdminView {
             .collect();
         let edit = self.usage.budget_for.clone().map(|id| {
             let (save, cancel) = (cx.entity(), cx.entity());
-            card_surface(cx)
+            panel_card_surface(cx)
                 .p(space::S16)
                 .flex()
                 .flex_col()
                 .gap(space::S8)
-                .child(div().n_headline().child(fill(
-                    m::USAGE_BUDGET_TITLE,
-                    &[("name", &self.member_name(&id))],
-                )))
                 .child(
+                    // One row, one control height (h28): what is edited at the left, the
+                    // number field (§2.8: 112 wide, `$` inside, right-aligned) and its two
+                    // buttons at the right.
                     div()
                         .flex()
                         .items_center()
                         .gap(space::S8)
-                        .child(div().flex_1().child(
-                            NativeTextField::new("usage-budget", &self.usage.budget).full_width(),
-                        ))
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w(gpui::Pixels::ZERO)
+                                .flex()
+                                .items_baseline()
+                                .gap(space::S8)
+                                .child(div().flex_none().n_headline().child(fill(
+                                    m::USAGE_BUDGET_TITLE,
+                                    &[("name", &self.member_name(&id))],
+                                )))
+                                .child(
+                                    TruncText::new(m::USAGE_BUDGET_NOTE)
+                                        .n_footnote()
+                                        .text_color(k.secondary),
+                                ),
+                        )
+                        .child(
+                            NativeTextField::new("usage-budget", &self.usage.budget)
+                                .size(crate::ui::native::FieldSize::Small)
+                                .width(crate::ui::native::metrics::NUMBER_FIELD)
+                                .align(gpui::TextAlign::Right)
+                                .leading(
+                                    div()
+                                        .n_body()
+                                        .text_color(k.secondary)
+                                        .child(m::USAGE_BUDGET_UNIT),
+                                ),
+                        )
                         .child(
                             push_button(
                                 "usage-budget-cancel",
@@ -1185,12 +1318,11 @@ impl AdminView {
                             }),
                         ),
                 )
-                .children(
-                    self.usage
-                        .budget_error
-                        .clone()
-                        .map(|e| Alert::new(Sym::Failed, e).tone(AlertTone::Destructive)),
-                )
+                .children(self.usage.budget_error.clone().map(|e| {
+                    Alert::new(Sym::Failed, e)
+                        .on_surface()
+                        .tone(AlertTone::Destructive)
+                }))
         });
         div()
             .flex()
@@ -1203,12 +1335,11 @@ impl AdminView {
                     .child(tabs)
                     .child(div().flex_1())
                     .when(tab == UsageTab::Bots, |d| {
-                        d.child(
-                            div()
-                                .n_footnote()
-                                .text_color(k.secondary)
-                                .child(m::USAGE_BUDGET_HINT),
-                        )
+                        d.child(div().n_footnote().text_color(k.secondary).child(if week {
+                            m::USAGE_BUDGET_HINT
+                        } else {
+                            m::USAGE_BUDGET_HINT_PRORATED
+                        }))
                     }),
             )
             .children(edit)

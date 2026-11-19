@@ -475,7 +475,7 @@ async fn the_real_clis_are_found_by_name_and_say_their_version() {
             Some(true)
         );
     }
-    let (report, _) = daemon::doctor::report(&cfg).await;
+    let (report, _) = daemon::doctor::report(&cfg, std::path::Path::new("daemon.toml"), None).await;
     assert!(!report.contains("NOT FOUND"), "{report}");
     assert!(report.contains("Claude Code"), "{report}");
     // Windows: the owner is told what a side chat of Codex can still do.

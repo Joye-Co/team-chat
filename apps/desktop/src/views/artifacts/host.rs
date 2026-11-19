@@ -25,8 +25,8 @@ use std::{
 };
 
 use artifact_view::{
-    ArtifactEvent, Capabilities, DataCause, EventDecl, EventKind, RefMenu, Reject, Snapshot,
-    VersionSpec, Viewer,
+    ArtifactEvent, Capabilities, DataCause, EventDecl, EventKind, Failure, RefMenu, Reject,
+    Snapshot, VersionSpec, Viewer,
 };
 use futures::StreamExt as _;
 use gpui::{App, AsyncApp, Global, Hsla, SharedString, WeakEntity, Window};
@@ -355,7 +355,13 @@ pub fn on_page_event(
         } => {
             if !user_action {
                 tracing::debug!(artifact_id, version, "page ask without user input dropped");
-                finish(&page, *version, reply_id, Err(Reject::NotAllowed), cx);
+                finish(
+                    &page,
+                    *version,
+                    reply_id,
+                    Err(Reject::NoUserAction.into()),
+                    cx,
+                );
                 return;
             }
             if let Some(cid) = send(
@@ -377,7 +383,17 @@ pub fn on_page_event(
             label,
             value,
             selector,
-        } => ask_about(artifact_id, *version, label, value, selector, window, cx),
+            user_action,
+        } => {
+            // Like emit and ask: only right after the viewer's own input in the page (the
+            // ⌥-click and the 就这里提问 button are such input). A page cannot put chips
+            // into the composer by itself. The bridge answered the page already.
+            if !user_action {
+                tracing::debug!(artifact_id, version, "page ref without user input dropped");
+                return;
+            }
+            ask_about(artifact_id, *version, label, value, selector, window, cx)
+        }
         _ => {}
     }
 }
@@ -422,7 +438,7 @@ pub fn finish_request(
     result: Result<Value, Reject>,
     cx: &mut App,
 ) {
-    finish(page, version, reply_id, result, cx);
+    finish(page, version, reply_id, result.map_err(Into::into), cx);
 }
 
 /// Sends one event now. Returns its client event id when it went out.
@@ -515,7 +531,7 @@ fn send(
                 PageSendError::Refused => Reject::Failed,
             };
             if let Some(id) = &reply_id {
-                finish(&page, version, id, Err(reject), cx);
+                finish(&page, version, id, Err(reject.into()), cx);
             }
             if e == PageSendError::Offline {
                 host(cx).bands.insert(
@@ -571,7 +587,7 @@ fn time_out(cid: &str, cx: &mut App) {
     };
     forget(host(cx), &p);
     if let Some(id) = &p.reply_id {
-        finish(&p.page, p.version, id, Err(Reject::Timeout), cx);
+        finish(&p.page, p.version, id, Err(Reject::Timeout.into()), cx);
     }
     cx.refresh_windows();
 }
@@ -581,7 +597,7 @@ fn finish(
     page: &PageRef,
     version: u32,
     reply_id: &Value,
-    result: Result<Value, Reject>,
+    result: Result<Value, Failure>,
     cx: &mut App,
 ) {
     #[cfg(test)]
@@ -625,7 +641,7 @@ pub fn on_signal(signal: PageSignal, cx: &mut App) {
                 {
                     let settled = match &result {
                         Ok(ack) => Ok(json!({ "eventId": ack.event_id })),
-                        Err(reason) => Err(reject_for(reason)),
+                        Err(reason) => Err(reject_for(reason).into()),
                     };
                     finish(&p.page, p.version, id, settled, cx);
                 }
@@ -671,7 +687,7 @@ pub fn on_signal(signal: PageSignal, cx: &mut App) {
                                 && let Some(id) = &p.reply_id
                                 && p.kind == PageEventKind::Ask
                             {
-                                finish(&p.page, p.version, id, Err(reject), cx);
+                                finish(&p.page, p.version, id, Err(reject.into()), cx);
                             }
                             refresh_at(OFFLINE_FOR, cx);
                         }
@@ -693,7 +709,7 @@ pub fn on_signal(signal: PageSignal, cx: &mut App) {
                     forget(host(cx), &p);
                     let reject = reject_for(&reason);
                     if let Some(id) = &p.reply_id {
-                        finish(&p.page, p.version, id, Err(reject), cx);
+                        finish(&p.page, p.version, id, Err(reject.into()), cx);
                     }
                     let until = Instant::now() + OFFLINE_FOR;
                     let band = match reject {
@@ -735,9 +751,9 @@ pub fn on_signal(signal: PageSignal, cx: &mut App) {
                 let result = if ok {
                     Ok(payload.unwrap_or(Value::Null))
                 } else if declined {
-                    Err(Reject::Declined)
+                    Err(Reject::Declined.into())
                 } else {
-                    Err(Reject::Failed)
+                    Err(Reject::Failed.into())
                 };
                 finish(&p.page, p.version, id, result, cx);
             }
@@ -872,11 +888,15 @@ pub fn store_and_push(artifact_id: &str, version: u32, snap: Snapshot, cx: &mut 
     }
     h.snapshots.insert(key, snap.clone());
     super::window::push_to_window(artifact_id, version, &snap, cx);
-    for e in web_embed::all(cx) {
-        let s = e.read(cx);
-        if s.artifact_id() == artifact_id && s.version() == version {
-            s.push_data(version, snap.clone());
-        }
+    let pages: Vec<_> = web_embed::all(cx)
+        .into_iter()
+        .filter(|e| {
+            let s = e.read(cx);
+            s.artifact_id() == artifact_id && s.version() == version
+        })
+        .collect();
+    for e in pages {
+        e.update(cx, |s, cx| s.push_data(version, snap.clone(), cx));
     }
 }
 
@@ -886,7 +906,7 @@ fn push_to(page: &PageRef, version: u32, snap: Snapshot, cx: &mut App) {
             super::window::push_to_window(id, version, &snap, cx);
         }
         PageRef::Embed(e) => {
-            let _ = e.read_with(cx, |s, _| s.push_data(version, snap));
+            let _ = e.update(cx, |s, cx| s.push_data(version, snap, cx));
         }
     }
 }
@@ -1610,7 +1630,7 @@ pub fn version_added(artifact_id: &str, version: u32, cx: &mut App) {
     }
     for p in open {
         if let Some(id) = &p.reply_id {
-            finish(&p.page, p.version, id, Err(Reject::Reloaded), cx);
+            finish(&p.page, p.version, id, Err(Reject::Reloaded.into()), cx);
         }
     }
     host(cx).bands.remove(&(artifact_id.to_string(), before));
@@ -1674,7 +1694,7 @@ mod tests {
     use crate::data::page_host::{PageAck, PageEventDecl};
     use std::cell::RefCell;
 
-    type Finished = Vec<(Value, Result<Value, Reject>)>;
+    type Finished = Vec<(Value, Result<Value, Failure>)>;
 
     thread_local! {
         /// Page requests [`finish`] answered on this test's thread.
@@ -1863,7 +1883,10 @@ mod tests {
                 },
                 cx,
             );
-            assert_eq!(finished(), vec![(json!(3), Err(Reject::RateLimited))]);
+            assert_eq!(
+                finished(),
+                vec![(json!(3), Err(Reject::RateLimited.into()))]
+            );
         });
     }
 
@@ -1875,7 +1898,7 @@ mod tests {
             let cid = ask(PageRef::Embed(WeakEntity::new_invalid()), 11, cx);
             ack(&cid, "ev-1", ExpectMode::Run, cx);
             version_added(ART, 4, cx);
-            assert_eq!(finished(), vec![(json!(11), Err(Reject::Reloaded))]);
+            assert_eq!(finished(), vec![(json!(11), Err(Reject::Reloaded.into()))]);
             assert!(host(cx).pending.is_empty() && host(cx).by_event.is_empty());
             // Its later timeout or reply finds nothing open.
             time_out(&cid, cx);
@@ -1890,7 +1913,10 @@ mod tests {
             start_host(cx);
             let cid = ask(PageRef::Window(ART.into()), 9, cx);
             ack(&cid, "ev-1", ExpectMode::None, cx);
-            assert_eq!(finished(), vec![(json!(9), Err(Reject::RateLimited))]);
+            assert_eq!(
+                finished(),
+                vec![(json!(9), Err(Reject::RateLimited.into()))]
+            );
             let name = author_name(host(cx).provider.clone().unwrap().as_ref(), ART, 3);
             assert_eq!(
                 band(ART, 3, cx),
@@ -1899,7 +1925,7 @@ mod tests {
             // Offline still says 不在线.
             let cid = ask(PageRef::Window(ART.into()), 10, cx);
             ack(&cid, "ev-2", ExpectMode::Offline, cx);
-            assert_eq!(finished(), vec![(json!(10), Err(Reject::Offline))]);
+            assert_eq!(finished(), vec![(json!(10), Err(Reject::Offline.into()))]);
             assert_eq!(
                 band(ART, 3, cx),
                 Some(BandView::Failed(fill(cp::PAGE_OFFLINE, &[("name", &name)])))

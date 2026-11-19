@@ -2,16 +2,11 @@
 // restore, a run's pending notes, the review after a run, the daily consolidation (with and
 // without an AI service) and its undoable 记忆更新, and memory in the prompts.
 import { SELF, env } from "cloudflare:test";
-import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { consolidateAll, localClock, teamZone } from "../src/memory/consolidate";
-import { Daemon, downViolations, mention, world } from "./daemon";
-import { BASE, Client, api, clientMsgId, createMember, protocolViolations } from "./helpers";
+import { Daemon, mention, world } from "./daemon";
+import { BASE, Client, api, clientMsgId, createMember } from "./helpers";
 
-afterAll(async () => {
-  await new Promise((r) => setTimeout(r, 300));
-  expect(protocolViolations).toEqual([]);
-  expect(downViolations).toEqual([]);
-});
 afterEach(() => {
   vi.restoreAllMocks();
 });

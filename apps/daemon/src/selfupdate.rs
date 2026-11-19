@@ -197,6 +197,8 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// failing at start must not download on every start), then how often.
 pub const FIRST_CHECK: Duration = Duration::from_secs(10 * 60);
 pub const CHECK_EVERY: Duration = Duration::from_secs(60 * 60);
+/// How a check that did not get to the server starts. The link's own warning covers that.
+const UNREACHABLE: &str = "cannot reach the server";
 /// A download of the program may take this long.
 const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 
@@ -222,15 +224,33 @@ pub fn is_newer(latest: &str, own: &str) -> bool {
     l > o || (l == o && pre)
 }
 
+/// Why the daemon does not update itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Off {
+    pub why: &'static str,
+    /// False when this is how the machine is meant to run (the owner's own setting, or a system
+    /// where the app brings the daemon): logged, but not one of 最近的问题.
+    pub problem: bool,
+}
+
 /// Why the daemon does not update itself, or None when it does. `service` says whether a
 /// service manager started it: a daemon started by hand would just stop after an update.
-pub fn off_reason(enabled: bool, platform: Option<&str>, service: bool) -> Option<&'static str> {
+pub fn off_reason(enabled: bool, platform: Option<&str>, service: bool) -> Option<Off> {
     if !enabled {
-        Some("self_update = false in the config")
+        Some(Off {
+            why: "self_update = false in the config",
+            problem: false,
+        })
     } else if platform.is_none() {
-        Some("the app updates the daemon on this system")
+        Some(Off {
+            why: "the app updates the daemon on this system",
+            problem: false,
+        })
     } else if !service {
-        Some("not started by systemd (a daemon started by hand would not come back)")
+        Some(Off {
+            why: "not started by systemd (a daemon started by hand would not come back)",
+            problem: true,
+        })
     } else {
         None
     }
@@ -274,7 +294,7 @@ pub async fn fetch(
         .bearer_auth(token)
         .send()
         .await
-        .map_err(|e| format!("cannot reach the server: {}", e.without_url()))?;
+        .map_err(|e| format!("{UNREACHABLE}: {}", e.without_url()))?;
     match res.status().as_u16() {
         404 => return Ok(None),
         200..=299 => {}
@@ -283,7 +303,7 @@ pub async fn fetch(
     let body = res
         .bytes()
         .await
-        .map_err(|e| format!("cannot reach the server: {}", e.without_url()))?;
+        .map_err(|e| format!("{UNREACHABLE}: {}", e.without_url()))?;
     let info: chat_protocol::updates::UpdateInfo = serde_json::from_slice(&body)
         .map_err(|e| format!("the update check answered no release: {e}"))?;
     info.validate().map_err(|e| format!("bad release: {e}"))?;
@@ -402,12 +422,15 @@ pub struct Updater {
 
 impl Updater {
     /// The updater of this daemon, or None (with the reason) when it does not update itself.
-    pub fn new(enabled: bool) -> Result<Updater, &'static str> {
+    pub fn new(enabled: bool) -> Result<Updater, Off> {
         let platform = release_platform();
-        if let Some(why) = off_reason(enabled, platform, under_service_manager()) {
-            return Err(why);
+        if let Some(off) = off_reason(enabled, platform, under_service_manager()) {
+            return Err(off);
         }
-        let exe = std::env::current_exe().map_err(|_| "the daemon's program file is unknown")?;
+        let exe = std::env::current_exe().map_err(|_| Off {
+            why: "the daemon's program file is unknown",
+            problem: true,
+        })?;
         Ok(Updater::at(platform.unwrap_or_default(), exe))
     }
 
@@ -453,8 +476,10 @@ impl Updater {
         });
     }
 
-    /// The result of a check. Returns what to log.
-    pub fn checked(&mut self, r: Checked) -> Option<String> {
+    /// The result of a check. Returns what to log: `Err` is a problem the owner should see
+    /// (a release that cannot be used or written), `Ok` a plain line. A server that could not
+    /// be reached is a plain line: the link's own warning says it.
+    pub fn checked(&mut self, r: Checked) -> Result<Option<String>, String> {
         self.checking = false;
         match r {
             Ok(Some(s)) => {
@@ -463,10 +488,11 @@ impl Updater {
                     s.version
                 );
                 self.staged = Some(s);
-                Some(line)
+                Ok(Some(line))
             }
-            Ok(None) => None,
-            Err(e) => Some(format!("update check: {e}")),
+            Ok(None) => Ok(None),
+            Err(e) if e.starts_with(UNREACHABLE) => Ok(Some(format!("update check: {e}"))),
+            Err(e) => Err(format!("update check: {e}")),
         }
     }
 
@@ -524,17 +550,13 @@ mod update_tests {
     #[test]
     fn it_updates_itself_only_when_on_installed_alone_under_systemd() {
         assert_eq!(off_reason(true, Some(PLATFORM), true), None);
-        assert!(
-            off_reason(false, Some(PLATFORM), true)
-                .unwrap()
-                .contains("self_update")
-        );
-        assert!(off_reason(true, None, true).unwrap().contains("app"));
-        assert!(
-            off_reason(true, Some(PLATFORM), false)
-                .unwrap()
-                .contains("systemd")
-        );
+        // The owner's own setting and a system where the app brings the daemon: not problems.
+        let off = off_reason(false, Some(PLATFORM), true).unwrap();
+        assert!(off.why.contains("self_update") && !off.problem);
+        let off = off_reason(true, None, true).unwrap();
+        assert!(off.why.contains("app") && !off.problem);
+        let off = off_reason(true, Some(PLATFORM), false).unwrap();
+        assert!(off.why.contains("systemd") && off.problem);
         assert_eq!(
             release_platform().is_some(),
             cfg!(all(target_os = "linux", target_arch = "x86_64"))
@@ -745,7 +767,7 @@ mod update_tests {
             version: version.into(),
             file,
         })));
-        assert!(line.unwrap().contains(version));
+        assert!(line.unwrap().unwrap().contains(version));
         (u, exe)
     }
 
@@ -793,12 +815,15 @@ mod update_tests {
         let mut u = Updater::at(PLATFORM, exe.clone());
         assert!(!staged_path(&exe).unwrap().exists());
         assert!(u.wants_check());
-        assert_eq!(u.checked(Ok(None)), None);
+        assert_eq!(u.checked(Ok(None)), Ok(None));
+        // A problem for 最近的问题; a server that is down is only logged.
         assert!(
             u.checked(Err("HTTP 500".into()))
-                .unwrap()
+                .unwrap_err()
                 .contains("HTTP 500")
         );
+        let down = u.checked(Err(format!("{UNREACHABLE}: timed out")));
+        assert!(down.unwrap().unwrap().contains("timed out"));
         assert!(u.wants_check());
         assert_eq!(u.install_when_idle(None), Ok(false));
     }

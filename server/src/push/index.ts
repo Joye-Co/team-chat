@@ -32,6 +32,7 @@ import {
   registerRoute,
 } from "../core/registry";
 import { CARD_EVENT_RPC } from "../cards2/index";
+import { takeHttpPost } from "../notify/messages";
 import { type PushEnv, apnsConfigured, sendApns } from "./apns";
 import { alertPayload, alertText, badgePayload, excerpt, quickActions } from "./payload";
 
@@ -473,9 +474,7 @@ registerRoute({
   auth: "member",
   async handler({ env, auth, params, body }): Promise<CardEventAck> {
     const a = auth as AuthContext;
-    if (!(await gatewayStub(env, a.memberId).rpc("http.post.take", { tokenId: a.tokenId }))) {
-      throw new ApiError("rate_limited", "too many posts");
-    }
+    await takeHttpPost(env, a);
     const req = await body(AnswerCardRequest);
     const group = await getGroup(env.DB, params.id);
     if (!group) throw new ApiError("not_found", "group not found");
