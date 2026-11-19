@@ -159,6 +159,19 @@ async fn windows_checks(
     let Some(handle) = main(cx) else {
         return check("windows_main_window", false);
     };
+    // F10 opens the first menu of the title bar from the keyboard, and F10 again closes it
+    // (the same handler a tap of Alt runs).
+    let menus_open = |cx: &mut AsyncApp| {
+        cx.update(|cx| super::menus::window_menu_bar(cx).read(cx).is_activated())
+    };
+    let _ = handle.update(cx, |_, window, _| window.activate_window());
+    pause(cx).await;
+    key(handle, "f10", cx);
+    pause(cx).await;
+    check("windows_f10_opens_the_menus", menus_open(cx));
+    key(handle, "f10", cx);
+    pause(cx).await;
+    check("windows_f10_again_closes_the_menus", !menus_open(cx));
     // The switch below must not write this run's choice into the person's settings.
     crate::views::settings::prefs::stop_saving();
     // The switch off: no icon, and the app would end with its last window.
@@ -195,6 +208,7 @@ async fn windows_checks(
 
 pub fn run(services: Services, report: PathBuf, finish: Finish, cx: &mut App) {
     cx.set_activation_policy(ActivationPolicy::Accessory);
+    super::stay_in_background(cx);
     super::restore(&services, cx);
     if let Err(error) = app::open_main_window(services.clone(), false, None, cx) {
         finish(
@@ -237,14 +251,8 @@ pub fn run(services: Services, report: PathBuf, finish: Finish, cx: &mut App) {
         };
 
         let restored = cx.update(|cx| services.nav.read(cx).place.clone());
-        check(
-            "restore_opens_first_group",
-            restored
-                == provider
-                    .groups()
-                    .first()
-                    .map(|g| Place::Group(g.id.clone())),
-        );
+        // Nothing is saved on a first start: `restore` opens 首页.
+        check("restore_opens_home", restored == Some(Place::Desk));
         check(
             "quick_switcher_opens",
             dialog_opens(handle, Box::new(QuickSwitch), cx).await,
@@ -332,10 +340,9 @@ pub fn run(services: Services, report: PathBuf, finish: Finish, cx: &mut App) {
 
         key(handle, crate::secondary!("1"), cx);
         pause(cx).await;
-        let first = provider
-            .groups()
-            .first()
-            .map(|g| Place::Group(g.id.clone()));
+        // ⌘1…⌘9 count the sidebar's rows: the 群, then the 私聊.
+        let order = super::sidebar_order(&provider.groups());
+        let first = order.first().cloned().map(Place::Group);
         let place = cx.update(|cx| services.nav.read(cx).place.clone());
         check(
             "cmd_1_key_opens_first_group",
@@ -344,7 +351,7 @@ pub fn run(services: Services, report: PathBuf, finish: Finish, cx: &mut App) {
 
         dispatch(handle, Box::new(OpenGroup2), cx);
         pause(cx).await;
-        let second = provider.groups().get(1).map(|g| Place::Group(g.id.clone()));
+        let second = order.get(1).cloned().map(Place::Group);
         let place = cx.update(|cx| services.nav.read(cx).place.clone());
         check(
             "cmd_2_opens_second_group",
@@ -617,15 +624,16 @@ pub mod scenes {
         cx: &mut App,
     ) -> Result<AnyWindowHandle, String> {
         over_main(services, content, cx, |services, window, cx| {
-            let group = services
-                .provider
-                .groups()
-                .into_iter()
-                .find(|g| g.kind == crate::data::GroupKind::Group);
-            if let Some(g) = group
-                && let Some(t) = services.provider.topics(&g.id).into_iter().next()
+            // The 话题 the window shows, so the sheet renames what is open.
+            let open = services.nav.read(cx).topic.clone();
+            if let Some((g, id)) = open
+                && let Some(t) = services
+                    .provider
+                    .topics(&g)
+                    .into_iter()
+                    .find(|t| t.id == id)
             {
-                crate::views::topic_menu::open_rename(services, &g.id, &t, window, cx);
+                crate::views::topic_menu::open_rename(services, &g, &t, window, cx);
             }
         })
     }

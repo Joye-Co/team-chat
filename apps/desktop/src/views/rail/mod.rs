@@ -74,6 +74,80 @@ struct Cache {
     has_topics: bool,
 }
 
+/// What the faded bottom edge of the list leaves out, from its last layout.
+#[derive(Clone, Copy, Default, PartialEq)]
+struct BottomEdge {
+    /// An open section header whose first row is still under the edge: it
+    /// waits for that row, so no label stands alone there.
+    stranded: Option<usize>,
+    /// The first row under the edge that waits on me, and how many do.
+    waiting: Option<(usize, usize)>,
+}
+
+/// How much of the list's bottom a row must clear to be read whole: the fade,
+/// or while the 下面还有 pill shows, the band under the pill and its soft edge.
+fn bottom_clear(pill: bool) -> gpui::Pixels {
+    if pill {
+        metrics::SIDEBAR_WAITING_FADE + metrics::SIDEBAR_WAITING_BAND
+    } else {
+        space::S24
+    }
+}
+
+/// How far above the list's bottom a row must start to count as in view: the
+/// 24 edge, and while the 下面还有 pill shows, the band under the pill as well.
+/// The pill may go once the row is in view, so the room of that edge stays.
+fn row_room(pill: bool) -> gpui::Pixels {
+    if pill {
+        space::S24 + metrics::SIDEBAR_WAITING_BAND
+    } else {
+        space::S24
+    }
+}
+
+/// Reads [`BottomEdge`] from the list's last layout. A list that ends in
+/// view hides nothing. `pill`: the pill showed in that layout.
+fn bottom_edge(list: &ListState, entries: &[Entry], pill: bool) -> BottomEdge {
+    let mut edge = BottomEdge::default();
+    let viewport = list.viewport_bounds();
+    let Some(last) = entries.len().checked_sub(1) else {
+        return edge;
+    };
+    let ends_in_view = list
+        .bounds_for_item(last)
+        .is_some_and(|row| row.bottom() <= viewport.bottom() + px(0.5));
+    if viewport.size.height <= px(0.) || ends_in_view {
+        return edge;
+    }
+    let fade = viewport.bottom() - bottom_clear(pill);
+    for (ix, entry) in entries
+        .iter()
+        .enumerate()
+        .skip(list.logical_scroll_top().item_ix)
+    {
+        let row = list.bounds_for_item(ix);
+        let waits = entry.item.waiting_on_me();
+        if waits > 0 && row.is_none_or(|r| r.bottom() > fade) {
+            let (first, n) = edge.waiting.unwrap_or((ix, 0));
+            edge.waiting = Some((first, n + waits));
+        }
+        let drawn = row.is_some_and(|r| r.top() < viewport.bottom());
+        let has_row = entries
+            .get(ix + 1)
+            .is_some_and(|next| !next.item.is_section_header());
+        if drawn
+            && has_row
+            && entry.item.opens_section()
+            && list
+                .bounds_for_item(ix + 1)
+                .is_none_or(|next| next.top() >= viewport.bottom() - row_room(pill))
+        {
+            edge.stranded = Some(ix);
+        }
+    }
+    edge
+}
+
 /// The traffic-light row at the top of the sidebar, under its 8 pt top
 /// padding: centred on the toolbar row's centre line (32 pt from the window
 /// top), so the lights, 隐藏侧栏 and the page title share one line.
@@ -110,8 +184,19 @@ pub struct RailView {
     /// The open 话题 and selected 群 the list last scrolled into view: a
     /// move from anywhere (search, a card, ⌘[) shows its row here too.
     revealed: Option<Selection>,
+    /// The reveal of the open place waits for the list's first layout: a
+    /// list that was never laid out has nothing to scroll by.
+    reveal_waits: bool,
+    /// Frames a reveal waited for rows that were not measured yet.
+    reveal_tries: u8,
+    /// A reveal that is checked again on the next frames.
+    settle: Option<Settle>,
     /// The virtual list of [`Cache::entries`].
     list: ListState,
+    /// What the list's bottom edge left out on the last layout.
+    bottom_edge: Rc<std::cell::Cell<BottomEdge>>,
+    /// The list style and account whose rows `list` holds, and how many.
+    listed: Option<((RailMode, Option<MemberId>), usize)>,
     // --- v12/behavior ---
     /// The rail's key focus: ↑/↓ move the selection, Return opens it.
     focus: gpui::FocusHandle,
@@ -149,6 +234,22 @@ fn answered_topics(services: &Services, cx: &App) -> std::collections::HashSet<S
         .collect()
 }
 
+/// Frames a reveal waits for the list to measure its rows.
+const REVEAL_TRIES: u8 = 3;
+/// Frames a reveal is checked against the list's viewport after it ran.
+const SETTLE_FRAMES: u8 = 3;
+
+/// A reveal that ran: what it read and what it did.
+#[derive(Clone, Copy)]
+struct Settle {
+    /// The viewport height the reveal used.
+    height: gpui::Pixels,
+    /// Where the list was before it and where it left it.
+    before: gpui::ListOffset,
+    after: gpui::ListOffset,
+    frames: u8,
+}
+
 impl RailView {
     /// The sidebar list's key focus (a region of the window, F6).
     pub fn focus_handle(&self) -> gpui::FocusHandle {
@@ -177,7 +278,12 @@ impl RailView {
             cache: None,
             session: None,
             revealed: None,
+            reveal_waits: false,
+            reveal_tries: 0,
+            settle: None,
             list: ListState::new(0, ListAlignment::Top, LIST_OVERDRAW),
+            bottom_edge: Default::default(),
+            listed: None,
             // Tab reaches the rows themselves (FocusRow); the list keeps a
             // handle for the arrow keys when it is focused as a whole.
             focus: cx.focus_handle(),
@@ -237,6 +343,7 @@ impl RailView {
         let mut inputs = self.inputs(cx);
         let selection = (inputs.open.clone(), inputs.group_page.clone());
         let reveal = self.revealed.as_ref() != Some(&selection);
+        self.settle_reveal();
         // A 话题 opened from elsewhere in a folded 群: unfold it, so its row
         // shows where the person is.
         if reveal
@@ -246,6 +353,9 @@ impl RailView {
             inputs.folded_groups = self.folded_groups.clone();
         }
         if self.cache.as_ref().is_some_and(|c| c.inputs == inputs) {
+            if reveal {
+                self.reveal(selection);
+            }
             return;
         }
         let p = self.services.provider.clone();
@@ -271,19 +381,21 @@ impl RailView {
         }
         // C opens its first busy member on the first read.
         self.open_members = inputs.open_members.clone();
-        let old = self
-            .cache
-            .as_ref()
-            .map(|c| (c.inputs.mode, c.entries.len()));
+        // What the list holds, kept apart from the cache: a provider change
+        // drops the cache, and a list that was reset for it jumped back to
+        // its top on every change (and undid the reveal of the open row).
+        let listed = (inputs.mode, inputs.me.clone());
+        let old = self.listed.replace((listed.clone(), entries.len()));
         match old {
-            Some((mode, n)) if mode == inputs.mode => {
+            Some((was, n)) if was == listed => {
                 // Keep the scroll position: replace only the rows past the
-                // old end, and measure the others again.
+                // old end. The list measures the rows it draws on every
+                // frame, so the others need no reset (which also dropped
+                // the heights a reveal scrolls by).
                 let keep = n.min(entries.len());
                 if n != entries.len() {
                     self.list.splice(keep..n, entries.len() - keep);
                 }
-                self.list.remeasure_items(0..keep);
             }
             _ => self.list.reset(entries.len()),
         }
@@ -296,11 +408,127 @@ impl RailView {
             inputs,
         });
         if reveal {
-            self.revealed = Some(selection);
-            if let Some(ix) = self.selected_index() {
-                self.list.scroll_to_reveal_item(ix);
-            }
+            self.reveal(selection);
         }
+    }
+
+    /// Scrolls the open place's row into view, once per selection. The list
+    /// must have drawn its rows first (a cold open, or rows that were just
+    /// replaced, have no heights to scroll by), so the reveal waits a few
+    /// frames for that.
+    fn reveal(&mut self, selection: Selection) {
+        let Some(ix) = self.selected_index() else {
+            self.revealed = Some(selection);
+            self.reveal_waits = false;
+            self.reveal_tries = 0;
+            self.settle = None;
+            return;
+        };
+        let top = self.list.logical_scroll_top();
+        let height = self.list.viewport_bounds().size.height;
+        if height <= px(0.) {
+            self.reveal_waits = true;
+            return;
+        }
+        if self.list.bounds_for_item(top.item_ix).is_none() && self.reveal_tries < REVEAL_TRIES {
+            self.reveal_tries += 1;
+            self.reveal_waits = true;
+            return;
+        }
+        self.reveal_waits = false;
+        self.reveal_tries = 0;
+        self.revealed = Some(selection);
+        self.scroll_to_open(ix);
+        self.settle = Some(Settle {
+            height,
+            before: top,
+            after: self.list.logical_scroll_top(),
+            frames: SETTLE_FRAMES,
+        });
+    }
+
+    /// Scrolls so that row `ix` is drawn whole; a row that already is stays
+    /// where it is.
+    fn scroll_to_open(&mut self, ix: usize) {
+        let Some(entries) = self.cache.as_ref().map(|c| c.entries.clone()) else {
+            return;
+        };
+        let last = entries.len().saturating_sub(1);
+        // The first row of a 群 comes with its label: rows never show under
+        // the pinned destinations without their 群.
+        let lead = match ix.checked_sub(1).and_then(|i| entries.get(i)) {
+            Some(e) if matches!(e.item, modes::Item::GroupHeader { .. }) => ix - 1,
+            _ => ix,
+        };
+        let viewport = self.list.viewport_bounds();
+        match self.list.bounds_for_item(ix) {
+            Some(row) if row.top() >= viewport.top() => {
+                // The bottom edge fades a row that has rows after it.
+                let clear = if ix == last {
+                    px(0.)
+                } else {
+                    row_room(self.bottom_edge.get().waiting.is_some())
+                };
+                let under = row.bottom() + clear - viewport.bottom();
+                if under <= px(0.) {
+                    return;
+                }
+                // By the row's own bounds: the rows after it may not be
+                // measured yet, and the list counts those as 0 high. One of
+                // the last two rows takes the list to its end, where no
+                // fade is drawn.
+                if ix + 1 >= last {
+                    self.list.scroll_to_end();
+                } else {
+                    self.list.scroll_by(under);
+                    // On to the next row's top: no row is left cut in half
+                    // under the pinned destinations.
+                    let top = self.list.logical_scroll_top();
+                    if top.offset_in_item > px(0.) {
+                        self.list.scroll_to(gpui::ListOffset {
+                            item_ix: top.item_ix + 1,
+                            offset_in_item: px(0.),
+                        });
+                    }
+                }
+            }
+            // Above the viewport, or too far below to be measured.
+            _ => self.list.scroll_to(gpui::ListOffset {
+                item_ix: lead,
+                offset_in_item: px(0.),
+            }),
+        }
+    }
+
+    /// A reveal reads the list's last layout, which on the first frames of a
+    /// window can still be short (the list scrolled by the missing height
+    /// and hid the 群 label of a row that was in view all along). While the
+    /// viewport height changes under a reveal, it is done again from where
+    /// the list was; a scroll by the person ends the check.
+    fn settle_reveal(&mut self) {
+        let Some(s) = self.settle else { return };
+        if self.list.logical_scroll_top() != s.after {
+            self.settle = None;
+            return;
+        }
+        let height = self.list.viewport_bounds().size.height;
+        if height == s.height {
+            self.settle = (s.frames > 0).then(|| Settle {
+                frames: s.frames - 1,
+                ..s
+            });
+            return;
+        }
+        self.list.scroll_to(s.before);
+        if let Some(ix) = self.selected_index() {
+            self.scroll_to_open(ix);
+        }
+        self.settle = Some(Settle {
+            height,
+            after: self.list.logical_scroll_top(),
+            frames: SETTLE_FRAMES,
+            ..s
+        });
     }
 
     /// The row of the open 话题, 私聊 or 群, if the list shows it.
@@ -328,6 +556,10 @@ impl RailView {
         div()
             .w_full()
             .pt(entry.gap)
+            // Kept in the layout, so the list does not move when it shows.
+            .when(self.bottom_edge.get().stranded == Some(ix), |d| {
+                d.invisible()
+            })
             .child(self.item(&entry.item, cx))
             .into_any_element()
     }
@@ -549,6 +781,65 @@ impl RailView {
         )
     }
 
+    /// The pill over the list's bottom edge: `n` rows below wait on me, and
+    /// a click scrolls to the first (row `ix`). It stands on an opaque band
+    /// that hides the rows it says are below; only the band's top edge is
+    /// soft, so a row above it never reads as dimmed (A4). The wheel still
+    /// scrolls the list through the band.
+    fn waiting_below(&self, ix: usize, n: usize, cx: &mut Context<Self>) -> AnyElement {
+        use crate::ui::{
+            icons::sym as sym_icon,
+            native::{PushSize, PushStyle, native_colors, push_button, tokens::shadow},
+            sf_symbols::SymSize,
+        };
+        let k = native_colors(cx);
+        let fill = crate::views::shell::chrome::colors(cx).sidebar;
+        div()
+            .absolute()
+            .left_0()
+            .right_0()
+            .bottom_0()
+            .flex()
+            .flex_col()
+            .child(
+                div()
+                    .h(metrics::SIDEBAR_WAITING_FADE)
+                    .bg(gpui::linear_gradient(
+                        0.,
+                        gpui::linear_color_stop(fill, 0.),
+                        gpui::linear_color_stop(fill.opacity(0.), 1.),
+                    )),
+            )
+            .child(
+                div()
+                    .id("rail-waiting-band")
+                    .block_mouse_except_scroll()
+                    .h(metrics::SIDEBAR_WAITING_BAND)
+                    .pb(space::S4)
+                    .bg(fill)
+                    .flex()
+                    .items_end()
+                    .justify_center()
+                    .child(
+                        push_button(
+                            "rail-waiting-below",
+                            crate::copy::fill(c::RAIL_WAITS_BELOW_N, &[("n", &n.to_string())]),
+                            PushStyle::Secondary,
+                            PushSize::Small,
+                            cx,
+                        )
+                        .icon(gpui_component::Icon::new(Sym::NeedsYou).text_color(k.amber))
+                        .child(sym_icon(Sym::ArrowDown, SymSize::INLINE, k.secondary))
+                        .shadow(shadow::sm())
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.scroll_to_open(ix);
+                            cx.notify();
+                        })),
+                    ),
+            )
+            .into_any_element()
+    }
+
     /// Draws the inactive-window look (gray selection, `secondary` tools).
     pub fn set_show_inactive(&mut self, inactive: bool, cx: &mut Context<Self>) {
         if self.show_inactive != inactive {
@@ -559,7 +850,7 @@ impl RailView {
 }
 
 impl Render for RailView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.refresh(cx);
         let nav = self.services.nav.read(cx);
         let page = nav.page();
@@ -610,32 +901,69 @@ impl Render for RailView {
         let filter = self.filter_button(mode, cx);
         let no_rows = self.cache.as_ref().is_none_or(|c| c.entries.is_empty());
         let first_sync = syncing;
+        // The list's scroll edges, from its last layout.
+        let list_drawn = !no_rows && !first_sync;
+        let scrolled = {
+            let top = self.list.logical_scroll_top();
+            top.item_ix > 0 || top.offset_in_item > px(0.)
+        };
+        let rows_n = self.list.item_count();
+        let at_end = self.list.logical_scroll_top().item_ix >= rows_n
+            || self
+                .list
+                .bounds_for_item(rows_n.saturating_sub(1))
+                .is_some_and(|row| row.bottom() <= self.list.viewport_bounds().bottom() + px(0.5));
+        let separator = crate::ui::native::native_colors(cx).separator;
+        let entries_drawn = self
+            .cache
+            .as_ref()
+            .filter(|_| list_drawn)
+            .map(|c| c.entries.clone());
+        // A row that waits on me never hides under the edge unsaid.
+        let waiting_below = self
+            .bottom_edge
+            .get()
+            .waiting
+            .filter(|_| list_drawn)
+            .map(|(ix, n)| self.waiting_below(ix, n, cx));
+        // The reveal waits one frame for the list's first layout; while the
+        // list is not drawn (the skeleton, the empty hint) there is nothing
+        // to wait for.
+        if (self.reveal_waits || self.settle.is_some()) && !no_rows && !first_sync {
+            cx.on_next_frame(window, |_, _, cx| cx.notify());
+        }
         // §2.14, A1-13: no create button while the first sync runs.
         // 新建 (onboarding): 新话题, 新建群 and 发起私聊 in one pull-down, so a
         // new member finds where a 群 or a 私聊 starts without the menu bar.
         // ⌘N still starts a 话题 directly.
-        let new_topic = crate::ui::native::disabled_push(
-            self.tool("rail-new-topic", Sym::Compose, c::RAIL_NEW, cx),
-            first_sync,
-            cx,
-        )
-        .dropdown_menu_with_anchor(gpui::Anchor::TopRight, |menu, _, _| {
-            // Each item with its symbol, no separator: three ways to start
-            // something, one list (owner decision, 2026-11-08).
-            let go = |sym: Sym, label: &'static str, action: fn() -> Box<dyn gpui::Action>| {
-                PopupMenuItem::new(label)
-                    .icon(gpui_component::Icon::new(sym))
-                    .on_click(move |_, window, cx| window.dispatch_action(action(), cx))
-            };
-            menu.min_w(px(200.))
-                .item(go(Sym::Compose, c::RAIL_NEW_TOPIC, || Box::new(NewTopic)))
-                .item(go(Sym::Topic, c::RAIL_NEW_GROUP, || {
-                    Box::new(crate::views::nav::NewGroup)
-                }))
-                .item(go(Sym::Person, c::RAIL_START_DM, || {
-                    Box::new(crate::views::nav::StartDm)
-                }))
+        // §2.14: with nothing cached and no server there is nowhere to create
+        // anything; the button stays in place, disabled at 50 %.
+        let disabled_new_topic = model::cannot_create(&self.services).then(|| {
+            crate::ui::native::disabled_push(
+                self.tool("rail-new-topic", Sym::Compose, c::RAIL_NEW, cx),
+                true,
+                cx,
+            )
         });
+        let new_topic = self
+            .tool("rail-new-topic", Sym::Compose, c::RAIL_NEW, cx)
+            .dropdown_menu_with_anchor(gpui::Anchor::TopRight, |menu, _, _| {
+                // Each item with its symbol, no separator: three ways to start
+                // something, one list (owner decision, 2026-11-08).
+                let go = |sym: Sym, label: &'static str, action: fn() -> Box<dyn gpui::Action>| {
+                    PopupMenuItem::new(label)
+                        .icon(gpui_component::Icon::new(sym))
+                        .on_click(move |_, window, cx| window.dispatch_action(action(), cx))
+                };
+                menu.min_w(px(200.))
+                    .item(go(Sym::Compose, c::RAIL_NEW_TOPIC, || Box::new(NewTopic)))
+                    .item(go(Sym::Topic, c::RAIL_NEW_GROUP, || {
+                        Box::new(crate::views::nav::NewGroup)
+                    }))
+                    .item(go(Sym::Person, c::RAIL_START_DM, || {
+                        Box::new(crate::views::nav::StartDm)
+                    }))
+            });
         let sidebar_fill = crate::views::shell::chrome::colors(cx).sidebar;
         // Owner decision (2026-11-08): the tools sit at the trailing end of
         // the traffic-light row, so the search field has the whole width
@@ -646,7 +974,17 @@ impl Render for RailView {
             .items_center()
             .gap(space::S4)
             .child(filter)
-            .child(new_topic);
+            // The slot stays, so the filter does not move when the sync ends.
+            .child(if first_sync {
+                div()
+                    .flex_none()
+                    .size(crate::ui::native::tokens::metrics::TOOLBAR_ITEM)
+                    .into_any_element()
+            } else if let Some(disabled) = disabled_new_topic {
+                disabled.into_any_element()
+            } else {
+                new_topic.into_any_element()
+            });
         let (row_tools, search_tools) = if fullscreen {
             (None, Some(tools))
         } else {
@@ -773,21 +1111,58 @@ impl Render for RailView {
                     } else {
                         rows.into_any_element()
                     })
+                    // A scrolled list starts under a 1 px line, so its first
+                    // rows do not read as children of the pinned 成员 row.
+                    .when(list_drawn && scrolled, |d| {
+                        d.child(
+                            div()
+                                .absolute()
+                                .left(metrics::SIDEBAR_ROW_INSET)
+                                .right(metrics::SIDEBAR_ROW_INSET)
+                                .top_0()
+                                .h(crate::ui::native::tokens::layout::HAIRLINE)
+                                .bg(separator),
+                        )
+                    })
                     // §2.1, A4: the list scrolls under a 24 edge, so the row
                     // under 设置 fades out instead of being cut mid-glyph.
-                    .child(
-                        div()
+                    // Not at the list's end: the last row is drawn whole.
+                    .when(!(list_drawn && at_end), |d| {
+                        d.child(
+                            div()
+                                .absolute()
+                                .left_0()
+                                .right_0()
+                                .bottom_0()
+                                .h(space::S24)
+                                .bg(gpui::linear_gradient(
+                                    0.,
+                                    gpui::linear_color_stop(sidebar_fill, 0.),
+                                    gpui::linear_color_stop(sidebar_fill.opacity(0.), 1.),
+                                )),
+                        )
+                    })
+                    // After the list's layout: what its bottom edge hides now.
+                    .when_some(entries_drawn, |d, entries| {
+                        let (list, edge) = (self.list.clone(), self.bottom_edge.clone());
+                        d.child(
+                            gpui::canvas(
+                                move |_, window, _| {
+                                    let pill = edge.get().waiting.is_some();
+                                    let now = bottom_edge(&list, &entries, pill);
+                                    // A refresh is ignored while a frame is
+                                    // drawn: the next frame shows the change.
+                                    if edge.replace(now) != now {
+                                        window.request_animation_frame();
+                                    }
+                                },
+                                |_, _, _, _| (),
+                            )
                             .absolute()
-                            .left_0()
-                            .right_0()
-                            .bottom_0()
-                            .h(space::S24)
-                            .bg(gpui::linear_gradient(
-                                0.,
-                                gpui::linear_color_stop(sidebar_fill, 0.),
-                                gpui::linear_color_stop(sidebar_fill.opacity(0.), 1.),
-                            )),
-                    ),
+                            .size_full(),
+                        )
+                    })
+                    .children(waiting_below),
             )
             // §2.1, §2.15, T-13: offline, an Alert row above the footer.
             // A 话题 page docks the same Alert above its composer instead.
@@ -866,17 +1241,22 @@ fn account_menu(
         .item(
             PopupMenuItem::new(c::ACCOUNT_ADD).on_click(move |_, _, _| add.provider.add_account()),
         )
+        // Both rows are plain items that send their action: a shortcut read
+        // from the keymap shows only when the focus is where the key is
+        // bound, so it came and went from one open to the next. The
+        // shortcuts (⌘, and ⌥⌘,) are in the menu bar.
         .item(
             PopupMenuItem::new(crate::copy::settings::MENU_SETTINGS).on_click(|_, window, cx| {
                 window.dispatch_action(Box::new(crate::app::ToggleSettings), cx)
             }),
         )
-        // Owners only: 团队管理… (⌥⌘,).
+        // Owners only: 团队管理….
         .when(crate::views::settings::i_am_owner(services), |menu| {
-            menu.menu(
-                crate::copy::admin::MENU_OPEN,
-                Box::new(crate::views::admin::OpenTeamAdmin),
-            )
+            menu.item(PopupMenuItem::new(crate::copy::admin::MENU_OPEN).on_click(
+                |_, window, cx| {
+                    window.dispatch_action(Box::new(crate::views::admin::OpenTeamAdmin), cx)
+                },
+            ))
         })
         .separator()
         .item(
@@ -1150,6 +1530,125 @@ mod tests {
         assert!(
             !Rc::ptr_eq(&first, &entries(&view, cx)),
             "a change reads again"
+        );
+    }
+
+    /// A short window: a section label never stands alone at the bottom
+    /// edge, and the pill's scroll brings the row that waits on me into view.
+    #[gpui::test]
+    fn the_bottom_edge_keeps_labels_with_rows_and_says_who_waits(cx: &mut gpui::TestAppContext) {
+        cx.update(gpui_component::init);
+        let provider: Arc<dyn ChatProvider> = V2Samples::new();
+        let (view, cx) = cx.add_window_view(move |window, cx| {
+            let services = Services::new(provider, cx);
+            RailView::new(services, window, cx)
+        });
+        let notified = Rc::new(std::cell::Cell::new(0));
+        let count = notified.clone();
+        cx.update(|_, cx| {
+            cx.observe(&view, move |_, _| count.set(count.get() + 1))
+                .detach()
+        });
+        let mut stranded = false;
+        for height in (240..640).step_by(4) {
+            let before = view.update(cx, |this, _| this.bottom_edge.get());
+            cx.simulate_resize(gpui::size(px(260.), px(height as f32)));
+            cx.run_until_parked();
+            // What the edge hides now is drawn without waiting for an input.
+            if view.update(cx, |this, _| this.bottom_edge.get()) != before {
+                notified.set(0);
+                cx.update(|window, cx| window.simulate_next_frame(cx));
+                assert!(notified.get() > 0, "the next frame draws the new edge");
+            }
+            view.update(cx, |this, _| {
+                let Some(ix) = this.bottom_edge.get().stranded else {
+                    return;
+                };
+                stranded = true;
+                let entries = this.cache.as_ref().unwrap().entries.clone();
+                assert!(entries[ix].item.opens_section(), "only an open header");
+                // The edge was read with or without the pill: its band is the most it hides.
+                let fade = this.list.viewport_bounds().bottom() - row_room(true);
+                assert!(
+                    this.list
+                        .bounds_for_item(ix + 1)
+                        .is_none_or(|row| row.top() >= fade),
+                    "its first row is still under the edge"
+                );
+            });
+        }
+        assert!(stranded, "some height leaves a label at the edge");
+
+        // Under the pill's band a first row shows too little to carry its label.
+        let mut behind_band = false;
+        for height in (240..640).step_by(1) {
+            cx.simulate_resize(gpui::size(px(260.), px(height as f32)));
+            cx.run_until_parked();
+            view.update(cx, |this, _| {
+                let edge = this.bottom_edge.get();
+                if edge.waiting.is_none() {
+                    return;
+                }
+                let bottom = this.list.viewport_bounds().bottom();
+                let entries = this.cache.as_ref().unwrap().entries.clone();
+                for ix in 0..entries.len().saturating_sub(1) {
+                    let label = this.list.bounds_for_item(ix);
+                    let first = this.list.bounds_for_item(ix + 1);
+                    if entries[ix].item.opens_section()
+                        && !entries[ix + 1].item.is_section_header()
+                        && label.is_some_and(|l| l.top() < bottom)
+                        && first.is_some_and(|r| {
+                            r.top() >= bottom - row_room(true)
+                                && r.top() < bottom - bottom_clear(true)
+                        })
+                    {
+                        behind_band = true;
+                        assert_eq!(edge.stranded, Some(ix), "its first row is behind the band");
+                    }
+                }
+            });
+        }
+        assert!(behind_band, "some height puts a first row behind the band");
+
+        let waiting = |view: &gpui::Entity<RailView>, cx: &mut gpui::VisualTestContext| {
+            view.update(cx, |this, _| this.bottom_edge.get().waiting)
+        };
+        // The tallest window that still hides one: room to scroll the row in.
+        let mut below = None;
+        for height in (240..900).rev().step_by(4) {
+            cx.simulate_resize(gpui::size(px(260.), px(height as f32)));
+            cx.run_until_parked();
+            below = waiting(&view, cx);
+            if below.is_some() {
+                break;
+            }
+        }
+        let (ix, _) = below.expect("a row waits under the edge");
+        view.update(cx, |this, cx| {
+            this.scroll_to_open(ix);
+            cx.notify();
+        });
+        // A resize is what draws a frame in a test window; twice, as the
+        // edge is read after the list's layout.
+        for grow in [1., 2.] {
+            let size = view.update_in(cx, |_, window, _| window.viewport_size());
+            cx.simulate_resize(gpui::size(size.width, size.height + px(grow)));
+            cx.run_until_parked();
+        }
+        view.update(cx, |this, _| {
+            let row = this.list.bounds_for_item(ix).expect("the row is drawn");
+            let bottom = this.list.viewport_bounds().bottom();
+            assert!(row.bottom() <= bottom);
+            // A pill still up for other rows neither stands on the row it
+            // brought in nor fades it: the row ends above the band's soft edge.
+            if this.bottom_edge.get().waiting.is_some() {
+                assert!(row.bottom() <= bottom - bottom_clear(true));
+            }
+        });
+        assert_ne!(
+            waiting(&view, cx).map(|(first, _)| first),
+            Some(ix),
+            "the pill no longer points at a row in view"
         );
     }
 

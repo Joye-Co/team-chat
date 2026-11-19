@@ -13,6 +13,7 @@
 //! about five per second ([`forward_page_event`]).
 
 pub mod gate_check;
+pub mod list;
 pub mod pane;
 pub mod scenes;
 

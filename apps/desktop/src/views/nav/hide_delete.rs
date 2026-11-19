@@ -24,13 +24,13 @@ fn destructive_item(label: &'static str) -> PopupMenuItem {
     })
 }
 
-/// Whether 删除群… shows: an owner, on a 群 (a 私聊 cannot be deleted). The server refuses
+/// Whether 删除… shows: an owner, on a 群 (a 私聊 cannot be deleted). The server refuses
 /// the default 群 (全员); the alert says so.
 pub fn may_delete_group(services: &Services, g: &GroupSummary) -> bool {
     services.provider.can_hide_delete() && g.kind == GroupKind::Group && i_am_owner(services)
 }
 
-/// Whether 删除话题… shows: its creator or an owner, never for the 群聊.
+/// Whether 删除… of a 话题 shows: its creator or an owner, never for the 群聊.
 pub fn may_delete_topic(services: &Services, topic: &Topic) -> bool {
     services.provider.can_hide_delete()
         && !is_main_topic(&topic.id)
@@ -46,7 +46,7 @@ pub fn hide_group_item(menu: PopupMenu, services: &Services, g: &GroupSummary) -
     menu.item(PopupMenuItem::new(nav::HIDE).on_click(move |_, _, cx| hide_group(&s, &id, cx)))
 }
 
-/// 删除群… for an owner's 群 menu; nothing otherwise.
+/// 删除… for an owner's 群 menu; nothing otherwise.
 pub fn delete_group_item(menu: PopupMenu, services: &Services, g: &GroupSummary) -> PopupMenu {
     if !may_delete_group(services, g) {
         return menu;
@@ -59,7 +59,7 @@ pub fn delete_group_item(menu: PopupMenu, services: &Services, g: &GroupSummary)
     )
 }
 
-/// 隐藏话题 and 删除话题… for a 话题's menu (not the 群聊), after a separator.
+/// 隐藏 and 删除… for a 话题's menu (not the 群聊), after a separator.
 pub fn topic_items(
     mut menu: PopupMenu,
     services: &Services,
@@ -75,11 +75,13 @@ pub fn topic_items(
     );
     if may_delete_topic(services, topic) {
         let (s, g, tp) = (services.clone(), group_id.to_string(), topic.clone());
-        menu = menu.item(
-            destructive_item(r::TOPIC_DELETE).on_click(move |_, window, cx| {
-                confirm_delete_topic(s.clone(), &g, &tp, window, cx)
-            }),
-        );
+        menu =
+            menu.separator()
+                .item(
+                    destructive_item(r::TOPIC_DELETE).on_click(move |_, window, cx| {
+                        confirm_delete_topic(s.clone(), &g, &tp, window, cx)
+                    }),
+                );
     }
     menu
 }
@@ -107,11 +109,9 @@ pub fn confirm_delete_group(
 ) {
     dialogs::destructive_alert(
         "delete-group",
-        fill(
-            nav::DELETE_GROUP_CONFIRM_TITLE,
-            &[("name", &dialogs::short_name(&name))],
-        ),
-        nav::DELETE_GROUP_CONFIRM_BODY.to_string(),
+        // The whole name, in the body: it wraps, the one-line title cannot.
+        nav::DELETE_GROUP_CONFIRM_TITLE.to_string(),
+        fill(nav::DELETE_GROUP_CONFIRM_BODY, &[("name", &name)]),
         nav::DELETE_OK,
         move |_, cx| delete_group(&services, &group_id, cx),
         window,
@@ -154,11 +154,8 @@ pub fn confirm_delete_topic(
     let (g, t) = (group_id.to_string(), topic.id.clone());
     dialogs::destructive_alert(
         "delete-topic",
-        fill(
-            r::TOPIC_DELETE_CONFIRM_TITLE,
-            &[("name", &dialogs::short_name(&topic.title))],
-        ),
-        r::TOPIC_DELETE_CONFIRM_BODY.to_string(),
+        r::TOPIC_DELETE_CONFIRM_TITLE.to_string(),
+        fill(r::TOPIC_DELETE_CONFIRM_BODY, &[("name", &topic.title)]),
         r::TOPIC_DELETE_OK,
         move |_, _| services.provider.delete_topic(&g, &t),
         window,
@@ -167,7 +164,7 @@ pub fn confirm_delete_topic(
 }
 
 /// A refused hide or delete: an alert with the reason (a refusal blocks, no toast).
-fn refused(title: &'static str, e: crate::data::AdminError, cx: &mut App) {
+pub(super) fn refused(title: &'static str, e: crate::data::AdminError, cx: &mut App) {
     in_main_window(cx, move |window, cx| {
         dialogs::error_alert(title, error_text(e), |_, _| {}, window, cx)
     });

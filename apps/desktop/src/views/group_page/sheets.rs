@@ -11,7 +11,7 @@ use gpui::{
 };
 use gpui_component::{
     WindowExt as _,
-    input::{InputEvent, InputState},
+    input::{InputEvent, TextareaState},
 };
 
 use crate::{
@@ -19,11 +19,9 @@ use crate::{
     copy::{common, group_page as c},
     data::{AdminError, AdminReply},
     ui::native::{
-        NativeTextField, SheetLayout, SheetWidth, disabled_push, native_sheet, sheet_buttons,
+        NativeTextArea, SheetLayout, SheetWidth, disabled_push, native_sheet, sheet_buttons,
     },
-    views::nav::dialogs::{
-        error_alert, form_field_width, sheet_footnote, sheet_form, sheet_form_row,
-    },
+    views::nav::dialogs::{error_alert, sheet_footnote, sheet_form, sheet_form_row_top},
 };
 
 /// Which field the sheet edits.
@@ -66,7 +64,9 @@ struct TextSheet {
     group_id: String,
     kind: Kind,
     current: String,
-    input: Entity<InputState>,
+    /// A text area for both: a decision runs to 1000 characters and a
+    /// 群说明 to 200 (D8), too long to review on one line.
+    input: Entity<TextareaState>,
     busy: bool,
     _subscriptions: Vec<Subscription>,
 }
@@ -125,7 +125,7 @@ impl Render for TextSheet {
                 "group-record",
                 c::GROUP_PAGE_RECORD_TITLE,
                 c::GROUP_PAGE_DECISIONS_NOTE,
-                c::GROUP_PAGE_RECORD,
+                c::GROUP_PAGE_RECORD_LABEL,
                 c::GROUP_PAGE_SAVE,
             ),
             Kind::Purpose => (
@@ -141,13 +141,10 @@ impl Render for TextSheet {
             .explanation(explanation)
             .body(
                 sheet_form()
-                    .child(sheet_form_row(
+                    .child(sheet_form_row_top(
                         label,
-                        NativeTextField::new(
-                            SharedString::from(format!("{id}-field")),
-                            &self.input,
-                        )
-                        .width(form_field_width(SheetWidth::Form)),
+                        NativeTextArea::new(SharedString::from(format!("{id}-field")), &self.input)
+                            .rows(4),
                         cx,
                     ))
                     .children(note.map(|n| sheet_footnote(n, cx))),
@@ -173,22 +170,44 @@ fn open(services: Services, group_id: String, kind: Kind, window: &mut Window, c
             .unwrap_or_default(),
     };
     let sheet = cx.new(|cx| {
-        let input = cx.new(|cx| {
-            let state = InputState::new(window, cx).placeholder(match kind {
-                Kind::Decision => c::GROUP_PAGE_RECORD_PLACEHOLDER,
-                Kind::Purpose => c::GROUP_PAGE_PURPOSE_PLACEHOLDER,
-            });
-            state.default_value(current.clone())
-        });
-        let subscriptions = vec![cx.subscribe_in(
-            &input,
-            window,
-            |this: &mut TextSheet, _, event: &InputEvent, window, cx| match event {
-                InputEvent::PressEnter { .. } => this.submit(window, cx),
-                InputEvent::Change => cx.notify(),
-                _ => {}
-            },
-        )];
+        let (input, subscription) = match kind {
+            Kind::Decision => {
+                let area = cx.new(|cx| {
+                    TextareaState::new(window, cx).placeholder(c::GROUP_PAGE_RECORD_PLACEHOLDER)
+                });
+                let sub = cx.subscribe_in(
+                    &area,
+                    window,
+                    |_: &mut TextSheet, _, event: &InputEvent, _, cx| {
+                        if matches!(event, InputEvent::Change) {
+                            cx.notify();
+                        }
+                    },
+                );
+                (area, sub)
+            }
+            Kind::Purpose => {
+                let area = cx.new(|cx| {
+                    TextareaState::new(window, cx)
+                        .placeholder(c::GROUP_PAGE_PURPOSE_PLACEHOLDER)
+                        .default_value(current.clone())
+                });
+                // Return breaks the line; the secondary Return saves.
+                let sub = cx.subscribe_in(
+                    &area,
+                    window,
+                    |this: &mut TextSheet, _, event: &InputEvent, window, cx| match event {
+                        InputEvent::PressEnter {
+                            secondary: true, ..
+                        } => this.submit(window, cx),
+                        InputEvent::Change => cx.notify(),
+                        _ => {}
+                    },
+                );
+                (area, sub)
+            }
+        };
+        let subscriptions = vec![subscription];
         TextSheet {
             services,
             group_id,

@@ -3,7 +3,7 @@
 
 crate::copy! {
     RAIL_SEARCH = "搜索或交代",
-    RAIL_NEW_TOPIC = "新话题",
+    RAIL_NEW_TOPIC = "新话题…",
     // The 新建 pull-down at the top of the sidebar: 新话题, 新建群, 发起私聊.
     RAIL_NEW = "新建",
     RAIL_NEW_GROUP = "新建群…",
@@ -24,8 +24,6 @@ crate::copy! {
     RAIL_DONE_TODAY = "完成 · 今天",
     EMPTY_NO_GROUPS_TITLE = "还没有加入群",
     RAIL_EMPTY_HINT = "加入群后，话题会列在这里",
-    RAIL_MORE_MEMBERS = "+{n}",
-    RAIL_SETTINGS = "设置",
     RAIL_MODE_WORK = "以工作为中心",
     RAIL_MODE_ATTENTION = "以「需要我」为中心",
     RAIL_MODE_MEMBER = "以成员为中心",
@@ -51,7 +49,6 @@ crate::copy! {
     // --- end v13/ux-pages ---
     RAIL_NAMES_SEP = "、",
     RAIL_OPTIONS = "侧栏选项",
-    RAIL_TEAM_STRIP = "成员：{busy} 位在忙，共 {n} 位",
 
     // ⌘K 交代或搜索 (Ask.dc.html).
     ASK_PLACEHOLDER = "交代一件事，或搜索话题、产出和成员",
@@ -66,22 +63,13 @@ crate::copy! {
     ASK_GIVE_TO_JOJO = "交给 {name} 安排",
     ASK_GIVE_DETAIL = "开一个话题：{work}",
     ASK_GIVE_JOJO_DETAIL = "{name} 看完再分给合适的成员",
-    ASK_IDLE = "空闲",
     ASK_WORKING_ON = "在做 {title}",
     ASK_SEND_TO = "发到",
-    ASK_SEND_TO_GROUP = "发到哪个群",
-    ASK_TOPIC_DONE = "{name} 做完了",
-    ASK_TOPIC_WORKING = "{name} 在做",
-    ASK_TOPIC_WAITING_YOU = "等你",
     ASK_ARTIFACT_BY = "{name} 做的",
     ASK_ARTIFACT_IMAGE = "图片",
     ASK_ARTIFACT_DECISION = "决定",
     ASK_MEMBER_WEEK = "本周 {n} 个话题",
     ASK_GROUP_MEMBERS = "{n} 位成员",
-    ASK_HINT_OPEN = "打开",
-    ASK_HINT_SELECT = "选择",
-    ASK_HINT_CLOSE = "关闭",
-    ASK_EMPTY = "没有找到",
     // --- accounts: the account menu of the sidebar footer ---
     ACCOUNT_MENU = "账号",
     ACCOUNT_ADD = "添加账号…",
@@ -89,4 +77,8 @@ crate::copy! {
     ACCOUNT_SIGN_OUT_TITLE = "退出这个账号？",
     ACCOUNT_SIGN_OUT_BODY = crate::copy::per_system("退出后，这台 Mac 不再收到这个账号的消息。其他账号仍保持登录。", "退出后，这台电脑不再收到这个账号的消息。其他账号仍保持登录。"),
     ACCOUNT_SIGN_OUT_CONFIRM = "退出",
+    // The sidebar's one line while the server is unreachable and a 群 has no cached 话题.
+    RAIL_OFFLINE_TOPICS = "连上后显示话题",
+    // The sidebar pill: waiting rows hidden under the list's bottom edge, not the total.
+    RAIL_WAITS_BELOW_N = "下面还有 {n} 件等你",
 }

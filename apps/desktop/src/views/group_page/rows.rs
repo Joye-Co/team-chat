@@ -157,7 +157,7 @@ pub fn mail_row(
                 .child(
                     line(title)
                         .n_body()
-                        .font_weight(gpui::FontWeight::MEDIUM)
+                        .font_weight(crate::theme::MEDIUM_WEIGHT)
                         .text_color(ink.title),
                 )
                 .child(
@@ -226,37 +226,11 @@ pub fn progress_slot(n: usize, m: usize, dot: Hsla, text: Hsla) -> AnyElement {
         .into_any_element()
 }
 
-/// A person without a photo as a letter disk (§4): `quaternary` fill with
-/// `label` text, mine included, so no bright disk outshines the window.
-/// Members with a photo or a character tile use `MemberAvatar`.
-pub fn avatar(member: Option<&crate::data::Member>, size: Pixels, cx: &App) -> AnyElement {
-    let photo = member
-        .and_then(|m| m.avatar_url.as_deref())
-        .map(|p| p.strip_prefix("file://").unwrap_or(p))
-        .is_some_and(crate::ui::avatar::is_local_file);
-    let letter = member.is_some_and(|m| !m.is_bot() && m.character.is_none()) && !photo;
-    if !letter {
-        return crate::ui::MemberAvatar::new(member, size).into_any_element();
-    }
-    let k = native_colors(cx);
-    let name = member.map(|m| m.name.as_str()).unwrap_or_default();
-    let text = crate::ui::avatar::monogram(name, size);
-    let share = if text.chars().count() > 1 { 0.38 } else { 0.44 };
-    div()
-        .flex_none()
-        .size(size)
-        .rounded_full()
-        .bg(k.quaternary)
-        .text_color(k.label)
-        .when(member.is_some_and(|m| m.deactivated), |d| d.opacity(0.5))
-        .flex()
-        .items_center()
-        .justify_center()
-        .text_size((size * share).round().max(px(9.)))
-        .line_height(size)
-        .font_weight(gpui::FontWeight::MEDIUM)
-        .child(text)
-        .into_any_element()
+/// A member's avatar in a row: the one avatar of the app (§1.8, C5), so a
+/// person without a photo draws the same bordered disk and initial in
+/// every pane.
+pub fn avatar(member: Option<&crate::data::Member>, size: Pixels, _cx: &App) -> AnyElement {
+    crate::ui::MemberAvatar::new(member, size).into_any_element()
 }
 
 /// The secondary line of a row as runs: an optional state symbol and text

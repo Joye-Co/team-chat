@@ -24,6 +24,25 @@ pub fn open_dialog(
     Ok(handle)
 }
 
+/// The query of the `search-artifact` scene: a word of a 产出's name and of its 话题.
+pub const ARTIFACT_QUERY: &str = "月报";
+
+/// Opens the main window with the switcher searching everything for
+/// [`ARTIFACT_QUERY`]: the 产出 section under the 话题 it was made in.
+pub fn open_artifact_dialog(
+    services: Services,
+    content: Size<Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    let handle = open_main(services.clone(), content, cx)?;
+    handle
+        .update(cx, |_, window, cx| {
+            super::open(services, true, ARTIFACT_QUERY, window, cx)
+        })
+        .map_err(|e| e.to_string())?;
+    Ok(handle)
+}
+
 /// Opens the long topic at a message 5,000 messages up, as Enter on a hit
 /// does: the second of seven hits of [`FAR_QUERY`] in that 话题.
 pub fn open_far_hit(services: &Services, cx: &mut App) {

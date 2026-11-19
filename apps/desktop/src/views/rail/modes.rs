@@ -19,7 +19,10 @@ use crate::{
     app::RailMode,
     copy::rail as c,
     data::{ChatProvider, GroupId, GroupKind, Member, MemberId, Topic},
-    ui::{MemberAvatar, native::sidebar::RightColumn},
+    ui::{
+        MemberAvatar,
+        native::{sidebar::RightColumn, tokens::space},
+    },
 };
 
 type Open<'a> = Option<&'a (String, String)>;
@@ -85,6 +88,11 @@ pub(super) enum Item {
     OtherTopics {
         id: GroupId,
         n: usize,
+    },
+    /// A: the server is unreachable and a 群 has no cached 话题: the
+    /// muted line that says they come back.
+    Offline {
+        id: GroupId,
     },
     /// A: an open 群 with no cached 话题 while the first sync runs: sidebar
     /// item skeletons (§2.14, T-13).
@@ -182,15 +190,22 @@ pub(super) struct Inputs {
     pub open_members: Option<std::collections::HashSet<MemberId>>,
 }
 
-/// A section's first row sits [`space::S6`] below the last one; rows of one
-/// section 1 pt apart.
+/// The space above every group label but the first: outside the label's own
+/// 32 pt row, so a label reads as the start of a group and its selected fill
+/// stays a full row.
+const GROUP_GAP: Pixels = space::S8;
+
+/// The inset of a compact empty line under a 群 label: its text starts at the
+/// x of the 话题 titles it stands in for (row padding 8, media 16, gap 8).
+const EMPTY_LINE_INSET: Pixels = space::S32;
+
+/// The flat rows of `list`, with [`GROUP_GAP`] above each section after the
+/// first.
 fn sections(list: Vec<Vec<Item>>) -> Vec<Entry> {
     let mut out = Vec::new();
     for (si, section) in list.into_iter().enumerate() {
         for (i, item) in section.into_iter().enumerate() {
-            // Section headers carry their own space above (§9.1).
-            let _ = (si, i);
-            let gap = px(0.);
+            let gap = if si > 0 && i == 0 { GROUP_GAP } else { px(0.) };
             out.push(Entry { gap, item });
         }
     }
@@ -236,13 +251,17 @@ pub(super) fn work(p: &dyn ChatProvider, i: &Inputs) -> Vec<Entry> {
         // open 群 shows sidebar skeleton rows, and nothing while unreachable.
         if !folded && empty {
             match i.sync {
-                Sync::Synced if all > 0 => section.push(Item::OtherTopics {
+                // The count comes from the cache, so it shows offline too.
+                _ if all > 0 => section.push(Item::OtherTopics {
                     id: g.id.clone(),
                     n: all,
                 }),
                 Sync::Synced => section.push(Item::NoTopics { id: g.id.clone() }),
                 Sync::Syncing => section.push(Item::Syncing { id: g.id.clone() }),
-                Sync::Unreachable => {}
+                // §2.13: a compact line under every 群 with nothing cached,
+                // as the page beside it says per section, so no header
+                // stands alone.
+                Sync::Unreachable => section.push(Item::Offline { id: g.id.clone() }),
             }
         }
         if !folded {
@@ -517,8 +536,52 @@ pub(super) fn by_member(p: &dyn ChatProvider, i: &mut Inputs, side: &SideChats) 
         }
     }
     out.into_iter()
-        .map(|item| Entry { gap: px(0.), item })
+        .enumerate()
+        .map(|(ix, item)| Entry {
+            gap: if ix > 0 && matches!(item, Item::MemberSection { .. }) {
+                GROUP_GAP
+            } else {
+                px(0.)
+            },
+            item,
+        })
         .collect()
+}
+
+impl Item {
+    /// An open section header: rows follow it.
+    pub(super) fn opens_section(&self) -> bool {
+        matches!(
+            self,
+            Item::GroupHeader { folded: false, .. }
+                | Item::DmHeader { folded: false }
+                | Item::MemberSection { folded: false, .. }
+        )
+    }
+
+    /// A section header, open or folded.
+    pub(super) fn is_section_header(&self) -> bool {
+        matches!(
+            self,
+            Item::GroupHeader { .. } | Item::DmHeader { .. } | Item::MemberSection { .. }
+        )
+    }
+
+    /// How many 等你 this row shows. An open member's 话题 are rows of their
+    /// own and count there.
+    pub(super) fn waiting_on_me(&self) -> usize {
+        let needs_you = crate::ui::native::BadgeState::NeedsYou;
+        match self {
+            Item::Topic(t) if t.line.badge == needs_you => 1,
+            Item::Dm { line: Some(l), .. } if l.badge == needs_you => 1,
+            Item::MemberHead {
+                row,
+                expanded: false,
+                ..
+            } => row.waiting_on_me,
+            _ => 0,
+        }
+    }
 }
 
 impl RailView {
@@ -600,7 +663,9 @@ impl RailView {
                         // D1-56: beside the avatar, no leading emoji.
                         crate::ui::avatar::name_beside_avatar(name).to_string(),
                     )
-                    .leading(MemberAvatar::new(peer.as_ref(), ROW_AVATAR))
+                    // The roster can arrive after the list: the initial of
+                    // the printed name, never the no-name glyph beside a name.
+                    .leading(MemberAvatar::new(peer.as_ref(), ROW_AVATAR).fallback_name(name))
                     .selected(*selected)
                     .unread(*unread)
                     .muted(*muted)
@@ -686,10 +751,19 @@ impl RailView {
                 .id(SharedString::from(format!("rail-no-topics-{id}")))
                 .h(crate::ui::native::tokens::metrics::SIDEBAR_ROW)
                 .mx(crate::ui::native::tokens::metrics::SIDEBAR_ROW_INSET)
-                .pl(crate::ui::native::tokens::space::S8)
+                .pl(EMPTY_LINE_INSET)
                 .flex()
                 .items_center()
                 .child(crate::ui::native::EmptyLine::new(c::RAIL_NO_TOPICS))
+                .into_any_element(),
+            Item::Offline { id } => div()
+                .id(SharedString::from(format!("rail-offline-{id}")))
+                .h(crate::ui::native::tokens::metrics::SIDEBAR_ROW)
+                .mx(crate::ui::native::tokens::metrics::SIDEBAR_ROW_INSET)
+                .pl(EMPTY_LINE_INSET)
+                .flex()
+                .items_center()
+                .child(crate::ui::native::EmptyLine::new(c::RAIL_OFFLINE_TOPICS))
                 .into_any_element(),
             Item::OtherTopics { id, n } => {
                 let nav = self.services.nav.clone();
