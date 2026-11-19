@@ -32,6 +32,12 @@ pub struct ArtifactWindows {
     opening: HashSet<String>,
     /// inc-host: the window's own title (without the 已更新到 / 有 v{n} note).
     titles: HashMap<String, String>,
+    /// The version each window was last asked to show, to load it again (重试).
+    #[cfg(any(target_os = "macos", windows))]
+    shown: HashMap<String, (artifact_view::VersionSpec, artifact_view::Capabilities)>,
+    /// Windows of a 产出 (not of an attached file): their pages get the app's base
+    /// stylesheet and theme variables, like the same page embedded in the main window.
+    styled: HashSet<String>,
 }
 
 impl Global for ArtifactWindows {}
@@ -156,10 +162,13 @@ fn show_folder(provider: &Arc<dyn ChatProvider>, folder: ArtifactFolder, cx: &mu
         {
             win.set_title(&title);
             win.set_versions(&items);
-            if let Err(e) = win.show_version(spec, caps) {
+            if let Err(e) = win.show_version(spec.clone(), caps) {
                 tracing::warn!(error = %e, "cannot show the version");
             }
             win.focus();
+            windows(cx)
+                .shown
+                .insert(folder.artifact_id.clone(), (spec, caps));
             return;
         }
         open_window(
@@ -257,6 +266,12 @@ fn open_window_with(
     // The app context lives on the thread of GPUI's message loop.
     #[cfg(windows)]
     let mtm = artifact_view::MainThread::current();
+    windows(cx)
+        .shown
+        .insert(artifact_id.clone(), (spec.clone(), caps));
+    if provider.is_some() {
+        windows(cx).styled.insert(artifact_id.clone());
+    }
     let mut options = OpenOptions::new(title, artifact_id.clone(), spec);
     // Only a bot's version that declares events may send them (R10).
     options.capabilities = caps;
@@ -310,7 +325,12 @@ fn on_event(
     use artifact_view::ArtifactEvent as E;
     match event {
         E::Closed => {
-            windows(cx).open.remove(artifact_id);
+            let w = windows(cx);
+            w.open.remove(artifact_id);
+            w.shown.remove(artifact_id);
+            w.styled.remove(artifact_id);
+            // What the page host kept for this page (open requests, its band) goes.
+            super::host::page_gone(&super::host::PageRef::Window(artifact_id.to_string()), cx);
         }
         E::VersionSelected { version } => {
             if let Some(p) = provider {
@@ -320,7 +340,15 @@ fn on_event(
         E::ExternalLink { url } => ask_to_open_link(url),
         E::LoadFailed { version, reason } => {
             tracing::warn!(artifact_id, version, %reason, "产出 page failed to load");
-            notify_error(ca::LOAD_FAILED.to_string(), cx);
+            // A toast with 重试 (the page's own window shows nothing): it loads the same
+            // version again in that window.
+            let id = artifact_id.to_string();
+            crate::ui::overlay::Toast::new(crate::ui::Sym::Failed, ca::LOAD_FAILED)
+                .tone(crate::ui::overlay::Tone::Danger)
+                .description(ca::LOAD_FAILED_LINE)
+                .action_button(ca::LOAD_RETRY, move |_, cx| reload_shown(&id, cx))
+                .id(format!("artifact-load-failed-{artifact_id}"))
+                .push(cx);
         }
         // inc-host: loads get the data; emits, asks and refs go to the page host.
         e @ (E::Loaded { .. }
@@ -328,6 +356,10 @@ fn on_event(
         | E::Ask { .. }
         | E::Ref { .. }
         | E::RequestsEnded { .. }) => {
+            // A new document: the app's base stylesheet and theme variables first.
+            if matches!(e, E::Loaded { .. }) {
+                style_window(artifact_id, cx);
+            }
             if provider.is_some() {
                 super::host::on_page_event(
                     super::host::PageRef::Window(artifact_id.to_string()),
@@ -342,7 +374,56 @@ fn on_event(
     }
 }
 
+/// 重试 after a page did not load: shows the version the window was last asked for again.
+#[cfg(any(target_os = "macos", windows))]
+fn reload_shown(artifact_id: &str, cx: &mut App) {
+    let w = windows(cx);
+    let Some((spec, caps)) = w.shown.get(artifact_id).cloned() else {
+        return;
+    };
+    if let Some(win) = w.open.get(artifact_id).filter(|w| !w.is_closed()) {
+        if let Err(e) = win.show_version(spec, caps) {
+            tracing::warn!(error = %e, "cannot load the version again");
+        }
+        win.focus();
+    }
+}
+
+/// Gives the page in the window of `artifact_id` the app's base stylesheet (the app
+/// font, text, table and control defaults, the `--tc-*` variables) in the theme of now.
+/// A page that sets nothing, or that uses the variables, then looks the same in its own
+/// window as embedded in the main one. An attached HTML file's window is left as the
+/// file is.
+#[cfg(any(target_os = "macos", windows))]
+fn style_window(artifact_id: &str, cx: &mut App) {
+    if !windows(cx).styled.contains(artifact_id) {
+        return;
+    }
+    let script = crate::ui::web_embed::window_base_script(cx);
+    if let Some(win) = windows(cx).open.get(artifact_id).filter(|w| !w.is_closed()) {
+        win.evaluate_script(&script);
+    }
+}
+
 // --- inc-host track: the page host reaches the 产出 windows ---
+
+/// The `(产出, version)` every open 产出 window shows.
+pub(crate) fn shown_versions(cx: &mut App) -> Vec<(String, u32)> {
+    #[cfg(any(target_os = "macos", windows))]
+    {
+        let w = windows(cx);
+        w.open
+            .iter()
+            .filter(|(id, win)| !win.is_closed() && w.styled.contains(*id))
+            .map(|(id, win)| (id.clone(), win.version()))
+            .collect()
+    }
+    #[cfg(not(any(target_os = "macos", windows)))]
+    {
+        let _ = cx;
+        Vec::new()
+    }
+}
 
 /// Gives the window of `artifact_id` a data snapshot when it shows `version`.
 pub(crate) fn push_to_window(
@@ -455,9 +536,12 @@ fn reload_window(provider: &Arc<dyn ChatProvider>, artifact_id: &str, version: u
                     && !win.is_closed()
                 {
                     win.set_versions(&items);
-                    if let Err(e) = win.show_version(spec, caps) {
+                    if let Err(e) = win.show_version(spec.clone(), caps) {
                         tracing::warn!(error = %e, "cannot reload the version");
                     }
+                    windows(cx)
+                        .shown
+                        .insert(folder.artifact_id.clone(), (spec, caps));
                 }
             });
         }
@@ -546,8 +630,17 @@ fn watch_theme(cx: &mut App) {
     }
     cx.observe_global::<gpui_component::Theme>(|cx| {
         let chrome = chrome(cx);
-        for window in windows(cx).open.values() {
+        // The pages follow the theme too: their base stylesheet and variables, and the
+        // colours of the 就这里提问 menu.
+        let base = crate::ui::web_embed::window_base_script(cx);
+        let menu = super::host::ref_menu(cx);
+        let w = windows(cx);
+        for (id, window) in &w.open {
             window.set_chrome(chrome);
+            if w.styled.contains(id) && !window.is_closed() {
+                window.evaluate_script(&base);
+                window.set_ref_menu(menu.clone());
+            }
         }
     })
     .detach();

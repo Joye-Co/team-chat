@@ -128,6 +128,28 @@ async fn ask_once(
         selector: Some("#bars .col:nth-child(1)".into()),
         user_action: true,
     };
+    // The same call from a page script, without the viewer's click, puts nothing there.
+    {
+        let mut scripted = ask.clone();
+        if let artifact_view::ArtifactEvent::Ref { user_action, .. } = &mut scripted {
+            *user_action = false;
+        }
+        cx.update(|cx| {
+            handle.update(cx, |_, window, cx| {
+                host::on_page_event(
+                    PageRef::Window(d::ART_REPORT.into()),
+                    d::ART_REPORT,
+                    &scripted,
+                    Some(window),
+                    cx,
+                )
+            })
+        })
+        .map_err(|e| e.to_string())?;
+        if refs(cx) != 0 {
+            return Err("a ref without the viewer's input reached the composer".into());
+        }
+    }
     {
         cx.update(|cx| {
             handle.update(cx, |_, window, cx| {
@@ -179,6 +201,10 @@ pub fn embed_states_checks(_: &Services, _: &mut App) -> Vec<Result<String, Stri
                 .count()
                 == 1,
             format!("only the web page keeps the 网页 frame ({frames:?})"),
+        ),
+        check(
+            !ids("embed-media").is_empty(),
+            "a 产出 that is not a web page shows its own preview".to_string(),
         ),
     ]
 }

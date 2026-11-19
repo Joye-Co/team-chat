@@ -3059,15 +3059,16 @@ pub trait ChatProvider: Send + Sync + 'static {
     ) -> Result<String, page_host::PageSendError> {
         Err(page_host::PageSendError::Refused)
     }
-    /// The latest data snapshot of a version (`GET …/data`): `(data, dataRev)`, `None`
-    /// when it could not be read.
+    /// The latest data snapshot of a version (`GET …/data`): `Ok(Some((data, dataRev)))`,
+    /// `Ok(None)` when the version has none (or the viewer may not read it), and `Err`
+    /// when it could not be read now (the page host tries again).
     fn fetch_page_data(
         &self,
         _artifact_id: &str,
         _version: u32,
-    ) -> futures::channel::oneshot::Receiver<Option<(serde_json::Value, u64)>> {
+    ) -> futures::channel::oneshot::Receiver<crate::data::page_host::PageData> {
         let (tx, rx) = futures::channel::oneshot::channel();
-        let _ = tx.send(None);
+        let _ = tx.send(Ok(None));
         rx
     }
     /// A new stream of page signals (acks, replies, data pushes). `None` when the provider

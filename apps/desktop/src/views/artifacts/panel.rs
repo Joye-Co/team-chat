@@ -191,11 +191,16 @@ impl Render for TopicOutputs {
             .artifacts
             .iter()
             .map(|a| {
-                let (kind, glyph) = match a.kind {
-                    ArtifactKind::Page => (ca::PANEL_KIND_PAGE, Sym::Document),
-                    ArtifactKind::Image => (f::KIND_IMAGE, Sym::Image),
-                    _ => (ca::KIND_FILE, Sym::File),
+                let kind = match a.kind {
+                    ArtifactKind::Page => ca::PANEL_KIND_PAGE,
+                    ArtifactKind::Image => f::KIND_IMAGE,
+                    _ => ca::KIND_FILE,
                 };
+                let glyph = crate::views::artifact_page::list::ListKind::of(
+                    self.services.provider.as_ref(),
+                    a,
+                )
+                .sym();
                 // A page shows its version and time (`网页 · v3 · 今天 14:31`);
                 // a first-version image its size (`图片 · 2.4 MB`).
                 let meta = match a.size_bytes {
