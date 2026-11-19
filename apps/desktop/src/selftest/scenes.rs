@@ -520,6 +520,13 @@ pub const SCENES: &[Scene] = &[
         open: crate::views::files::preview::open,
     },
     Scene {
+        name: "files-inline",
+        about: "A message with an attached table and Markdown notes: each shows in the viewer a 产出 of its kind gets, not a bare file row",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: crate::views::files::preview::open_inline,
+    },
+    Scene {
         name: "files-menu",
         about: "The files scene with the image's context menu: 打开, 在访达中显示, 快速查看, 共享…, 存储为…",
         start: Start::SignedIn,
@@ -920,6 +927,51 @@ pub const SCENES: &[Scene] = &[
                 s,
                 c,
                 MediaSample::from_name("media-markdown").expect("sample"),
+                cx,
+            )
+        },
+    },
+    Scene {
+        name: "media-markdown-find",
+        about: "⌘F in the Markdown reader: the find bar with seq typed, every match marked, the current one stronger, n / m",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: |s, c, cx| {
+            media_preview::open_finding(
+                s,
+                c,
+                MediaSample::from_name("media-markdown").expect("sample"),
+                Some("seq"),
+                cx,
+            )
+        },
+    },
+    Scene {
+        name: "media-markdown-find-code",
+        about: "⌘F in the Markdown reader on a word that is only in a code block: a band behind the part that holds the current match",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: |s, c, cx| {
+            media_preview::open_finding(
+                s,
+                c,
+                MediaSample::from_name("media-markdown").expect("sample"),
+                Some("lastAckedSeq"),
+                cx,
+            )
+        },
+    },
+    Scene {
+        name: "media-code-find",
+        about: "⌘F in the code viewer: the find bar with seq typed, the lines that hold a match filled, the current one stronger",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: |s, c, cx| {
+            media_preview::open_finding(
+                s,
+                c,
+                MediaSample::from_name("media-code").expect("sample"),
+                Some("seq"),
                 cx,
             )
         },
@@ -1399,6 +1451,7 @@ pub fn ready_check(name: &str) -> Option<fn(&App) -> bool> {
     // --- end inc-refs ---
     match name {
         "files-quick-look-page" => Some(crate::views::files::preview::quick_look_settled),
+        "files-inline" => Some(crate::views::files::preview::inline_ready),
         "artifact-v2-leave" => Some(crate::views::artifact_page::scenes::left),
         "web-embed" => Some(|cx| embed_preview::ready(EmbedMode::Topic, cx)),
         "web-embed-scrolled" => Some(|cx| embed_preview::ready(EmbedMode::Scrolled, cx)),
@@ -1482,7 +1535,7 @@ fn media_ready(name: &str) -> Option<fn(&App) -> bool> {
         "media-html" => Some(|cx| {
             media_preview::ready(MediaSample::from_name("media-html").expect("sample"), cx)
         }),
-        "media-markdown" => Some(|cx| {
+        "media-markdown" | "media-markdown-find" | "media-markdown-find-code" => Some(|cx| {
             media_preview::ready(
                 MediaSample::from_name("media-markdown").expect("sample"),
                 cx,
@@ -1500,7 +1553,7 @@ fn media_ready(name: &str) -> Option<fn(&App) -> bool> {
         "media-pdf" => Some(|cx| {
             media_preview::ready(MediaSample::from_name("media-pdf").expect("sample"), cx)
         }),
-        "media-code" => Some(|cx| {
+        "media-code" | "media-code-find" => Some(|cx| {
             media_preview::ready(MediaSample::from_name("media-code").expect("sample"), cx)
         }),
         "media-table" => Some(|cx| {

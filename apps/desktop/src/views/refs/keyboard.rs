@@ -1,7 +1,8 @@
 //! Keyboard part focus inside a card block (REFS §A3): Tab moves focus into a card's blocks;
 //! arrow keys move a part focus ring inside the focused block (table: cells; ⇧ + arrows: the
-//! row or the column; chart: points; list and plan: items and steps); ⌥↵ adds the focused
-//! part (the whole block when no part has focus), ⇧⌥↵ the whole block; Esc leaves the block.
+//! row or the column; chart: points; list and plan: items and steps); ↵ presses the 问这里
+//! the focused part shows, ⌥↵ adds the focused part (the whole block when no part has focus),
+//! ⇧⌥↵ the whole block; Esc leaves the block.
 //!
 //! A renderer wraps a block (or a run of blocks drawn together) in [`focus_block`] with the
 //! block's parts as [`NavPart`]s. The parts keep their own element ids, so the affordances
@@ -205,6 +206,19 @@ pub fn ring(radius: gpui::Pixels, cx: &App) -> gpui::Div {
         .border_color(n.focus)
 }
 
+/// The focus ring of a whole block: [`ring`] with 6 pt of clear space around the block,
+/// so its content never touches the line. It stays inside the 12 pt between blocks.
+fn block_ring(radius: gpui::Pixels, cx: &App) -> gpui::Div {
+    use crate::ui::native::tokens::{metrics::FOCUS_RING, space};
+    let reach = space::S6 + FOCUS_RING;
+    ring(radius, cx)
+        .top(-reach)
+        .bottom(-reach)
+        .left(-reach)
+        .right(-reach)
+        .rounded(radius + reach)
+}
+
 /// The focused part of block `key`, as an index into `parts`.
 fn current(key: &str, parts: &[NavPart], cx: &App) -> Option<usize> {
     let h = cx.try_global::<super::HubGlobal>()?.0.read(cx);
@@ -258,6 +272,15 @@ fn on_key(
             cx.stop_propagation();
             ask_about(target, RefIntent::Topic, window, cx);
         }
+        // Only on the block's own focus: Enter on a control inside it belongs to the control.
+        // One press asks once: a held key does not repeat it.
+        "enter" if !mods.shift && !e.is_held && handle(key, cx).is_focused(window) => {
+            if let Some(i) = current(key, parts, cx) {
+                let target = (parts[i].target)(cx);
+                cx.stop_propagation();
+                ask_about(target, RefIntent::Topic, window, cx);
+            }
+        }
         "escape" => {
             hub(cx).update(cx, |h, cx| {
                 if h.part_focus.as_ref().is_some_and(|(b, _)| b == key) {
@@ -301,7 +324,7 @@ pub fn focus_block(
         .track_focus(&f)
         .on_key_down(move |e: &KeyDownEvent, window, cx| on_key(&k, &parts, &whole, e, window, cx))
         .child(el)
-        .children(own_ring.then(|| ring(theme::radius::MD, cx)))
+        .children(own_ring.then(|| block_ring(theme::radius::MD, cx)))
         .into_any_element()
 }
 

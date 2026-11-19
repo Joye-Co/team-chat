@@ -13,12 +13,16 @@ use gpui::{
     StyledImage as _, Window, div, img, prelude::FluentBuilder as _, px, relative, uniform_list,
 };
 
-use gpui_component::{Disableable as _, Selectable as _, button::Button};
+use gpui_component::{
+    Disableable as _, Selectable as _,
+    button::Button,
+    menu::{DropdownMenu as _, PopupMenuItem},
+};
 
 use crate::ui::native::FocusRow as _;
 
 use super::{
-    inline::{code_line, fit, group_digits},
+    inline::{LineMarks, code_line_marked, fit, group_digits},
     parts::{self, mono, tool},
     screen,
     state::{MediaState, SPEEDS, Target},
@@ -88,11 +92,46 @@ fn id(spec: &FullSpec, part: &str) -> ElementId {
 struct Head {
     /// 12 muted after the title (kind, length, rows).
     meta: Option<SharedString>,
+    /// The kind's own pop-up (the page's version), first in the tools slot.
+    picker: Option<AnyElement>,
     /// The kind's own toggles (table of contents, wrap, page list, send), before the
     /// fixed actions.
     toggles: Vec<Button>,
     /// Copy, when the kind has something to copy.
     copy: Option<Rc<dyn Fn(&mut App)>>,
+}
+
+/// `v3` in a view's header. An attached file has no version: nothing.
+fn version_word(spec: &FullSpec) -> Option<String> {
+    (!spec.media.key.is_file()).then(|| {
+        fill(
+            cm::VERSION_CHIP,
+            &[("n", &spec.media.key.version.to_string())],
+        )
+    })
+}
+
+/// The 查找 toggle of a view that can be searched (Markdown, code, table): lit
+/// while the find bar is open.
+fn find_toggle(spec: &FullSpec, state: &Entity<MediaState>, cx: &App) -> Button {
+    let open = state.read(cx).find.is_some();
+    let state = state.clone();
+    action(
+        spec,
+        "find",
+        Sym::Search,
+        crate::copy::timeline::FIND_PLACEHOLDER,
+    )
+    .selected(open)
+    .on_click(move |_, window, cx| {
+        state.update(cx, |s, cx| {
+            if s.find.is_some() {
+                s.close_find(cx)
+            } else {
+                s.open_find(window, cx)
+            }
+        })
+    })
 }
 
 /// A 32 ghost header action (§2.2).
@@ -117,19 +156,22 @@ fn head(
     // The kind's own tools sit in a second slot, left of the fixed set and a
     // separator; the fixed set is the same in every kind and state: copy
     // (disabled at 50 % when nothing copies), download, open, close (F52).
-    let has_toggles = !h.toggles.is_empty();
+    let has_toggles = !h.toggles.is_empty() || h.picker.is_some();
     let mut tools = div()
         .flex_none()
         .flex()
         .items_center()
         .gap(space::S4)
+        .children(h.picker)
         .children(h.toggles)
         .when(has_toggles, |d| d.child(tool_separator(cx)));
     tools = match h.copy {
         Some(copy) => tools
             .child(action(spec, "copy", Sym::Copy, cm::COPY).on_click(move |_, _, cx| copy(cx))),
         None => tools.child(
+            // The label's ink at 50 % (§1.8), not the disabled ghost's dimmer one.
             action(spec, "copy", Sym::Copy, cm::COPY)
+                .text_color(n.label)
                 .disabled(true)
                 .opacity(0.5),
         ),
@@ -245,6 +287,7 @@ pub fn failed(
                 // failure, one Alert).
                 ui::native::Alert::new(Sym::Warning, cm::STATE_FAILED)
                     .tone(ui::native::AlertTone::Destructive)
+                    .on_card()
                     .description(cm::STATE_FAILED_RETRY)
                     .action(
                         ui::native::push_button(
@@ -266,6 +309,15 @@ pub fn failed(
         .into_any_element()
 }
 
+/// The kind's symbol of a version not read yet, from its name, so the header keeps its icon
+/// when the read finishes; the document for a name that says no kind (an artifact's title).
+fn head_symbol(title: &str) -> Sym {
+    match super::file_kind(title, "") {
+        super::MediaKind::File => Sym::Document,
+        kind => kind.icon(),
+    }
+}
+
 /// The header of a version that is not read yet (loading, failed): the same
 /// anatomy as the ready header (icon, title, the fixed actions), with copy,
 /// download and open disabled at 50 % until there is something to act on (§2.9).
@@ -275,6 +327,8 @@ fn bare_head(title: &str, close: CloseFn, cx: &App) -> gpui::Div {
     let off = |id: &'static str, sym: Sym, name: &'static str| {
         ui::native::icon_button_bare(id, sym, ui::native::IconSize::Regular)
             .named(name)
+            // The label's ink at 50 % (§1.8), not the disabled ghost's dimmer one.
+            .text_color(n.label)
             .disabled(true)
             .opacity(0.5)
     };
@@ -288,7 +342,7 @@ fn bare_head(title: &str, close: CloseFn, cx: &App) -> gpui::Div {
         .gap(space::S8)
         .border_b_1()
         .border_color(n.separator)
-        .child(ui::icon(Sym::Document, px(16.), n.secondary))
+        .child(ui::icon(head_symbol(title), px(16.), n.secondary))
         .child(
             ui::native::file_name(title.to_string())
                 .flex_1()
@@ -332,16 +386,29 @@ fn tool_separator(cx: &App) -> gpui::Div {
         .bg(n.separator)
 }
 
-fn frame(cx: &App) -> gpui::Div {
-    // §2.9: a sheet sits on the card surface (23 in dark), not the window
-    // background.
-    let n = ui::native::native_colors(cx);
+/// The column of a full view. It has no fill of its own: the sheet under it
+/// (`MediaViewer`, `native_sheet`) paints the rounded card surface (§2.9), and a
+/// square fill here would show past the sheet's corners (children are clipped to
+/// the box, not to its radius).
+fn frame(_cx: &App) -> gpui::Div {
+    div().size_full().flex().flex_col().overflow_hidden()
+}
+
+/// The selection mark of a thumbnail (a video frame, a PDF page): a 2 px ring in
+/// the foreground color with a 2 px gap of the sheet between it and the picture,
+/// so the ring reads on a white page and on a black frame alike. Unselected, the
+/// same box without the ring, so nothing moves.
+fn thumb_ring(selected: bool, radius: gpui::Pixels, cx: &App) -> gpui::Div {
+    let k = theme::colors(cx);
     div()
-        .size_full()
-        .flex()
-        .flex_col()
-        .bg(n.sheet)
-        .overflow_hidden()
+        .p(space::S2)
+        .rounded(radius)
+        .border_2()
+        .border_color(if selected {
+            k.text_1
+        } else {
+            gpui::transparent_black()
+        })
 }
 
 fn file(spec: &FullSpec, cx: &App) -> AnyElement {
@@ -356,15 +423,21 @@ fn file(spec: &FullSpec, cx: &App) -> AnyElement {
         },
         cx,
     );
-    let k = theme::colors(cx);
-    // On Windows a type the app has no viewer for is not a failure: the sheet says that
-    // there is no preview (Space leads here, where the Mac has Quick Look; the app never
-    // hands a downloaded file to a system preview handler, see `views::files::quick_look`).
-    // The Mac keeps its words.
-    let hint = if cfg!(target_os = "windows") && !spec.media.preview_failed {
-        cm::STATE_NO_PREVIEW
+    // A type the app has no viewer for is not a failure: the sheet says that there is
+    // no preview, with the file's own icon (§2.13). Only a preview that was tried and
+    // failed uses the failure words.
+    let (icon, title, hint) = if spec.media.preview_failed {
+        (
+            Sym::Alert,
+            cm::STATE_FAILED,
+            super::states::failed_hint(&spec.media.entry).0,
+        )
     } else {
-        super::states::failed_hint(&spec.media.entry).1
+        (
+            spec.media.kind.icon(),
+            cm::STATE_NO_PREVIEW_TITLE,
+            cm::STATE_NO_PREVIEW,
+        )
     };
     frame(cx)
         .child(header)
@@ -375,20 +448,17 @@ fn file(spec: &FullSpec, cx: &App) -> AnyElement {
                 .flex_col()
                 .items_center()
                 .justify_center()
-                .gap(space::S12)
-                .t_small()
-                .text_color(k.text_3)
-                .child(ui::icon(Sym::Alert, px(20.), k.text_3))
-                .child(hint)
                 .child(
-                    ui::native::push_button(
-                        id(spec, "sysbig"),
-                        cm::OPEN_WITH_SYSTEM,
-                        ui::PushStyle::Outline,
-                        ui::PushSize::Regular,
-                        cx,
-                    )
-                    .on_click(move |_, _, cx| parts::open_with_system(&path, cx)),
+                    ui::EmptyState::new(icon, title).description(hint).action(
+                        ui::native::push_button(
+                            id(spec, "sysbig"),
+                            cm::OPEN_WITH_SYSTEM,
+                            ui::PushStyle::Default,
+                            ui::PushSize::Small,
+                            cx,
+                        )
+                        .on_click(move |_, _, cx| parts::open_with_system(&path, cx)),
+                    ),
                 ),
         )
         .into_any_element()
@@ -439,9 +509,25 @@ fn html(
                 .capabilities(artifact_view::Capabilities::NONE),
             )
             // The page sits on the sheet's background edge to edge, with the
-            // pane padding (§2.22: no darker panel without a line).
+            // pane padding (§2.22: no darker panel without a line). An attached file
+            // (its key has no version) was written for a browser's white page.
             .fill()
+            .canvas(if m.key.version == 0 {
+                crate::ui::web_embed::Canvas::Paper
+            } else {
+                crate::ui::web_embed::Canvas::Sheet
+            })
             .rounded(gpui::Pixels::ZERO)
+            // Its fill ends at the sheet's bottom corners (the right one only while
+            // no rail sits beside it).
+            .rounded_bottom(
+                ui::native::metrics::SHEET_RADIUS,
+                if events.is_empty() {
+                    ui::native::metrics::SHEET_RADIUS
+                } else {
+                    gpui::Pixels::ZERO
+                },
+            )
             .pad(space::S16)
             .on_event(move |e, _, cx| {
                 if let ArtifactEvent::Emit { name, .. } = e {
@@ -459,98 +545,77 @@ fn html(
         }
         None => parts::placeholder(px(320.), ui::spinner(), cx).into_any_element(),
     };
-    let _ = window;
-    let versions = if spec.versions.is_empty() {
-        vec![VersionRow {
-            version: spec.media.key.version,
-            when: String::new(),
-            note: String::new(),
-        }]
-    } else {
-        spec.versions.clone()
-    };
-    let mut list = div().flex().flex_col().gap(space::S2).child(
-        div()
-            .px(space::S8)
-            .pb(space::S6)
-            .t_meta()
-            .text_color(k.text_3)
-            .child(cm::VERSIONS),
-    );
-    for v in &versions {
+    // The versions are a pop-up in the header (F52: a short rail collapses), there only
+    // when there is more than one to pick. A file attachment has no version at all.
+    let picker = (spec.versions.len() > 1).then(|| {
+        let versions = spec.versions.clone();
         let pick = state.clone();
-        let n = v.version;
-        list = list.child(
-            div()
-                .id(ElementId::Name(
-                    format!("{}-v{}", spec.id, v.version).into(),
-                ))
-                .focus_row(v.version == shown, cx)
-                .px(space::S8)
-                .py(space::S6)
-                .rounded(radius::MD)
-                .when(v.version == shown, |el| el.bg(k.selected))
-                .flex()
-                .flex_col()
-                .gap(space::S2)
-                .child(
-                    div()
-                        .flex()
-                        .gap(space::S6)
-                        .child(
-                            mono(
-                                fill(cm::VERSION_CHIP, &[("n", &v.version.to_string())]),
-                                k.text_1,
-                            )
-                            .font_weight(gpui::FontWeight::SEMIBOLD),
-                        )
-                        .child(mono(v.when.clone(), k.text_3)),
-                )
-                .when(!v.note.is_empty(), |el| {
-                    el.child(div().t_meta().text_color(k.text_2).child(v.note.clone()))
+        let chip = |n: u32| fill(cm::VERSION_CHIP, &[("n", &n.to_string())]);
+        let label = move |v: &VersionRow| {
+            [chip(v.version), v.when.clone(), v.note.clone()]
+                .into_iter()
+                .filter(|p| !p.is_empty())
+                .collect::<Vec<_>>()
+                .join(" · ")
+        };
+        let title = versions
+            .iter()
+            .find(|v| v.version == shown && !v.when.is_empty())
+            .map_or_else(|| chip(shown), |v| format!("{} · {}", chip(shown), v.when));
+        ui::native::inline_popup(id(spec, "versions"), title, window, cx)
+            .t_meta()
+            .tnum()
+            .named(cm::VERSIONS)
+            .dropdown_menu(move |menu, _, _| {
+                versions.iter().fold(menu, |menu, v| {
+                    let (pick, n) = (pick.clone(), v.version);
+                    menu.item(PopupMenuItem::new(label(v)).checked(n == shown).on_click(
+                        move |_, _, cx| {
+                            pick.update(cx, |s, cx| {
+                                s.version = Some(n);
+                                cx.notify();
+                            })
+                        },
+                    ))
                 })
-                .on_click(move |_, _, cx| {
-                    pick.update(cx, |s, cx| {
-                        s.version = Some(n);
-                        cx.notify();
-                    })
-                }),
-        );
-    }
-    let mut log = div()
-        .mt(space::S12)
-        .pt(space::S12)
-        .px(space::S8)
-        .border_t_1()
-        .border_color(k.sep)
-        .flex()
-        .flex_col()
-        .gap(space::S6)
-        .child(div().t_meta().text_color(k.text_3).child(cm::PAGE_EVENTS));
-    if events.is_empty() {
-        log = log.child(
-            div()
-                .t_meta()
-                .text_color(k.text_3)
-                .child(cm::PAGE_EVENTS_NONE),
-        );
-    }
-    for e in events.iter().rev().take(8) {
-        log = log.child(mono(e.clone(), k.text_2));
-    }
+            })
+            .into_any_element()
+    });
+    // What people did in the page, newest first: the rail is there only when there is
+    // something in it (D21).
+    let log = (!events.is_empty()).then(|| {
+        let mut log = div()
+            .w(px(150.))
+            .flex_none()
+            .border_l_1()
+            .border_color(k.sep)
+            .p(space::S16)
+            .flex()
+            .flex_col()
+            .gap(space::S6)
+            .child(div().t_meta().text_color(k.text_3).child(cm::PAGE_EVENTS));
+        for e in events.iter().rev().take(8) {
+            log = log.child(mono(e.clone(), k.text_2));
+        }
+        log
+    });
+    // A 产出 says which version it shows; with the pop-up, the pop-up says it.
+    let meta = if picker.is_none() && !spec.versions.is_empty() && shown > 0 {
+        format!(
+            "{} · {}",
+            cm::KIND_HTML,
+            fill(cm::VERSION_CHIP, &[("n", &shown.to_string())])
+        )
+    } else {
+        cm::KIND_HTML.to_string()
+    };
     let header = head(
         spec,
-        Sym::Document,
+        spec.media.kind.icon(),
         spec.media.title.clone(),
         Head {
-            meta: Some(
-                format!(
-                    "{} · {}",
-                    cm::KIND_HTML,
-                    fill(cm::VERSION_CHIP, &[("n", &shown.to_string())])
-                )
-                .into(),
-            ),
+            meta: Some(meta.into()),
+            picker,
             ..Head::default()
         },
         cx,
@@ -563,16 +628,7 @@ fn html(
                 .min_h(px(0.))
                 .flex()
                 .child(div().flex_1().min_w(px(0.)).flex().flex_col().child(page))
-                .child(
-                    div()
-                        .w(px(150.))
-                        .flex_none()
-                        .border_l_1()
-                        .border_color(k.sep)
-                        .p(space::S8)
-                        .child(list)
-                        .child(log),
-                ),
+                .children(log),
         )
         .into_any_element()
 }
@@ -610,17 +666,21 @@ fn sections(md: &str) -> (Option<String>, Vec<(Option<String>, String)>) {
 }
 
 /// The blocks of a Markdown document, one child each so the table of contents can scroll
-/// to a part: the title (its first-level heading at the top, else the 产出's title) with
-/// the file name and length under it, then one part per heading. The viewer sheet and the
-/// 产出 pane and page ([`markdown_reader`]) draw the same blocks.
+/// to a part: with `titled`, the title (its first-level heading at the top, else the
+/// 产出's title) with the file name and length under it, then one part per heading. The
+/// 产出 pane and page ([`markdown_reader`]) draw the title; the viewer sheet has it in
+/// its own header and draws only the parts (A5: nothing twice).
 fn markdown_blocks(
     id: &SharedString,
     title: Option<String>,
     parts_: Vec<(Option<String>, String)>,
     media: &Media,
     md: &store::Markdown,
+    titled: bool,
+    found: Option<&super::find::Found>,
     cx: &App,
 ) -> Vec<AnyElement> {
+    let palette = k_palette(cx);
     let k = theme::colors(cx);
     let head = div()
         .pb(space::S12)
@@ -639,14 +699,60 @@ fn markdown_blocks(
             fill(cm::MD_WORDS, &[("n", &group_digits(md.stats.chars as u64))])
         )))
         .into_any_element();
-    std::iter::once(head)
+    titled
+        .then_some(head)
+        .into_iter()
         .chain(parts_.into_iter().enumerate().map(|(i, (_, body))| {
+            // ⌘F: the matches of this part, the current one stronger; those in a code
+            // fence are painted by the fence's highlighter. A current match that cannot
+            // carry a mark (inline code, a link, a diagram) gets a band behind its part
+            // instead, as a row of a 话题 does.
+            let mut band = false;
+            let mut code_marks = Vec::new();
+            let body = match found.and_then(|f| f.matches.get(i).map(|m| (f, m))) {
+                Some((f, ranges)) if !ranges.is_empty() => {
+                    let current = f.current.filter(|(part, _)| *part == i).map(|(_, m)| m);
+                    let (marked, current_marked) = crate::views::timeline::find::mark_matches(
+                        &body,
+                        ranges,
+                        current,
+                        ui::native::tokens::find::match_fill(&palette),
+                        ui::native::tokens::find::current_fill(&palette),
+                    );
+                    let (fences, current_fenced) = crate::views::timeline::find::fence_marks(
+                        &body,
+                        ranges,
+                        current,
+                        ui::native::tokens::find::match_fill(&palette),
+                        ui::native::tokens::find::current_fill(&palette),
+                    );
+                    code_marks = fences;
+                    band = current.is_some() && !current_marked && !current_fenced;
+                    marked
+                }
+                _ => body,
+            };
             div()
+                .when(band, |d| {
+                    d.bg(ui::native::native_colors(cx).fill)
+                        .rounded(radius::MD)
+                        .mx(-space::S8)
+                        .px(space::S8)
+                })
+                // A section sits further from the block above it than its heading
+                // sits from its own content, so each heading reads with what it heads.
+                .when(i > 0, |d| d.pt(space::S16))
                 .pb(space::S8)
-                .child(markdown::message_body(
+                // A ```mermaid fence of the document is drawn as a diagram.
+                .child(markdown::document_body_marked(
                     ElementId::Name(format!("{id}-md-{i}").into()),
                     body,
-                    &[],
+                    &markdown::DocContext {
+                        artifact_id: media.key.artifact_id.clone(),
+                        version: media.key.version,
+                        part: i,
+                    },
+                    code_marks,
                 ))
                 .into_any_element()
         }))
@@ -679,7 +785,9 @@ pub fn markdown_reader(
                 .max_w(measure + pad * 2.)
                 .mx_auto()
                 .p(pad)
-                .children(markdown_blocks(&id, title, parts_, media, md, cx)),
+                .children(markdown_blocks(
+                    &id, title, parts_, media, md, true, None, cx,
+                )),
         )
 }
 
@@ -692,7 +800,7 @@ fn markdown_view(
     let k = theme::colors(cx);
     let (title, parts_) = sections(&md.text);
     let st = state.read(cx);
-    let (toc_on, selected, scroll) = (st.sidebar, st.toc, st.scroll.clone());
+    let (toc_on, toc_at, scroll) = (st.sidebar, st.toc.clone(), st.scroll.clone());
     let mut toc = div()
         .w(px(128.))
         .flex_none()
@@ -710,7 +818,27 @@ fn markdown_view(
                 .text_color(k.text_3)
                 .child(cm::MD_TOC),
         );
-    let offset = 1; // the title block is child 0
+    let offset = 0; // the sheet draws no title block: part i is child i
+    // ⌘F: the matches per part; the document scrolls to the part of the current one.
+    let bodies: Vec<&str> = parts_.iter().map(|(_, body)| body.as_str()).collect();
+    let found = super::find::found(state, &bodies, cx);
+    if let Some((part, _)) = found.as_ref().filter(|f| f.reveal).and_then(|f| f.current) {
+        // The table of contents names the part the document moves to.
+        toc_at.set(part);
+        // The part's distance from the first part, both measured in one frame: the
+        // sheet may still be sliding in, so a position in the window is not to be
+        // trusted. Before the parts were laid out once, the next frame tries again.
+        match (
+            scroll.bounds_for_item(offset),
+            scroll.bounds_for_item(part + offset),
+        ) {
+            (Some(first), Some(at)) => {
+                scroll.set_offset(gpui::point(px(0.), first.top() - at.top()));
+            }
+            _ => super::find::reveal_again(state, cx),
+        }
+    }
+    let selected = toc_at.get();
     for (i, (h, _)) in parts_.iter().enumerate() {
         let Some(h) = h else { continue };
         let go = state.clone();
@@ -730,7 +858,7 @@ fn markdown_view(
                 .on_click(move |_, _, cx| {
                     handle.scroll_to_top_of_item(i + offset);
                     go.update(cx, |s, cx| {
-                        s.toc = i;
+                        s.toc.set(i);
                         cx.notify();
                     });
                 }),
@@ -751,6 +879,8 @@ fn markdown_view(
             parts_,
             &spec.media,
             md,
+            false,
+            found.as_ref(),
             cx,
         ));
     let toggle = state.clone();
@@ -761,17 +891,21 @@ fn markdown_view(
         spec.media.title.clone(),
         Head {
             meta: Some(
-                format!(
-                    "{} · {}",
-                    cm::KIND_MARKDOWN,
-                    fill(
-                        cm::VERSION_CHIP,
-                        &[("n", &spec.media.key.version.to_string())]
-                    )
-                )
+                [
+                    version_word(spec),
+                    Some(fill(
+                        cm::MD_WORDS,
+                        &[("n", &group_digits(md.stats.chars as u64))],
+                    )),
+                ]
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>()
+                .join(" · ")
                 .into(),
             ),
             toggles: vec![
+                find_toggle(spec, state, cx),
                 action(spec, "toc", Sym::Outline, cm::MD_TOC)
                     .selected(toc_on)
                     .on_click(move |_, _, cx| {
@@ -782,13 +916,15 @@ fn markdown_view(
                     }),
             ],
             copy: Some(Rc::new(move |cx: &mut App| {
-                cx.write_to_clipboard(gpui::ClipboardItem::new_string(md_text.clone()))
+                super::parts::copy_text(md_text.clone(), cm::COPIED, cx)
             })),
+            ..Head::default()
         },
         cx,
     );
     frame(cx)
         .child(header)
+        .children(super::find::bar(&spec.id, state, cx))
         .child(
             div()
                 .flex_1()
@@ -800,7 +936,35 @@ fn markdown_view(
         .into_any_element()
 }
 
+fn k_palette(cx: &App) -> ui::native::tokens::Palette {
+    theme::colors(cx).palette
+}
+
 // --- images -------------------------------------------------------------------------
+
+const PICS_STRIP_TOP: gpui::Pixels = space::S12;
+const PICS_STRIP_BOTTOM: gpui::Pixels = space::S16;
+
+/// The room above and below the picture in the picture sheet.
+fn pics_pad(many: bool) -> gpui::Pixels {
+    if many { space::S4 } else { space::S16 }
+}
+
+/// The height the picture sheet's body needs for `pic` fitted to the sheet's width
+/// (the sheet hugs a short picture, §2.21); `None` when its size is unknown.
+pub(super) fn pics_body_height(pic: &store::Pic, many: bool) -> Option<gpui::Pixels> {
+    if pic.width == 0 || pic.height == 0 {
+        return None;
+    }
+    let mut wide = ui::native::metrics::SHEET_WIDE - space::S16 * 2.;
+    let mut rest = pics_pad(many) * 2.;
+    if many {
+        // The previous and next buttons beside the picture, then the strip under it.
+        wide -= (ui::native::tokens::height::SM + space::S16) * 2.;
+        rest += PICS_STRIP_TOP + ui::native::tokens::height::TABLE_ROW + PICS_STRIP_BOTTOM;
+    }
+    Some(wide * (pic.height as f32 / pic.width as f32) + rest)
+}
 
 fn lightbox(
     spec: &FullSpec,
@@ -823,32 +987,49 @@ fn lightbox(
     let copy_path = pic.path.clone();
     let (send_path, target) = (pic.path.clone(), spec.target.clone());
     // One sheet in the app's theme (F52): the fixed header, the picture, the strip.
+    // The meta says where in the set this picture is and what it is called; one
+    // picture has no position, and its name is not said twice after the title (A5):
+    // then the meta is its size.
+    let many = n > 1;
+    let mut meta = Vec::new();
+    if many {
+        meta.push(fill(
+            cm::IMG_POSITION,
+            &[("i", &(ix + 1).to_string()), ("n", &n.to_string())],
+        ));
+    }
+    if pic.name != spec.media.title {
+        meta.push(pic.name.clone());
+    }
+    if meta.is_empty() {
+        if pic.width > 0 && pic.height > 0 {
+            meta.push(format!("{} × {}", pic.width, pic.height));
+        }
+        meta.push(super::size_text(pic.bytes));
+    }
     let header = head(
         spec,
         Sym::Image,
         spec.media.title.clone(),
         Head {
-            meta: Some(
-                format!(
-                    "{} · {}",
-                    fill(
-                        cm::IMG_POSITION,
-                        &[("i", &(ix + 1).to_string()), ("n", &n.to_string())]
-                    ),
-                    pic.name
-                )
-                .into(),
-            ),
-            toggles: vec![action(spec, "send", Sym::Send, cm::SEND_TO_TOPIC).on_click(
-                move |_, _, cx| {
-                    if let Ok(bytes) = std::fs::read(&send_path) {
-                        parts::send_image(&target, bytes, cx);
-                    }
-                },
-            )],
+            meta: Some(meta.join(" · ").into()),
+            // Only with a 话题 to send to: an attachment's viewer has none.
+            toggles: parts::can_send_image(&target)
+                .then(|| {
+                    action(spec, "send", Sym::SendTo, cm::SEND_TO_TOPIC).on_click(
+                        move |_, _, cx| {
+                            if let Ok(bytes) = std::fs::read(&send_path) {
+                                parts::send_image(&target, bytes, cx);
+                            }
+                        },
+                    )
+                })
+                .into_iter()
+                .collect(),
             copy: Some(Rc::new(move |cx: &mut App| {
                 parts::copy_image_file(&copy_path, cx)
             })),
+            ..Head::default()
         },
         cx,
     );
@@ -891,13 +1072,15 @@ fn lightbox(
                 .items_center()
                 .gap(space::S16)
                 .px(space::S16)
-                .child(nav("prev", Sym::ChevronLeft, cm::IMG_PREV).on_click(step(-1)))
+                .when(many, |el| {
+                    el.child(nav("prev", Sym::ChevronLeft, cm::IMG_PREV).on_click(step(-1)))
+                })
                 .child(
                     div()
                         .flex_1()
                         .min_w_0()
                         .h_full()
-                        .py(space::S4)
+                        .py(pics_pad(many))
                         .flex()
                         .items_center()
                         .justify_center()
@@ -907,9 +1090,14 @@ fn lightbox(
                                 .object_fit(ObjectFit::Contain),
                         ),
                 )
-                .child(nav("next", Sym::ChevronRight, cm::IMG_NEXT).on_click(step(1))),
+                .when(many, |el| {
+                    el.child(nav("next", Sym::ChevronRight, cm::IMG_NEXT).on_click(step(1)))
+                }),
         )
-        .child(div().pt(space::S12).pb(space::S16).child(strip))
+        // One picture: no strip, and the same 16 under the picture as beside it.
+        .when(many, |el| {
+            el.child(div().pt(PICS_STRIP_TOP).pb(PICS_STRIP_BOTTOM).child(strip))
+        })
         .into_any_element()
 }
 
@@ -1047,9 +1235,11 @@ fn video(spec: &FullSpec, v: &store::Video, state: &Entity<MediaState>, cx: &App
     let duration = info.map_or(0., |i| i.duration);
     let st = state.read(cx);
     let (position, picked) = (st.position, st.frame);
+    let player_h = player_height(v);
     let player: AnyElement = match player_dir(&spec.media, v) {
         Some(dir) => {
             let follow = state.clone();
+            let seek = spec.clone();
             WebEmbed::new(
                 id(spec, "player"),
                 WebEmbedSpec::new(
@@ -1058,7 +1248,7 @@ fn video(spec: &FullSpec, v: &store::Video, state: &Entity<MediaState>, cx: &App
                 )
                 .capabilities(PLAYER_CAPS),
             )
-            .height(px(360.))
+            .height(player_h)
             .rounded(crate::ui::native::tokens::radius::CONTAINER)
             .autoplay(spec.autoplay)
             .on_event(move |e, _, cx| {
@@ -1066,6 +1256,12 @@ fn video(spec: &FullSpec, v: &store::Video, state: &Entity<MediaState>, cx: &App
                     && name == "time"
                 {
                     let t = payload["t"].as_f64().unwrap_or(0.);
+                    // The player's first report says it is there: the frame the view
+                    // opened at is applied now, and its 0 is not the position.
+                    if let Some(at) = follow.update(cx, |s, _| s.pending_seek.take()) {
+                        seek_player(&seek, at, cx);
+                        return;
+                    }
                     follow.update(cx, |s, cx| {
                         s.position = t;
                         cx.notify();
@@ -1077,7 +1273,8 @@ fn video(spec: &FullSpec, v: &store::Video, state: &Entity<MediaState>, cx: &App
         None => div().size_full().bg(s.bg).into_any_element(),
     };
     let current_chapter = v.chapters.iter().rposition(|c| c.t <= position + 0.25);
-    let mut chapters = div().flex().flex_col().gap(space::S2);
+    // The rows' fill bleeds 8 past the sheet's 16 inset, so their text sits on it (B7).
+    let mut chapters = div().mx(-space::S8).flex().flex_col().gap(space::S2);
     if !v.chapters.is_empty() {
         chapters = chapters.child(
             div()
@@ -1122,36 +1319,51 @@ fn video(spec: &FullSpec, v: &store::Video, state: &Entity<MediaState>, cx: &App
     }
     // The picked frame, else the frame at the playing position.
     let sel = picked.or_else(|| v.frames.iter().rposition(|f| f.t <= position + 0.25));
-    let mut strip = div().flex().gap(space::S8);
+    // Each frame sits 4 inside its selection ring: the strip bleeds 4 on every side so
+    // the frames, not the rings, keep the sheet's inset and the row's height.
+    let mut strip = div().flex_none().m(-space::S4).flex();
+    let sheet = ui::native::native_colors(cx).sheet;
     for (i, f) in v.frames.iter().enumerate() {
         let go = spec.clone();
         let st2 = state.clone();
         let t = f.t;
-        strip = strip.child(
-            div()
-                .id(ElementId::Name(format!("{}-fr-{i}", spec.id).into()))
-                .focus_row_with(false, crate::ui::native::Arrows::Grid, cx)
-                .flex_1()
-                .h(crate::ui::native::tokens::height::TABLE_ROW)
-                .rounded(radius::SM)
-                .overflow_hidden()
-                .border_2()
-                .border_color(if sel == Some(i) {
-                    k.text_1
-                } else {
-                    gpui::transparent_black()
-                })
-                .bg(s.bg)
-                .child(img(f.path.clone()).size_full().object_fit(ObjectFit::Cover))
-                .on_click(move |_, _, cx| {
-                    seek_player(&go, t, cx);
-                    st2.update(cx, |s, cx| {
-                        s.frame = Some(i);
-                        s.position = t;
-                        cx.notify();
-                    });
-                }),
-        );
+        strip =
+            strip.child(
+                thumb_ring(sel == Some(i), radius::MD, cx)
+                    .id(ElementId::Name(format!("{}-fr-{i}", spec.id).into()))
+                    .focus_row_with(false, crate::ui::native::Arrows::Grid, cx)
+                    .flex_1()
+                    .min_w_0()
+                    .h(crate::ui::native::tokens::height::TABLE_ROW + space::S8)
+                    .child(
+                        div()
+                            .relative()
+                            .size_full()
+                            .child(div().size_full().overflow_hidden().bg(s.bg).child(
+                                img(f.path.clone()).size_full().object_fit(ObjectFit::Cover),
+                            ))
+                            // A picture that covers its box is drawn past it and cut square
+                            // by the box, so its own radius is lost on the cut sides. The
+                            // corners come from a line of the sheet's fill over the gap
+                            // around the picture, round on its inner edge.
+                            .child(
+                                div()
+                                    .absolute()
+                                    .inset(-space::S2)
+                                    .rounded(radius::MARK + space::S2)
+                                    .border_2()
+                                    .border_color(sheet),
+                            ),
+                    )
+                    .on_click(move |_, _, cx| {
+                        seek_player(&go, t, cx);
+                        st2.update(cx, |s, cx| {
+                            s.frame = Some(i);
+                            s.position = t;
+                            cx.notify();
+                        });
+                    }),
+            );
     }
     let at = sel.and_then(|i| v.frames.get(i)).map_or(position, |f| f.t);
     let (copy_v, send_v, target) = (v.path.clone(), v.path.clone(), spec.target.clone());
@@ -1179,24 +1391,27 @@ fn video(spec: &FullSpec, v: &store::Video, state: &Entity<MediaState>, cx: &App
                 .flex_1()
                 .min_h(px(0.))
                 .overflow_y_scroll()
-                .p(space::S12)
+                // One left and right inset for every block, the header's (B7).
+                .px(space::S16)
+                .pt(space::S12)
+                // The frames end 16 above the sheet's edge, as beside them.
+                .pb(space::S16)
                 .flex()
                 .flex_col()
                 .gap(space::S12)
-                .child(div().w_full().h(px(360.)).flex_none().child(player))
+                .child(div().w_full().h(player_h).flex_none().child(player))
                 .when(!v.chapters.is_empty(), |el| el.child(chapters))
                 .child(
                     div()
+                        .flex_none()
                         .h(crate::ui::native::tokens::layout::BORDER)
-                        .bg(k.sep)
-                        .mx(space::S4),
+                        .bg(k.sep),
                 )
                 .child(
                     div()
                         .flex()
                         .items_center()
                         .gap(space::S8)
-                        .px(space::S4)
                         .child(
                             div()
                                 .t_meta()
@@ -1219,25 +1434,64 @@ fn video(spec: &FullSpec, v: &store::Video, state: &Entity<MediaState>, cx: &App
                                 }
                             }),
                         )
-                        .child(
-                            ui::native::push_button(
-                                id(spec, "sendf"),
-                                cm::VIDEO_SEND_FRAME,
-                                ui::native::PushStyle::Outline,
-                                ui::native::PushSize::Small,
-                                cx,
+                        // Only with a 话题 to send to: an attachment's viewer has none.
+                        .when(parts::can_send_image(&target), |row| {
+                            row.child(
+                                ui::native::push_button(
+                                    id(spec, "sendf"),
+                                    cm::VIDEO_SEND_FRAME,
+                                    ui::native::PushStyle::Outline,
+                                    ui::native::PushSize::Small,
+                                    cx,
+                                )
+                                .icon(ui::icon(Sym::SendTo, px(13.), k.text_2))
+                                .on_click(move |_, _, cx| {
+                                    if let Some(png) = store::frame_png(&send_v, at) {
+                                        parts::send_image(&target, png, cx);
+                                    }
+                                }),
                             )
-                            .icon(ui::icon(Sym::Send, px(13.), k.text_2))
-                            .on_click(move |_, _, cx| {
-                                if let Some(png) = store::frame_png(&send_v, at) {
-                                    parts::send_image(&target, png, cx);
-                                }
-                            }),
-                        ),
+                        }),
                 )
                 .child(strip),
         )
         .into_any_element()
+}
+
+/// The control bar of the player page (`.bar` in [`PLAYER_HTML`]).
+const PLAYER_BAR: gpui::Pixels = px(44.);
+/// The tallest the player block gets.
+const PLAYER_MAX_H: gpui::Pixels = px(360.);
+
+/// The player block: as tall as the picture at the sheet's width plus its control bar,
+/// so the picture is not letterboxed inside its frame; a tall clip stops at the cap.
+fn player_height(v: &store::Video) -> gpui::Pixels {
+    match v.info {
+        Some(i) if i.width > 0 && i.height > 0 => {
+            let wide = ui::native::metrics::SHEET_WIDE - space::S16 * 2.;
+            (wide * (i.height as f32 / i.width as f32) + PLAYER_BAR).min(PLAYER_MAX_H)
+        }
+        _ => PLAYER_MAX_H,
+    }
+}
+
+/// The height of the video view under its header (the blocks of [`video`] and the gaps
+/// between them), so the sheet ends 16 under the frame strip instead of on slack.
+pub(super) fn video_body_height(v: &store::Video) -> gpui::Pixels {
+    use crate::ui::native::tokens::{height, layout};
+    let gap = space::S12;
+    let mut h = space::S12 + player_height(v);
+    if !v.chapters.is_empty() {
+        // The label (12 / 16, 4 under it), then a 32 row after a gap of 2 each.
+        h += gap + px(16.) + space::S4 + (height::DEFAULT + space::S2) * v.chapters.len() as f32;
+    }
+    // The rule, the frame actions, the strip (its frames; the rings bleed 4).
+    h += gap + layout::BORDER + gap + height::SM + gap;
+    if !v.frames.is_empty() {
+        h += height::TABLE_ROW;
+    }
+    // 16 under the frames, and the 2 the header's rule and pixel rounding take.
+    h + space::S16 + space::S2
 }
 
 /// The player page inside the window: the system video decoder, custom controls in the
@@ -1249,7 +1503,7 @@ const PLAYER_HTML: &str = r##"<!doctype html><html><head><meta charset="utf-8"><
 html,body{margin:0;height:100%;background:#16161A;color:#C9C9D1;font:12px -apple-system,"Segoe UI Variable Text","Segoe UI","PingFang SC","Microsoft YaHei UI",sans-serif;-webkit-font-smoothing:antialiased;overflow:hidden}
 @media (prefers-color-scheme: dark){html,body{background:#0B0B0D}}
 .wrap{position:absolute;inset:0;display:flex;flex-direction:column}
-.stage{flex:1;position:relative;min-height:0}
+.stage{flex:1;position:relative;min-height:0;background:url("{POSTER}") center/contain no-repeat}
 video{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:transparent}
 .big{position:absolute;left:50%;top:50%;width:52px;height:52px;margin:-26px 0 0 -26px;border-radius:50%;border:0;background:rgba(255,255,255,.8);cursor:pointer;display:flex;align-items:center;justify-content:center}
 .big svg{width:20px;height:20px;margin-left:3px}
@@ -1266,9 +1520,9 @@ video{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;backgr
 .speed{padding:2px 7px!important;font:12px -apple-system,"Segoe UI Variable Text","Segoe UI",sans-serif;font-variant-numeric:tabular-nums}
 </style></head><body><div class="wrap">
 <div class="stage"><video id="v" src="{SRC}" poster="{POSTER}" playsinline preload="metadata"></video>
-<button class="big" id="big" aria-label="{PLAY}"><svg viewBox="0 0 24 24"><path d="M7 4l13 8-13 8z" fill="#141416"/></svg></button></div>
+<button class="big" id="big" aria-label="{PLAY}"><svg viewBox="0 0 24 24"><path d="M7 4l13 8-13 8z" fill="none" stroke="#141416" stroke-width="1.75" stroke-linejoin="round"/></svg></button></div>
 <div class="bar">
-<button id="pp" aria-label="{PLAY}"><svg viewBox="0 0 24 24" id="ppi"><path d="M7 4l13 8-13 8z" fill="currentColor"/></svg></button>
+<button id="pp" aria-label="{PLAY}"><svg viewBox="0 0 24 24" id="ppi"><path d="M7 4l13 8-13 8z"/></svg></button>
 <span class="time" id="tm">0:00 <i>/ 0:00</i></span>
 <div class="track" id="tr"><div class="segs" id="segs"></div><div class="thumb" id="th"></div></div>
 <button class="speed" id="sp">1×</button>
@@ -1286,7 +1540,7 @@ parts.forEach(function(p){var d=document.createElement('div');d.className='seg';
 function layout(){var T=dur()||1;parts.forEach(function(p){var e=p.end==null?T:p.end;p.el.style.flex=Math.max(0.001,(e-p.t)/T)+' 1 0'})}
 function draw(){var T=dur()||1,t=v.currentTime;parts.forEach(function(p){var e=p.end==null?T:p.end;var f=Math.min(1,Math.max(0,(t-p.t)/(e-p.t)));p.el.firstChild.style.width=(f*100)+'%'});th.style.left=(t/T*100)+'%';tm.innerHTML=fmt(t)+' <i>/ '+fmt(T)+'</i>'}
 var last=-1;function report(){if(Math.abs(v.currentTime-last)<0.2)return;last=v.currentTime;try{window.artifact.emitEvent('time',{t:v.currentTime})}catch(e){}}
-function icon(){document.getElementById('ppi').innerHTML=v.paused?'<path d="M7 4l13 8-13 8z" fill="currentColor"/>':'<rect x="6" y="5" width="4" height="14" fill="currentColor"/><rect x="14" y="5" width="4" height="14" fill="currentColor"/>';document.getElementById('big').style.display=v.paused&&v.currentTime<0.01?'flex':'none'}
+function icon(){document.getElementById('ppi').innerHTML=v.paused?'<path d="M7 4l13 8-13 8z"/>':'<rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/>';document.getElementById('big').style.display=v.paused&&v.currentTime<0.01?'flex':'none'}
 function toggle(){if(v.paused)v.play();else v.pause()}
 document.getElementById('big').onclick=toggle;document.getElementById('pp').onclick=toggle;v.onclick=toggle;
 var speeds=[1,1.25,1.5,2,0.75],si=0;document.getElementById('sp').onclick=function(){si=(si+1)%speeds.length;v.playbackRate=speeds[si];this.textContent=speeds[si]+'×'};
@@ -1295,7 +1549,7 @@ document.getElementById('pip').onclick=function(){try{if(v.webkitSetPresentation
 if(!v.webkitSetPresentationMode&&!document.pictureInPictureEnabled)document.getElementById('pip').style.display='none';
 document.getElementById('tr').onclick=function(e){var r=this.getBoundingClientRect();v.currentTime=(e.clientX-r.left)/r.width*dur()};
 window.seekTo=function(t){v.currentTime=t;draw();report()};
-v.addEventListener('loadedmetadata',function(){layout();draw()});
+v.addEventListener('loadedmetadata',function(){layout();draw();report()});
 v.addEventListener('timeupdate',function(){draw();report()});
 v.addEventListener('play',icon);v.addEventListener('pause',icon);v.addEventListener('seeked',function(){draw();report();icon()});
 document.addEventListener('keydown',function(e){if(e.key===' '){e.preventDefault();toggle()}if(e.key==='ArrowRight')v.currentTime+=5;if(e.key==='ArrowLeft')v.currentTime-=5});
@@ -1375,7 +1629,9 @@ fn audio(spec: &FullSpec, a: &store::Audio, state: &Entity<MediaState>, cx: &App
             speakers.push(s.clone());
         }
     }
-    let tones = [k.text_1, k.text_3, k.border_strong];
+    // Three steps of the palette that all read on the sheet in both themes (a border
+    // token is a line, not a value fill).
+    let tones = [k.text_1, k.palette.muted_foreground, k.palette.ring];
     let mut segs = div()
         .h(px(6.))
         .w_full()
@@ -1450,7 +1706,7 @@ fn audio(spec: &FullSpec, a: &store::Audio, state: &Entity<MediaState>, cx: &App
                 .flex()
                 .gap(space::S12)
                 .when(current == Some(i), |el| el.bg(k.selected))
-                .child(mono(super::clock_text(c.t), k.text_3).w(px(40.)).pt(px(2.)))
+                .child(mono(super::time_text(c.t), k.text_3).w(px(40.)))
                 .child(
                     div()
                         .flex_1()
@@ -1467,11 +1723,28 @@ fn audio(spec: &FullSpec, a: &store::Audio, state: &Entity<MediaState>, cx: &App
         );
     }
     let round = |idn: &str, icon: Sym, label: &'static str| tool(id(spec, idn), icon, label);
+    // The transcript is what this view can copy: every cue, as its rows read.
+    let transcript = (!a.transcript.is_empty()).then(|| {
+        a.transcript
+            .iter()
+            .map(|c| {
+                let time = super::time_text(c.t);
+                match &c.speaker {
+                    Some(s) => format!("{time} {s} {}", c.text),
+                    None => format!("{time} {}", c.text),
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    });
     let header = head(
         spec,
         Sym::Audio,
         spec.media.file_name().to_string(),
         Head {
+            copy: transcript.map(|all| -> Rc<dyn Fn(&mut App)> {
+                Rc::new(move |cx: &mut App| super::parts::copy_text(all.clone(), cm::COPIED, cx))
+            }),
             meta: Some(
                 format!(
                     "{} · {}",
@@ -1506,7 +1779,7 @@ fn audio(spec: &FullSpec, a: &store::Audio, state: &Entity<MediaState>, cx: &App
                         .flex()
                         .items_center()
                         .gap(space::S12)
-                        .child(round("back", Sym::Retry, cm::AUDIO_BACK).on_click(
+                        .child(round("back", Sym::Back15, cm::AUDIO_BACK).on_click(
                             move |_, _, cx| {
                                 back.update(cx, |s, cx| {
                                     let t = s.position - 15.;
@@ -1521,7 +1794,7 @@ fn audio(spec: &FullSpec, a: &store::Audio, state: &Entity<MediaState>, cx: &App
                             cx,
                             move |_, _, cx| toggle.update(cx, |s, cx| s.toggle_audio(&path, cx)),
                         ))
-                        .child(round("fwd", Sym::Refresh, cm::AUDIO_FORWARD).on_click(
+                        .child(round("fwd", Sym::Forward15, cm::AUDIO_FORWARD).on_click(
                             move |_, _, cx| {
                                 fwd.update(cx, |s, cx| {
                                     let t = s.position + 15.;
@@ -1533,8 +1806,8 @@ fn audio(spec: &FullSpec, a: &store::Audio, state: &Entity<MediaState>, cx: &App
                             mono(
                                 format!(
                                     "{} / {}",
-                                    super::clock_text(position),
-                                    super::clock_text(a.duration)
+                                    super::time_text(position),
+                                    super::time_text(a.duration)
                                 ),
                                 k.text_1,
                             )
@@ -1612,14 +1885,17 @@ fn pdf(spec: &FullSpec, p: &store::Pdf, state: &Entity<MediaState>, cx: &App) ->
     let side = state.clone();
     let toolbar = div()
         .h(crate::ui::native::tokens::height::FOOTER_ROW)
-        .px(space::S12)
+        // The header's 32 actions on the header's columns: the first glyph under its
+        // icon, the last under 关闭.
+        .pl(space::S8)
+        .pr(space::S12)
         .flex()
         .items_center()
         .gap(space::S8)
         .border_b_1()
         .border_color(k.sep)
         .child(
-            tool(id(spec, "side"), Sym::SidebarToggle, cm::PDF_SIDEBAR)
+            action(spec, "side", Sym::SidebarToggle, cm::PDF_SIDEBAR)
                 .selected(sidebar)
                 .on_click(move |_, _, cx| {
                     side.update(cx, |s, cx| {
@@ -1634,7 +1910,7 @@ fn pdf(spec: &FullSpec, p: &store::Pdf, state: &Entity<MediaState>, cx: &App) ->
                 .h(crate::ui::native::tokens::icon::MD)
                 .bg(k.sep),
         )
-        .child(tool(id(spec, "prev"), Sym::ChevronLeft, cm::PDF_PREV).on_click(go(-1)))
+        .child(action(spec, "prev", Sym::ChevronLeft, cm::PDF_PREV).on_click(go(-1)))
         .child(
             mono(
                 fill(
@@ -1645,9 +1921,9 @@ fn pdf(spec: &FullSpec, p: &store::Pdf, state: &Entity<MediaState>, cx: &App) ->
             )
             .text_size(crate::ui::native::tokens::text::UI.0),
         )
-        .child(tool(id(spec, "next"), Sym::ChevronRight, cm::PDF_NEXT).on_click(go(1)))
+        .child(action(spec, "next", Sym::ChevronRight, cm::PDF_NEXT).on_click(go(1)))
         .child(div().flex_1())
-        .child(tool(id(spec, "zout"), Sym::Minus, cm::PDF_ZOOM_OUT).on_click(zoom_by(1. / 1.25)))
+        .child(action(spec, "zout", Sym::Minus, cm::PDF_ZOOM_OUT).on_click(zoom_by(1. / 1.25)))
         .child(
             mono(format!("{}%", (zoom * 100.).round()), k.text_1)
                 .text_size(crate::ui::native::tokens::text::MONO.0)
@@ -1655,7 +1931,7 @@ fn pdf(spec: &FullSpec, p: &store::Pdf, state: &Entity<MediaState>, cx: &App) ->
                 .flex()
                 .justify_center(),
         )
-        .child(tool(id(spec, "zin"), Sym::Plus, cm::PDF_ZOOM_IN).on_click(zoom_by(1.25)));
+        .child(action(spec, "zin", Sym::Plus, cm::PDF_ZOOM_IN).on_click(zoom_by(1.25)));
     let mut thumbs = div()
         .id(id(spec, "thumbs"))
         .w(px(104.))
@@ -1664,11 +1940,13 @@ fn pdf(spec: &FullSpec, p: &store::Pdf, state: &Entity<MediaState>, cx: &App) ->
         .overflow_y_scroll()
         .border_r_1()
         .border_color(k.sep)
-        .p(space::S12)
+        .bg(ui::native::native_colors(cx).sheet)
+        .rounded_bl(ui::native::metrics::SHEET_RADIUS)
+        .p(space::S8)
         .flex()
         .flex_col()
         .items_center()
-        .gap(space::S12);
+        .gap(space::S4);
     for (i, page) in p.images.iter().enumerate() {
         let (w, h) = fit(page.width, page.height, 66., 96.);
         let pick = state.clone();
@@ -1681,17 +1959,13 @@ fn pdf(spec: &FullSpec, p: &store::Pdf, state: &Entity<MediaState>, cx: &App) ->
                 .flex_col()
                 .items_center()
                 .gap(space::S4)
+                .p(space::S4)
+                .rounded(radius::MD)
+                .when(i == ix, |el| el.bg(k.selected))
                 .child(
-                    div()
-                        .w(px(w + 4.))
-                        .h(px(h + 4.))
-                        .rounded(crate::ui::native::tokens::radius::CHECKBOX)
-                        .border_2()
-                        .border_color(if i == ix {
-                            k.text_1
-                        } else {
-                            gpui::transparent_black()
-                        })
+                    thumb_ring(i == ix, crate::ui::native::tokens::radius::CHECKBOX, cx)
+                        .w(px(w) + space::S8)
+                        .h(px(h) + space::S8)
                         .child(
                             div()
                                 .size_full()
@@ -1726,7 +2000,6 @@ fn pdf(spec: &FullSpec, p: &store::Pdf, state: &Entity<MediaState>, cx: &App) ->
         .h_full()
         .overflow_scroll()
         .track_scroll(&pages)
-        .bg(k.code_bg)
         .p(space::S16)
         .flex()
         .flex_col()
@@ -1758,7 +2031,7 @@ fn pdf(spec: &FullSpec, p: &store::Pdf, state: &Entity<MediaState>, cx: &App) ->
     }
     let header = head(
         spec,
-        Sym::Document,
+        spec.media.kind.icon(),
         spec.media.file_name().to_string(),
         Head {
             meta: Some(
@@ -1777,10 +2050,15 @@ fn pdf(spec: &FullSpec, p: &store::Pdf, state: &Entity<MediaState>, cx: &App) ->
         .child(header)
         .child(toolbar)
         .child(
+            // The muted backdrop of the pages is this row's fill, not the scrolling
+            // pane's: the row ends at the sheet's bottom edge, so its corners follow
+            // the sheet's (children are clipped to the box, not to its radius).
             div()
                 .flex_1()
                 .min_h(px(0.))
                 .flex()
+                .bg(k.code_bg)
+                .rounded_b(ui::native::metrics::SHEET_RADIUS)
                 .when(sidebar, |el| el.child(thumbs))
                 .child(doc),
         )
@@ -1797,15 +2075,47 @@ fn code(spec: &FullSpec, c: &store::Code, state: &Entity<MediaState>, cx: &App) 
     let starts = Arc::new(block_starts(&c.lines, lang));
     let width = (c.lines.len().max(1).ilog10() + 1) as f32 * 8. + 24.;
     let wrap = state.read(cx).wrap;
+    // ⌘F: the lines that hold a match get a fill, the current one a stronger
+    // one; the list scrolls to it.
+    let found = super::find::found(state, &c.lines, cx);
+    if let Some((line, _)) = found.as_ref().filter(|f| f.reveal).and_then(|f| f.current) {
+        state
+            .read(cx)
+            .list
+            .scroll_to_item(line, gpui::ScrollStrategy::Center);
+    }
+    let fills: Arc<Vec<Option<gpui::Hsla>>> = Arc::new(match &found {
+        Some(f) => (0..c.lines.len()).map(|i| f.line_fill(i, cx)).collect(),
+        None => Vec::new(),
+    });
+    // The matches themselves, and which one is current (line, match on the line).
+    let marks: Arc<Vec<Vec<std::ops::Range<usize>>>> =
+        Arc::new(found.as_ref().map_or_else(Vec::new, |f| f.matches.clone()));
+    let current = found.as_ref().and_then(|f| f.current);
+    let list_marks = marks.clone();
     let list_lines = lines.clone();
+    let list_fills = fills.clone();
     let list = uniform_list(id(spec, "lines"), lines.len(), move |range, _window, cx| {
         let k = theme::colors(cx);
         range
             .map(|i| {
                 let mut block = starts[i];
+                let on_current = current.is_some_and(|(at, _)| at == i);
+                let line_marks =
+                    list_marks
+                        .get(i)
+                        .filter(|r| !r.is_empty())
+                        .map(|ranges| LineMarks {
+                            ranges,
+                            current: current.filter(|(at, _)| *at == i).map(|(_, m)| m),
+                            on_current,
+                        });
                 div()
                     .h(px(20.))
                     .flex()
+                    .when_some(list_fills.get(i).copied().flatten(), |d, fill| {
+                        d.w_full().bg(fill)
+                    })
                     .child(
                         div()
                             .w(px(width))
@@ -1813,10 +2123,16 @@ fn code(spec: &FullSpec, c: &store::Code, state: &Entity<MediaState>, cx: &App) 
                             .pr(space::S12)
                             .flex()
                             .justify_end()
-                            .text_color(k.text_3)
+                            .text_color(if on_current { k.text_1 } else { k.text_3 })
                             .child((i + 1).to_string()),
                     )
-                    .child(code_line(&list_lines[i], lang, &mut block, cx))
+                    .child(code_line_marked(
+                        &list_lines[i],
+                        lang,
+                        &mut block,
+                        line_marks,
+                        cx,
+                    ))
             })
             .collect()
     })
@@ -1828,25 +2144,26 @@ fn code(spec: &FullSpec, c: &store::Code, state: &Entity<MediaState>, cx: &App) 
     let toggle = state.clone();
     let header = head(
         spec,
-        Sym::CodeFile,
+        spec.media.kind.icon(),
         spec.media.file_name().to_string(),
         Head {
             meta: Some(
-                format!(
-                    "{} · {}",
-                    fill(
-                        cm::VERSION_CHIP,
-                        &[("n", &spec.media.key.version.to_string())]
-                    ),
-                    fill(
+                [
+                    version_word(spec),
+                    Some(fill(
                         cm::CODE_NOTE,
-                        &[("lang", c.language), ("n", &lines.len().to_string())]
-                    )
-                )
+                        &[("lang", c.language), ("n", &lines.len().to_string())],
+                    )),
+                ]
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>()
+                .join(" · ")
                 .into(),
             ),
             toggles: vec![
-                action(spec, "wrap", Sym::List, cm::CODE_WRAP)
+                find_toggle(spec, state, cx),
+                action(spec, "wrap", Sym::Wrap, cm::CODE_WRAP)
                     .selected(wrap)
                     .on_click(move |_, _, cx| {
                         toggle.update(cx, |s, cx| {
@@ -1856,8 +2173,9 @@ fn code(spec: &FullSpec, c: &store::Code, state: &Entity<MediaState>, cx: &App) 
                     }),
             ],
             copy: Some(Rc::new(move |cx: &mut App| {
-                cx.write_to_clipboard(gpui::ClipboardItem::new_string(all.clone()))
+                super::parts::copy_text(all.clone(), cm::COPIED, cx)
             })),
+            ..Head::default()
         },
         cx,
     );
@@ -1867,10 +2185,36 @@ fn code(spec: &FullSpec, c: &store::Code, state: &Entity<MediaState>, cx: &App) 
             .flex_1()
             .overflow_y_scroll()
             .t_code();
+        let sheet = ui::native::native_colors(cx).sheet;
         for (i, l) in lines.iter().enumerate() {
+            let on_current = current.is_some_and(|(at, _)| at == i);
+            // The same marks as the unwrapped lines, on text that may wrap.
+            let highlights: Vec<(std::ops::Range<usize>, gpui::HighlightStyle)> = marks
+                .get(i)
+                .into_iter()
+                .flatten()
+                .enumerate()
+                .map(|(m, range)| {
+                    let now = current == Some((i, m));
+                    (
+                        range.clone(),
+                        gpui::HighlightStyle {
+                            font_weight: Some(theme::MEDIUM_WEIGHT),
+                            underline: Some(gpui::UnderlineStyle {
+                                thickness: ui::native::metrics::HAIRLINE,
+                                ..Default::default()
+                            }),
+                            color: now.then_some(sheet),
+                            background_color: now.then_some(k.text_1),
+                            ..Default::default()
+                        },
+                    )
+                })
+                .collect();
             col = col.child(
                 div()
                     .flex()
+                    .when_some(fills.get(i).copied().flatten(), |d, fill| d.bg(fill))
                     .child(
                         div()
                             .w(px(width))
@@ -1878,15 +2222,14 @@ fn code(spec: &FullSpec, c: &store::Code, state: &Entity<MediaState>, cx: &App) 
                             .pr(space::S12)
                             .flex()
                             .justify_end()
-                            .text_color(k.text_3)
+                            .text_color(if on_current { k.text_1 } else { k.text_3 })
                             .child((i + 1).to_string()),
                     )
                     .child(
-                        div()
-                            .flex_1()
-                            .min_w(px(0.))
-                            .text_color(k.text_1)
-                            .child(l.clone()),
+                        div().flex_1().min_w(px(0.)).text_color(k.text_1).child(
+                            gpui::StyledText::new(SharedString::from(l.clone()))
+                                .with_highlights(highlights),
+                        ),
                     ),
             );
         }
@@ -1896,6 +2239,7 @@ fn code(spec: &FullSpec, c: &store::Code, state: &Entity<MediaState>, cx: &App) 
     };
     frame(cx)
         .child(header)
+        .children(super::find::bar(&spec.id, state, cx))
         // The same space above the first line's ink and under the last
         // line's (A4): 8 + the line's own leading at the top, 12 under it.
         .child(
@@ -1922,6 +2266,21 @@ fn block_starts(lines: &[String], lang: text::Lang) -> Vec<bool> {
 }
 
 // --- table --------------------------------------------------------------------------
+
+/// The table as it shows, tab-separated: the header, then the rows in `order`.
+fn table_text(t: &text::Table, order: &[usize]) -> String {
+    let line = |cells: &[String]| {
+        cells
+            .iter()
+            .map(|c| c.replace(['\t', '\n', '\r'], " "))
+            .collect::<Vec<_>>()
+            .join("\t")
+    };
+    std::iter::once(line(&t.header))
+        .chain(order.iter().map(|&i| line(&t.rows[i])))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
 
 fn table(spec: &FullSpec, t: &text::Table, state: &Entity<MediaState>, cx: &App) -> AnyElement {
     let k = theme::colors(cx);
@@ -2002,9 +2361,23 @@ fn table(spec: &FullSpec, t: &text::Table, state: &Entity<MediaState>, cx: &App)
                 }),
         ));
     }
+    // ⌘F: the rows (in the order shown) that hold a match, the current one stronger.
+    let row_texts: Vec<String> = order.iter().map(|&i| t.rows[i].join("\t")).collect();
+    let found = super::find::found(state, &row_texts, cx);
+    if let Some((row, _)) = found.as_ref().filter(|f| f.reveal).and_then(|f| f.current) {
+        state
+            .read(cx)
+            .list
+            .scroll_to_item(row, gpui::ScrollStrategy::Center);
+    }
+    let fills: Arc<Vec<Option<gpui::Hsla>>> = Arc::new(match &found {
+        Some(f) => (0..order.len()).map(|i| f.line_fill(i, cx)).collect(),
+        None => Vec::new(),
+    });
     let rows = Arc::new(t.rows.clone());
     let numeric = Arc::new(t.numeric.clone());
     let order = Arc::new(order);
+    let (copied, shown_order) = (spec.media.clone(), order.clone());
     let list = uniform_list(id(spec, "rows"), order.len(), move |range, _window, cx| {
         let k = theme::colors(cx);
         range
@@ -2016,6 +2389,7 @@ fn table(spec: &FullSpec, t: &text::Table, state: &Entity<MediaState>, cx: &App)
                     .h(TABLE_ROW)
                     .flex()
                     .items_center()
+                    .when_some(fills.get(i).copied().flatten(), |r, fill| r.bg(fill))
                     .when(i + 1 < order.len(), |r| {
                         r.border_b_1().border_color(n.separator)
                     });
@@ -2062,12 +2436,26 @@ fn table(spec: &FullSpec, t: &text::Table, state: &Entity<MediaState>, cx: &App)
                 )
                 .into(),
             ),
+            toggles: vec![find_toggle(spec, state, cx)],
+            copy: Some(Rc::new(move |cx: &mut App| {
+                let Data::Table(t) = &copied.data else {
+                    return;
+                };
+                // A file longer than the rows read: the file itself, so nothing is cut.
+                let whole = (t.rows.len() < t.total_rows)
+                    .then(|| std::fs::read(copied.entry_path()).ok())
+                    .flatten()
+                    .map(|bytes| String::from_utf8_lossy(&bytes).into_owned());
+                let text = whole.unwrap_or_else(|| table_text(t, &shown_order));
+                super::parts::copy_text(text, cm::COPIED, cx)
+            })),
             ..Head::default()
         },
         cx,
     );
     frame(cx)
         .child(header)
+        .children(super::find::bar(&spec.id, state, cx))
         .child(table_head)
         .child(div().flex_1().min_h(px(0.)).flex().flex_col().child(list))
         .child(

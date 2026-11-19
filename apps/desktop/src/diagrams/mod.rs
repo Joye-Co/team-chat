@@ -49,6 +49,14 @@ pub struct DiagramSource {
     pub block_name: Option<String>,
 }
 
+impl DiagramSource {
+    /// Whether a node of this diagram can be referenced (问这里, ⌥-click): a fence
+    /// needs its block index, which a Markdown 产出 does not have.
+    pub fn can_ref(&self) -> bool {
+        !matches!(self.block, DiagramBlock::MarkdownFence { index: None, .. })
+    }
+}
+
 /// The block that holds the diagram.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DiagramBlock {
@@ -858,6 +866,7 @@ pub fn source_order(source: &str, nodes: &[renderer::DiagramNode]) -> Vec<Node> 
                     y: n.y as f32,
                     w: n.w as f32,
                     h: n.h as f32,
+                    head: n.head.map(|h| h as f32),
                 },
             )
         })

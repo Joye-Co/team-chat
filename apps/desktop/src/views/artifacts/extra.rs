@@ -205,6 +205,7 @@ fn media_preview(
         &message.id
     };
     let spec = inline::InlineSpec {
+        bare: false,
         key: MediaKey::new(r.artifact_id.clone(), r.version),
         kind,
         title: d.summary.title.clone(),

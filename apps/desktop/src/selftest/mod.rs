@@ -588,6 +588,13 @@ async fn shoot(
                 cx.background_executor().timer(options.settle).await;
                 settled = true;
             }
+            // The window of the scene before took its pointer with it: a part it rested
+            // on is not hovered here.
+            if frames == 0 {
+                let _ = cx.update(|cx| {
+                    crate::views::refs::hub(cx).update(cx, |hub, _| hub.hover = None);
+                });
+            }
             // A key scene parks the pointer once, before its keys.
             if frames == 0 || !interact::keys_only(scene.name) {
                 park_pointer(handle, interact::pointer(scene.name), cx);

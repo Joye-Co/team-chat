@@ -46,6 +46,104 @@ pub struct InlineSpec {
     pub target: Target,
     /// Unique per row, so two rows that show the same 产出 keep separate state.
     pub id: SharedString,
+    /// Inside a frame that already names the 产出 (a card's embed): only the body, no
+    /// card and no header of its own. [`embed_facts`] says what the header would.
+    pub bare: bool,
+}
+
+/// What a bare preview's frame shows in its header once the version is read.
+#[derive(Default)]
+pub struct EmbedFacts {
+    /// Pages, length, rows and size, as the card's own header says them.
+    pub meta: Option<String>,
+    /// The text the header's copy button copies (code).
+    pub copy: Option<String>,
+}
+
+/// The header facts of a bare preview: nothing until the version is read.
+pub fn embed_facts(spec: &InlineSpec, cx: &App) -> EmbedFacts {
+    let Some(Load::Ready(media)) = store::get(&spec.key, cx) else {
+        return EmbedFacts::default();
+    };
+    if media.preview_failed {
+        return EmbedFacts::default();
+    }
+    let size = super::size_text(media.bytes);
+    let mut copy = None;
+    let meta = match &media.data {
+        Data::Markdown(md) => Some(fill(
+            cm::MD_WORDS,
+            &[("n", &group_digits(md.stats.chars as u64))],
+        )),
+        Data::Images(pics) => Some(format!(
+            "{} · {size}",
+            fill(cm::IMG_COUNT, &[("n", &pics.len().to_string())])
+        )),
+        Data::Video(v) => Some(format!(
+            "{} · {size}",
+            super::time_text(v.info.map_or(0., |i| i.duration))
+        )),
+        Data::Audio(a) => Some(format!("{} · {size}", super::time_text(a.duration))),
+        Data::Pdf(p) => Some(format!(
+            "{} · {size}",
+            fill(cm::PDF_PAGES, &[("n", &p.pages.to_string())])
+        )),
+        Data::Code(c) => {
+            let (first, last) = code_excerpt(c);
+            copy = Some(c.lines[first..last].join("\n"));
+            Some(fill(
+                cm::CODE_RANGE,
+                &[
+                    ("a", &(first + 1).to_string()),
+                    ("b", &last.to_string()),
+                    ("n", &c.lines.len().to_string()),
+                ],
+            ))
+        }
+        Data::Table(t) => Some(fill(
+            cm::TABLE_META,
+            &[
+                ("rows", &group_digits(t.total_rows as u64)),
+                ("cols", &t.header.len().max(1).to_string()),
+            ],
+        )),
+        Data::Html | Data::File => None,
+    };
+    EmbedFacts { meta, copy }
+}
+
+/// The frame of a preview: the card, or nothing but the column when it is bare.
+fn frame(spec: &InlineSpec, width: gpui::Pixels, cx: &App) -> gpui::Div {
+    if spec.bare {
+        div().w_full().flex().flex_col()
+    } else {
+        card(cx).w(width).max_w_full()
+    }
+}
+
+/// The card's header, unless the frame around a bare preview has its own.
+fn shown_head(spec: &InlineSpec, header: gpui::Div) -> Option<gpui::Div> {
+    (!spec.bare).then_some(header)
+}
+
+/// A preview that is no card (a state row, pictures, a video) keeps clear of the frame
+/// around it when it is bare.
+fn inset_when_bare(spec: &InlineSpec, el: impl IntoElement) -> AnyElement {
+    if spec.bare {
+        div().p(space::S12).child(el).into_any_element()
+    } else {
+        el.into_any_element()
+    }
+}
+
+/// The lines an inline code preview shows: from the first line with text.
+fn code_excerpt(c: &store::Code) -> (usize, usize) {
+    let first = c
+        .lines
+        .iter()
+        .position(|l| !l.trim().is_empty())
+        .unwrap_or(0);
+    (first, (first + CODE_LINES).min(c.lines.len()))
 }
 
 /// Height of the HTML page inline (Media.dc.html: 300).
@@ -89,11 +187,11 @@ pub fn render(spec: &InlineSpec, window: &mut Window, cx: &mut App) -> Option<An
     };
     match store::get(&spec.key, cx) {
         Some(Load::Ready(media)) => Some(ready(spec, &media, window, cx)),
-        Some(Load::Failed(_)) => Some(states::failed_row(spec, cx).into_any_element()),
+        Some(Load::Failed(_)) => Some(inset_when_bare(spec, states::failed_row(spec, cx))),
         Some(Load::Loading) => Some(loading(spec, cx)),
         None => {
             if spec.bytes > spec.kind.auto_load_limit() {
-                return Some(states::big_row(spec, cx).into_any_element());
+                return Some(inset_when_bare(spec, states::big_row(spec, cx)));
             }
             if let Some(provider) = spec.target.provider.clone() {
                 store::request_artifact(&provider, &spec.key, &spec.title, cx);
@@ -115,18 +213,18 @@ fn open(spec: &InlineSpec, opening: Opening, cx: &mut App) {
 
 fn ready(spec: &InlineSpec, media: &Arc<Media>, window: &mut Window, cx: &mut App) -> AnyElement {
     if media.preview_failed {
-        return states::failed_media_row(spec, media, cx).into_any_element();
+        return inset_when_bare(spec, states::failed_media_row(spec, media, cx));
     }
     match &media.data {
         Data::Html => html(spec, media, cx),
         Data::Markdown(md) => markdown_card(spec, media, md, cx),
-        Data::Images(pics) => images(spec, pics, cx),
-        Data::Video(v) => video(spec, media, v, cx),
+        Data::Images(pics) => inset_when_bare(spec, images(spec, pics, cx)),
+        Data::Video(v) => inset_when_bare(spec, video(spec, media, v, cx)),
         Data::Audio(a) => audio(spec, media, a, window, cx),
         Data::Pdf(p) => pdf(spec, media, p, cx),
         Data::Code(c) => code(spec, media, c, cx),
         Data::Table(t) => table(spec, media, t, cx),
-        Data::File => states::failed_media_row(spec, media, cx).into_any_element(),
+        Data::File => inset_when_bare(spec, states::failed_media_row(spec, media, cx)),
     }
 }
 
@@ -136,13 +234,15 @@ fn loading(spec: &InlineSpec, cx: &App) -> AnyElement {
     let (w, h) = inline_box(spec.kind);
     let _ = k;
     // §2.14: a skeleton of the final shape, no spinner text in an empty region.
-    card(cx)
-        .w(w)
-        .max_w_full()
-        .child(card_header(spec.kind.icon(), spec.title.clone(), cx).child(div().flex_1()))
+    frame(spec, w, cx)
+        .children(shown_head(
+            spec,
+            card_header(spec.kind.icon(), spec.title.clone(), cx).child(div().flex_1()),
+        ))
         .child(
             div()
                 .h(h)
+                .when(spec.bare, |d| d.pt(space::S16))
                 .px(space::S16)
                 .pb(space::S16)
                 .flex()
@@ -162,9 +262,9 @@ fn inline_box(kind: MediaKind) -> (gpui::Pixels, gpui::Pixels) {
         MediaKind::Markdown => (INLINE_W, px(MD_BODY_H + 34.)),
         MediaKind::Image => (INLINE_W, px(SINGLE_H)),
         MediaKind::ImageSet => (INLINE_W, px(GRID_H)),
-        MediaKind::Video => (px(VIDEO_W), px(VIDEO_W * 9. / 16. + 86.)),
+        MediaKind::Video => (px(VIDEO_W), px(VIDEO_W * 9. / 16. + 114.)),
         MediaKind::Audio => (px(AUDIO_W), px(70.)),
-        MediaKind::Pdf => (px(PDF_W), px(186.)),
+        MediaKind::Pdf => (px(PDF_W), crate::ui::native::tokens::pdf_strip::HEIGHT),
         MediaKind::Code => (INLINE_W, px(CODE_LINES as f32 * 20. + 16.)),
         MediaKind::Table => (
             INLINE_W,
@@ -195,6 +295,8 @@ fn open_tool(spec: &InlineSpec, suffix: &str, opening: Opening) -> gpui_componen
         Sym::OpenExternal,
         cm::OPEN_IN_WINDOW,
     )
+    // The glyph, not the hit box, sits on the card's 16 content edge.
+    .mr(-space::S8)
     .on_click(move |_, _, cx| open(&s, opening.clone(), cx))
 }
 
@@ -237,29 +339,40 @@ fn html(spec: &InlineSpec, media: &Arc<Media>, cx: &App) -> AnyElement {
         )
         .capabilities(artifact_view::Capabilities::NONE),
     };
-    let mut embed = WebEmbed::new(
-        ElementId::Name(format!("{}-page", spec.id).into()),
-        page_spec,
-    )
-    .height(px(HTML_H))
-    .rounded(px(0.))
-    .pass_scroll(true);
+    let embed_id = ElementId::Name(format!("{}-page", spec.id).into());
+    // A page that did not open has nothing to expand or describe: 重试 is the way on.
+    let failed = crate::ui::web_embed::page_failed(&embed_id, cx);
+    let mut embed = WebEmbed::new(embed_id, page_spec)
+        .failed_inset(space::S16)
+        .height(px(HTML_H))
+        .rounded(px(0.))
+        // The page's text starts on the card's 16 content edge.
+        .pad(space::S16)
+        .pass_scroll(true);
+    if failed {
+        // Nothing under it: its fill ends at the card's bottom corners.
+        use crate::ui::native::tokens::{layout, radius as r};
+        embed = embed.rounded_bottom(r::CARD - layout::BORDER, r::CARD - layout::BORDER);
+    }
     if spec.target.provider.is_some() {
         embed = embed.on_host(host::embed_handler(id.clone()));
     }
     let latest = host::latest(id, cx).unwrap_or(version);
     let notice = host::notice(id, version, latest, cx).map(|t| host::notice_chip(t, cx));
     let s = spec.clone();
-    let expand = div()
-        .id(ElementId::Name(format!("{}-expand", spec.id).into()))
-        .focus_row(false, cx)
-        .flex_none()
-        .flex()
-        .items_center()
-        .gap(space::S4)
-        .child(ui::icon(Sym::ChevronDown, px(14.), k.text_3))
-        .child(cm::EXPAND)
-        .on_click(move |_, _, cx| open(&s, Opening::default(), cx));
+    // §1.8: a ghost sm button in the card footer, so 展开 reads as a control and its
+    // own padding parts it from the capability line. The negative margin puts its
+    // label on the card's content edge.
+    let expand = ui::native::push_button(
+        ElementId::Name(format!("{}-expand", spec.id).into()),
+        cm::EXPAND,
+        ui::native::PushStyle::Ghost,
+        ui::native::PushSize::Small,
+        cx,
+    )
+    .flex_none()
+    .ml(-space::S12)
+    .on_click(move |_, _, cx| open(&s, Opening::default(), cx));
     let foot = match spec.target.provider.as_deref() {
         Some(p) => host::page_footer(
             &spec.id,
@@ -278,7 +391,7 @@ fn html(spec: &InlineSpec, media: &Arc<Media>, cx: &App) -> AnyElement {
         .w(INLINE_W)
         .max_w_full()
         .child(
-            card_header(Sym::Document, spec.title.clone(), cx)
+            card_header(spec.kind.icon(), spec.title.clone(), cx)
                 .child(version_chip(spec.key.version, cx))
                 .children(notice)
                 .child(
@@ -294,7 +407,7 @@ fn html(spec: &InlineSpec, media: &Arc<Media>, cx: &App) -> AnyElement {
         )
         // The page sets its own height: it ends on a whole block (§2.21).
         .child(embed)
-        .child(foot)
+        .children((!failed).then_some(foot))
         .into_any_element()
 }
 
@@ -335,10 +448,9 @@ fn markdown_card(
         ));
     }
     let s = spec.clone();
-    card(cx)
-        .w(INLINE_W)
-        .max_w_full()
-        .child(
+    frame(spec, INLINE_W, cx)
+        .children(shown_head(
+            spec,
             card_header(Sym::Document, media.file_name().to_string(), cx)
                 .child(mono(
                     fill(cm::MD_WORDS, &[("n", &group_digits(md.stats.chars as u64))]),
@@ -346,7 +458,7 @@ fn markdown_card(
                 ))
                 .child(div().flex_1())
                 .child(open_tool(spec, "open", Opening::default())),
-        )
+        ))
         .child(
             // The excerpt ends on whole blocks (its first lines, a fence
             // closed) and the card hugs it: nothing is cut under the footer
@@ -367,8 +479,19 @@ fn markdown_card(
             footer(cx)
                 .id(ElementId::Name(format!("{}-more", spec.id).into()))
                 .focus_row(false, cx)
-                .child(ui::icon(Sym::ChevronDown, px(14.), k.text_3))
-                .child(fill(cm::MD_EXPAND, &[("m", &minutes.to_string())]))
+                // The chevron keeps to its label, as in the table card's footer.
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(space::S4)
+                        .child(fill(cm::MD_EXPAND, &[("m", &minutes.to_string())]))
+                        .child(ui::icon(
+                            Sym::ChevronRight,
+                            crate::ui::native::tokens::icon::MD,
+                            k.text_3,
+                        )),
+                )
                 .child(div().flex_1())
                 .child(chips)
                 .on_click(move |_, _, cx| open(&s, Opening::default(), cx)),
@@ -575,6 +698,7 @@ fn video(spec: &InlineSpec, media: &Arc<Media>, v: &store::Video, cx: &App) -> A
         .focus_row(false, cx)
         .relative()
         .w(px(VIDEO_W))
+        .max_w_full()
         .h(px(h))
         .rounded(crate::ui::native::tokens::radius::CONTAINER)
         .overflow_hidden()
@@ -607,10 +731,12 @@ fn video(spec: &InlineSpec, media: &Arc<Media>, v: &store::Video, cx: &App) -> A
                 .child(mono(super::time_text(duration), gpui::white())),
         )
         .child(
+            // Inside the straight part of the bottom edge: the frame clips to its box, not
+            // its curve, so a full-width strip would stick out at the rounded corners.
             div()
                 .absolute()
-                .left_0()
-                .right_0()
+                .left(crate::ui::native::tokens::radius::CONTAINER)
+                .right(crate::ui::native::tokens::radius::CONTAINER)
                 .bottom_0()
                 .child(chapter_ticks(
                     &v.chapters,
@@ -684,12 +810,35 @@ fn video(spec: &InlineSpec, media: &Arc<Media>, v: &store::Video, cx: &App) -> A
                 ),
         );
     }
-    let _ = media;
     div()
         .flex()
         .flex_col()
         .gap(space::S8)
         .child(poster)
+        // The file's name and size (§2.17: every attachment says what it is); the
+        // length is on the poster.
+        .child(
+            div()
+                .w(px(VIDEO_W))
+                .max_w_full()
+                .flex()
+                .items_center()
+                .gap(space::S8)
+                .child(ui::icon(
+                    Sym::Video,
+                    px(16.),
+                    crate::ui::native::native_colors(cx).secondary,
+                ))
+                .child(
+                    ui::native::file_name(media.file_name().to_string())
+                        .t_ui()
+                        .semibold()
+                        .text_color(k.text_1)
+                        .flex_shrink(1.)
+                        .min_w(px(0.)),
+                )
+                .child(mono(super::size_text(media.bytes), k.text_3)),
+        )
         .child(
             div()
                 .flex()
@@ -779,10 +928,21 @@ fn audio(
             &[("n", &a.transcript.len().to_string())],
         )
     };
-    let _ = media;
-    card(cx)
-        .w(px(AUDIO_W))
-        .max_w_full()
+    frame(spec, px(AUDIO_W), cx)
+        .children(shown_head(
+            spec,
+            card_header(Sym::Audio, media.file_name().to_string(), cx)
+                .child(mono(
+                    format!(
+                        "{} · {}",
+                        super::time_text(a.duration),
+                        super::size_text(media.bytes)
+                    ),
+                    k.text_3,
+                ))
+                .child(div().flex_1())
+                .child(open_tool(spec, "open", Opening::default())),
+        ))
         .child(
             div()
                 .h(crate::ui::native::tokens::height::LIST_ROW)
@@ -816,8 +976,8 @@ fn audio(
                 .child(mono(
                     format!(
                         "{} / {}",
-                        super::clock_text(position),
-                        super::clock_text(a.duration)
+                        super::time_text(position),
+                        super::time_text(a.duration)
                     ),
                     k.text_2,
                 ))
@@ -838,13 +998,43 @@ fn audio(
                         }),
                 ),
         )
-        .child(
+        .child(if a.transcript.is_empty() {
             footer(cx)
-                .child(ui::icon(Sym::Document, px(13.), k.text_3))
+                .child(ui::icon(
+                    Sym::Document,
+                    crate::ui::native::tokens::icon::MD,
+                    k.text_3,
+                ))
                 .child(footer_text)
-                .child(div().flex_1())
-                .child(open_tool(spec, "open", Opening::default())),
-        )
+                .into_any_element()
+        } else {
+            // The transcript reads in the viewer, as 显示全部 opens a table's rows.
+            let s = spec.clone();
+            footer(cx)
+                .id(ElementId::Name(format!("{}-transcript", spec.id).into()))
+                .focus_row(false, cx)
+                .gap(space::S8)
+                .child(ui::icon(
+                    Sym::Document,
+                    crate::ui::native::tokens::icon::MD,
+                    k.text_3,
+                ))
+                // The chevron keeps to its label, as in the table card's footer.
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(space::S4)
+                        .child(footer_text)
+                        .child(ui::icon(
+                            Sym::ChevronRight,
+                            crate::ui::native::tokens::icon::MD,
+                            k.text_3,
+                        )),
+                )
+                .on_click(move |_, _, cx| open(&s, Opening::default(), cx))
+                .into_any_element()
+        })
         .into_any_element()
 }
 
@@ -852,20 +1042,36 @@ fn audio(
 
 fn pdf(spec: &InlineSpec, media: &Arc<Media>, p: &store::Pdf, cx: &App) -> AnyElement {
     let k = theme::colors(cx);
+    // The strip is the card's last child: its fill follows the card's bottom corners
+    // (children are clipped to the box, not to its radius).
+    use crate::ui::native::tokens::{gallery, pdf_strip, text};
     let mut thumbs = div()
-        .h(px(140.))
-        .px(space::S10)
-        .pt(space::S10)
+        .h(pdf_strip::HEIGHT)
+        .px(space::S16)
+        // Whole pages with the same 12 above and below: none is cut by the card's edge.
+        .py(space::S12)
         .flex()
         .gap(space::S8)
         .bg(k.code_bg)
+        .rounded_b(
+            if spec.bare {
+                radius::LG
+            } else {
+                crate::ui::native::tokens::radius::CARD
+            } - crate::ui::native::tokens::layout::BORDER,
+        )
         .overflow_hidden();
-    // §2.4: as many whole pages as the 640 card holds (px 10, gap 8), so
-    // the strip has no void at the right and no page cut at the edge.
-    let mut room = PDF_W - 20.;
+    // §2.4: as many whole pages as the 640 card holds (px 16, gap 8), spread over
+    // the row, so the strip has no void at the right and no page cut at the edge.
+    let mut room = if spec.bare { pdf_strip::EMBED_W } else { PDF_W } - 32.;
     let mut shown = 0;
     for page in &p.images {
-        let (w, _) = fit(page.width, page.height, 120., 150.);
+        let (w, _) = fit(
+            page.width,
+            page.height,
+            pdf_strip::PAGE_W,
+            pdf_strip::PAGE_H,
+        );
         let need = if shown == 0 { w } else { w + 8. };
         if need > room {
             break;
@@ -873,14 +1079,29 @@ fn pdf(spec: &InlineSpec, media: &Arc<Media>, p: &store::Pdf, cx: &App) -> AnyEl
         room -= need;
         shown += 1;
     }
-    for page in p.images.iter().take(shown.max(1)) {
-        let (w, h) = fit(page.width, page.height, 120., 150.);
+    let shown = shown.max(1);
+    // One page has nothing to spread against: it stands in the middle of the strip.
+    thumbs = if shown == 1 {
+        thumbs.justify_center().items_center()
+    } else {
+        thumbs.justify_between()
+    };
+    // Pages the strip does not show: the last tile says how many more.
+    let more = (p.pages as usize).saturating_sub(shown);
+    for (i, page) in p.images.iter().take(shown).enumerate() {
+        let (w, h) = fit(
+            page.width,
+            page.height,
+            pdf_strip::PAGE_W,
+            pdf_strip::PAGE_H,
+        );
         thumbs = thumbs.child(
             div()
+                .relative()
                 .w(px(w))
                 .h(px(h))
                 .flex_none()
-                .rounded(px(3.))
+                .rounded(crate::ui::native::tokens::radius::CHECKBOX)
                 .overflow_hidden()
                 .border_1()
                 .border_color(k.border)
@@ -890,32 +1111,32 @@ fn pdf(spec: &InlineSpec, media: &Arc<Media>, p: &store::Pdf, cx: &App) -> AnyEl
                     img(page.path.clone())
                         .size_full()
                         .object_fit(ObjectFit::Cover),
-                ),
+                )
+                .when(more > 0 && i + 1 == shown, |el| {
+                    el.child(
+                        div()
+                            .absolute()
+                            .inset_0()
+                            .bg(gpui::hsla(0., 0., 0., gallery::MORE_SCRIM))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .text_size(text::HERO.0)
+                            .font_weight(gpui::FontWeight::SEMIBOLD)
+                            .text_color(gpui::white())
+                            .child(format!("+{more}")),
+                    )
+                }),
         );
     }
     let s = spec.clone();
-    card(cx)
+    frame(spec, px(PDF_W), cx)
         .id(ElementId::Name(format!("{}-pdf", spec.id).into()))
         .focus_row(false, cx)
-        .w(px(PDF_W))
-        .max_w_full()
-        .child(thumbs)
-        .child(
-            div()
-                .h(crate::ui::native::tokens::height::FORM_ROW)
-                .px(space::S12)
-                .flex()
-                .items_center()
-                .gap(space::S8)
-                .border_t_1()
-                .border_color(k.sep)
-                .child(ui::icon(Sym::Document, theme::icon::ROW, k.text_2))
-                .child(
-                    ui::native::file_name(media.file_name().to_string())
-                        .t_small()
-                        .medium()
-                        .text_color(k.text_1),
-                )
+        // The name row on top with the open tool, as on every sibling card (§2.4).
+        .children(shown_head(
+            spec,
+            card_header(spec.kind.icon(), media.file_name().to_string(), cx)
                 .child(mono(
                     format!(
                         "{} · {}",
@@ -925,9 +1146,9 @@ fn pdf(spec: &InlineSpec, media: &Arc<Media>, p: &store::Pdf, cx: &App) -> AnyEl
                     k.text_3,
                 ))
                 .child(div().flex_1())
-                .child(div().t_meta().text_color(k.text_2).child(cm::PDF_OPEN))
-                .child(ui::icon(Sym::ChevronRight, px(14.), k.text_2)),
-        )
+                .child(open_tool(spec, "open", Opening::default())),
+        ))
+        .child(thumbs)
         .on_click(move |_, _, cx| open(&s, Opening::default(), cx))
         .into_any_element()
 }
@@ -937,30 +1158,77 @@ fn pdf(spec: &InlineSpec, media: &Arc<Media>, p: &store::Pdf, cx: &App) -> AnyEl
 /// One highlighted line: keywords 600 `text-1`, strings and numbers `text-2`, comments
 /// `text-3` italic (monochrome, so status colors keep their meaning).
 pub fn code_line(line: &str, lang: text::Lang, block: &mut bool, cx: &App) -> gpui::Div {
+    code_line_marked(line, lang, block, None, cx)
+}
+
+/// What ⌘F marks on one line of code.
+pub struct LineMarks<'a> {
+    /// The matches on the line, as byte ranges.
+    pub ranges: &'a [std::ops::Range<usize>],
+    /// Which of them is the current match.
+    pub current: Option<usize>,
+    /// The line holds the current match: its strong band needs foreground ink.
+    pub on_current: bool,
+}
+
+/// [`code_line`] with the matches of the find bar: every match medium and underlined,
+/// the current one inverted, so stepping between two matches on a line shows.
+pub fn code_line_marked(
+    line: &str,
+    lang: text::Lang,
+    block: &mut bool,
+    marks: Option<LineMarks>,
+    cx: &App,
+) -> gpui::Div {
     let k = theme::colors(cx);
+    let ranges = marks.as_ref().map_or(&[][..], |m| m.ranges);
+    let current = marks.as_ref().and_then(|m| m.current);
+    let strong_band = marks.as_ref().is_some_and(|m| m.on_current);
     let mut row = div().flex().whitespace_nowrap();
+    let mut at = 0;
     for (tok, s) in text::highlight(line, lang, block) {
-        let el = div().child(s.replace('\t', "    "));
-        row = row.child(match tok {
-            Tok::Keyword => el
-                .font_weight(gpui::FontWeight::SEMIBOLD)
-                .text_color(k.text_1),
-            Tok::Str | Tok::Num => el.text_color(k.text_2),
-            Tok::Comment => el.italic().text_color(k.text_3),
-            Tok::Plain => el.text_color(k.text_1),
-        });
+        let end = at + s.len();
+        // The token, cut where a match starts or ends (tabs are widened after the cut).
+        let mut cuts = vec![at, end];
+        cuts.extend(
+            ranges
+                .iter()
+                .flat_map(|r| [r.start, r.end])
+                .filter(|c| (at..end).contains(c)),
+        );
+        cuts.sort_unstable();
+        cuts.dedup();
+        for piece in cuts.windows(2) {
+            let (a, b) = (piece[0], piece[1]);
+            let hit = ranges.iter().position(|r| r.start <= a && b <= r.end);
+            let el = div().child(s[a - at..b - at].replace('\t', "    "));
+            let el = match tok {
+                Tok::Keyword => el
+                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                    .text_color(k.text_1),
+                Tok::Str | Tok::Num => el.text_color(k.text_2),
+                Tok::Comment => el.italic().text_color(k.text_3),
+                Tok::Plain => el.text_color(k.text_1),
+            };
+            row = row.child(
+                el.when(strong_band, |d| d.text_color(k.text_1))
+                    .when(hit.is_some(), |d| {
+                        d.font_weight(theme::MEDIUM_WEIGHT).underline()
+                    })
+                    .when(hit.is_some() && hit == current, |d| {
+                        d.bg(k.text_1)
+                            .text_color(ui::native::native_colors(cx).sheet)
+                    }),
+            );
+        }
+        at = end;
     }
     row
 }
 
 fn code(spec: &InlineSpec, media: &Arc<Media>, c: &store::Code, cx: &App) -> AnyElement {
     let k = theme::colors(cx);
-    let first = c
-        .lines
-        .iter()
-        .position(|l| !l.trim().is_empty())
-        .unwrap_or(0);
-    let last = (first + CODE_LINES).min(c.lines.len());
+    let (first, last) = code_excerpt(c);
     // Long lines scroll sideways inside the card, never a hard clip (§2.17).
     let mut body = div()
         .id(ElementId::Name(format!("{}-code", spec.id).into()))
@@ -994,12 +1262,10 @@ fn code(spec: &InlineSpec, media: &Arc<Media>, c: &store::Code, cx: &App) -> Any
     }
     let text_all = c.lines[first..last].join("\n");
     let copy_id = ElementId::Name(format!("{}-copy", spec.id).into());
-    card(cx)
-        .w(INLINE_W)
-        .max_w_full()
-        .child(
-            card_header(Sym::CodeFile, String::new(), cx)
-                .child(mono(media.entry.clone(), k.text_1))
+    frame(spec, INLINE_W, cx)
+        .children(shown_head(
+            spec,
+            card_header(spec.kind.icon(), media.entry.clone(), cx)
                 .child(div().t_meta().text_color(k.text_3).child(fill(
                     cm::CODE_RANGE,
                     &[
@@ -1011,11 +1277,11 @@ fn code(spec: &InlineSpec, media: &Arc<Media>, c: &store::Code, cx: &App) -> Any
                 .child(div().flex_1())
                 .child(
                     tool(copy_id, Sym::Copy, cm::COPY).on_click(move |_, _, cx| {
-                        cx.write_to_clipboard(gpui::ClipboardItem::new_string(text_all.clone()));
+                        super::parts::copy_text(text_all.clone(), cm::COPIED, cx);
                     }),
                 )
                 .child(open_tool(spec, "open", Opening::default())),
-        )
+        ))
         .child(body)
         .into_any_element()
 }
@@ -1049,7 +1315,9 @@ fn table(spec: &InlineSpec, media: &Arc<Media>, t: &text::Table, cx: &App) -> An
         .h(TABLE_ROW)
         .flex()
         .items_center()
-        .border_y_1()
+        // A bare table sits right under its frame's header line.
+        .when(spec.bare, |d| d.border_b_1())
+        .when(!spec.bare, |d| d.border_y_1())
         .border_color(n.separator)
         .bg(n.fill);
     for (i, h) in t.header.iter().enumerate() {
@@ -1079,10 +1347,9 @@ fn table(spec: &InlineSpec, media: &Arc<Media>, t: &text::Table, cx: &App) -> An
         body = body.child(row);
     }
     let s = spec.clone();
-    card(cx)
-        .w(INLINE_W)
-        .max_w_full()
-        .child(
+    frame(spec, INLINE_W, cx)
+        .children(shown_head(
+            spec,
             card_header(Sym::Table, media.file_name().to_string(), cx)
                 .child(mono(
                     fill(
@@ -1096,7 +1363,7 @@ fn table(spec: &InlineSpec, media: &Arc<Media>, t: &text::Table, cx: &App) -> An
                 ))
                 .child(div().flex_1())
                 .child(open_tool(spec, "open", Opening::default())),
-        )
+        ))
         .child(head)
         .child(body)
         .child(
@@ -1114,7 +1381,11 @@ fn table(spec: &InlineSpec, media: &Arc<Media>, t: &text::Table, cx: &App) -> An
                     cm::TABLE_SHOW_ALL,
                     &[("n", &group_digits(t.total_rows as u64))],
                 ))
-                .child(ui::icon(Sym::ChevronRight, px(13.), k.text_2))
+                .child(ui::icon(
+                    Sym::ChevronRight,
+                    crate::ui::native::tokens::icon::MD,
+                    k.text_2,
+                ))
                 .on_click(move |_, _, cx| open(&s, Opening::default(), cx)),
         )
         .into_any_element()
