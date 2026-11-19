@@ -949,14 +949,15 @@ impl LivePane {
             .then(|| self.note.clone())
             .flatten()
             .map(|state| {
-                let commands = self
-                    .services
-                    .provider
-                    .hand_commands(&run.id)
+                let held = self.services.provider.hand_commands(&run.id);
+                let held: Vec<_> = held
                     .iter()
                     .filter(|h| this_hold(run, h))
                     .filter(|h| mine && Some(h.by.as_str()) == me.as_deref())
-                    .count();
+                    .collect();
+                let commands = held.len();
+                // 交还 aborts a command that still runs (the daemon cancels it): say so.
+                let running = held.iter().any(|h| h.result.is_none());
                 div()
                     .w_full()
                     .flex()
@@ -967,10 +968,16 @@ impl LivePane {
                             .full_width(),
                     )
                     .children((commands > 0).then(|| {
-                        div().n_footnote().text_color(n.secondary).child(fill(
-                            c::LIVE_NOTE_COMMANDS,
-                            &[("n", &commands.to_string()), ("member", bot)],
-                        ))
+                        div().n_footnote().text_color(n.secondary).child(
+                            if running && rights.hand_back {
+                                c::LIVE_NOTE_COMMAND_RUNNING.to_string()
+                            } else {
+                                fill(
+                                    c::LIVE_NOTE_COMMANDS,
+                                    &[("n", &commands.to_string()), ("member", bot)],
+                                )
+                            },
+                        )
                     }))
             });
         // More than the title: the icon stays on the title's line (the Alert anatomy).
