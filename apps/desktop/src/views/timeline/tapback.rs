@@ -62,7 +62,7 @@ pub fn with_names(id: impl Into<ElementId>, trigger: Button, names: SharedString
         .content(move |_, _, cx| {
             let k = native_colors(cx);
             div().pt(px(6.)).child(
-                popover_surface(ARROW_X, cx)
+                popover_surface(cx)
                     .max_w(px(280.))
                     .px(px(10.))
                     .py(px(6.))

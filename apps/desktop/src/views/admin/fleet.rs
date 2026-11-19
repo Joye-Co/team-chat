@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use gpui::{
     AnyElement, ClipboardItem, Context, InteractiveElement as _, IntoElement, ParentElement as _,
     SharedString, StatefulInteractiveElement as _, Styled, Window, div,
-    prelude::FluentBuilder as _, relative,
+    prelude::FluentBuilder as _,
 };
 use gpui_component::menu::{DropdownMenu as _, PopupMenuItem};
 
@@ -372,7 +372,7 @@ impl AdminView {
         } else {
             fill(m::FLEET_MEMBERS, &[("n", &members.len().to_string())])
         };
-        let meter = |label: &'static str, value: String, share: Option<f32>| {
+        let meter = |label: &'static str, value: String, share: Option<f32>, cx: &gpui::App| {
             div()
                 .flex_1()
                 .min_w(gpui::Pixels::ZERO)
@@ -392,20 +392,8 @@ impl AdminView {
                                 .child(value),
                         ),
                 )
-                .child(
-                    div()
-                        .h(t::MEMBER_BAR)
-                        .rounded_full()
-                        .bg(k.fill)
-                        .overflow_hidden()
-                        .children(share.map(|s| {
-                            div()
-                                .h_full()
-                                .rounded_full()
-                                .bg(k.label)
-                                .w(relative(s.clamp(0., 1.)))
-                        })),
-                )
+                // The one Progress (D12); no reading still draws the empty track.
+                .child(crate::ui::native::progress(share.unwrap_or(0.), cx))
         };
         let pct = |v: Option<f64>| {
             v.map(|v| format!("{}%", v.round() as i64))
@@ -499,9 +487,20 @@ impl AdminView {
                         m::FLEET_RUNNING,
                         format!("{running} / {slots}"),
                         (slots > 0).then(|| model::share(running as u64, slots as u64)),
+                        cx,
                     ))
-                    .child(meter(m::KPI_CPU, pct(cpu), cpu.map(|v| (v / 100.) as f32)))
-                    .child(meter(m::KPI_MEM, pct(mem), mem.map(|v| (v / 100.) as f32))),
+                    .child(meter(
+                        m::KPI_CPU,
+                        pct(cpu),
+                        cpu.map(|v| (v / 100.) as f32),
+                        cx,
+                    ))
+                    .child(meter(
+                        m::KPI_MEM,
+                        pct(mem),
+                        mem.map(|v| (v / 100.) as f32),
+                        cx,
+                    )),
             )
             .child(
                 div()

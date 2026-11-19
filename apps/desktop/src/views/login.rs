@@ -815,7 +815,7 @@ impl Render for LoginView {
         .w_full();
         // Busy: a 16 spinner before 正在验证…, at the same width, solid.
         let go = loading_push(
-            waiting_push(go, !ready && !signing_in),
+            waiting_push(go, !ready && !signing_in, cx),
             signing_in,
             PushSize::Large,
         )

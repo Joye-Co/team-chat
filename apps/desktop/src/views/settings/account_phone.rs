@@ -478,7 +478,6 @@ impl PhoneSignIn {
                                     .child(
                                         NativeTextField::new("phone-code-field", &page.code)
                                             .full_width()
-                                            .size(crate::ui::native::FieldSize::Hero)
                                             .error(error.is_some()),
                                     )
                                     .child(

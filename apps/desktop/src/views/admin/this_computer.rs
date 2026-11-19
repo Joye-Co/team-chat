@@ -335,7 +335,7 @@ impl AdminView {
                             div()
                                 .flex_1()
                                 .min_w(px(0.))
-                                .font_family(theme::MONO_FONT_FAMILY)
+                                .font_family(theme::mono_font_family())
                                 .text_size(text::META.0)
                                 .line_height(px(18.))
                                 .text_color(k.label)
