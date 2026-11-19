@@ -1,5 +1,7 @@
 //! In-app update: the banner in the main window and the 关于 section of settings.
 
+// One set of words: the app 重新打开 (never 重启), it takes 「大约一分钟」, a finished
+// download is 「已下载好」, and a version on offer is 「新版本 {version} 可以更新了」.
 crate::copy! {
     AVAILABLE = "新版本 {version} 可以更新了",
     UPDATE = "更新",
@@ -9,41 +11,34 @@ crate::copy! {
     INSTALLING = "正在安装新版本，马上重新打开…",
     // When the app cannot replace itself. On a Mac the disk image is open in Finder; elsewhere
     // the installer is selected in the file manager and running it installs over the old one.
-    MANUAL = crate::copy::per_system("无法自动替换当前的应用，安装盘已在访达中打开。请退出 {product}，把安装盘里的 {product} 拖到“应用程序”文件夹，替换旧版本后再打开。", "无法自动替换当前的应用，安装包已在文件资源管理器中选中。请退出 {product}，双击安装包，装完后再打开。"),
+    MANUAL = crate::copy::per_system("无法自动替换当前的应用，安装盘已在访达中打开。请退出 {product}，把安装盘里的 {product} 拖到「应用程序」文件夹，替换旧版本后再打开。", "无法自动替换当前的应用，安装包已在文件资源管理器中选中。请退出 {product}，双击安装包，装完后再打开。"),
     FAILED_DOWNLOAD = "新版本下载失败",
     FAILED_CHECKSUM = "下载的文件不完整，已删除，请重试",
     FAILED_INSTALL = "新版本安装失败",
     RETRY = "重试",
     DISMISS = "知道了",
     ABOUT = "关于",
-    VERSION = "当前版本 {version}",
     CHECK = "检查更新",
     CHECKING = "正在检查更新…",
     UP_TO_DATE = "已是最新版本",
     CHECK_FAILED = "检查更新失败，请稍后再试",
     UPDATE_TO = "更新到 {version}",
-    BANNER_AVAILABLE = "有新版本",
-    BANNER_VERSION = "版本 {version}",
     BANNER_DOWNLOADING = "正在下载 {version}",
-    BANNER_PERCENT = "{percent}%",
-    BANNER_MANUAL = "需要手动安装新版本",
-    BANNER_MANUAL_DETAIL = crate::copy::per_system("安装盘已在访达中打开", "安装包已在文件资源管理器中选中"),
     // --- v14/t4 update ---
     VERSION_TITLE = "版本 {version}",
     // The detail under 版本 {current}: the title already names the current one.
-    NEW_VERSION = "新版本 {version} 可以更新",
+    NEW_VERSION = "新版本 {version} 可以更新了",
     DOWNLOAD_PROGRESS = "{percent}% · {done} / {total} MB",
     CANCEL_DOWNLOAD = "取消下载",
     NOTES = "查看更新内容",
     NOTES_TITLE = "{version} 更新内容",
-    NOTES_DESCRIPTION = "这个版本改了什么。",
     NOTES_OK = "好",
     MANUAL_STEPS = crate::copy::per_system("安装盘已在访达中打开：", "安装包已在文件资源管理器中选中："),
     MANUAL_STEP_1 = "1. 退出 {product}",
-    MANUAL_STEP_2 = crate::copy::per_system("2. 把安装盘里的 {product} 拖到“应用程序”", "2. 双击安装包，等它装完"),
+    MANUAL_STEP_2 = crate::copy::per_system("2. 把安装盘里的 {product} 拖到「应用程序」", "2. 双击安装包，等它装完"),
     MANUAL_STEP_3 = crate::copy::per_system("3. 替换旧版本后再打开", "3. 再打开 {product}"),
-    READY_TITLE = "{product} {version} 已经下载好了",
-    READY_BODY = "当前 {current} → {version}，安装时会重启。",
+    READY_TITLE = "{product} {version} 已下载好",
+    READY_BODY = "当前 {current} → {version}，安装后重新打开。",
     PREVIEW_NOTES = "· 消息列表滚动更顺\n· 登录后不再偶尔漏掉新消息\n· 产出页可以按话题筛选",
     // --- end v14/t4 update ---
     // --- product updates: the sidebar card, notes, 已更新到 and 更新记录 ---
@@ -51,15 +46,15 @@ crate::copy! {
     CARD_AVAILABLE_DETAIL = "更新时应用会重新打开，大约一分钟。",
     CARD_NOTES = "改了什么",
     CARD_HIDE = "收起",
-    CARD_READY = "{version} 已经下载好了",
-    CARD_READY_DETAIL = "重启后就是新版本，大约一分钟。",
+    CARD_READY = "{version} 已下载好",
+    CARD_READY_DETAIL = "安装时应用会重新打开，大约一分钟。",
     CARD_WAITING = "等消息发完再装",
-    CARD_MANUAL_DETAIL = crate::copy::per_system("安装盘已在访达中打开：退出 {product}，把它拖到“应用程序”替换旧版本。", "安装包已在文件资源管理器中选中：退出 {product}，双击安装包装上新版本。"),
+    CARD_MANUAL_DETAIL = crate::copy::per_system("安装盘已在访达中打开：退出 {product}，把安装盘里的 {product} 拖到「应用程序」替换旧版本。", "安装包已在文件资源管理器中选中：退出 {product}，双击安装包装上新版本。"),
     NOTES_PUBLISHED = "{date}发布 · 你现在用的是 {current}",
     NOTES_CURRENT = "你现在用的是 {current}",
-    NOTES_FOOTER = "更新时应用会重新打开，大约一分钟",
+    NOTES_FOOTER = "更新时应用会重新打开，大约一分钟。",
     NOTES_EMPTY = "这个版本没有写更新内容。",
-    DATE = "{month} 月 {day} 日",
+    DATE = "{month}月{day}日",
     WHATS_NEW_TITLE = "已更新到 {version}",
     WHATS_NEW_MORE = "还有：{titles}",
     WHATS_NEW_OK = "好",
@@ -72,10 +67,15 @@ crate::copy! {
     CHANGELOG_COLLAPSE = "收起 {version}",
     AUTO_DOWNLOAD = "有新版本时自动下载",
     SHOW_WHATS_NEW = "更新后告诉我改了什么",
-    SHOW_WHATS_NEW_HINT = "重启后第一次打开时，说说这次改了什么",
+    SHOW_WHATS_NEW_HINT = "更新后第一次打开时，说说这次改了什么",
     // Under 版本 {current} in 设置: which version is on its way.
     DOWNLOAD_PROGRESS_OF = "正在下载 {version} · {percent}% · {done} / {total} MB",
     // --- end product updates ---
+    // The sidebar card of a failed update: the cause and the next step.
+    CARD_FAILED_CHECK_DETAIL = "没能检查更新，检查网络后重试。",
+    CARD_FAILED_DOWNLOAD_DETAIL = "下载中断了，检查网络后重试。",
+    CARD_FAILED_CHECKSUM_DETAIL = "下载的文件不完整，已删除，请重试。",
+    CARD_FAILED_INSTALL_DETAIL = "没能装上新版本，请重试。",
     // The manual install's next step: the app has to quit first.
     QUIT_TO_INSTALL = "退出 {product}",
 }

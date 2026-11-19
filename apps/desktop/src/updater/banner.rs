@@ -1,7 +1,7 @@
 //! The update in the main window: a quiet card at the bottom of the sidebar
 //! ([`update_card`]) that follows the update from 有新版本 to 正在安装, and
-//! one alert (2.10) only for 重启安装, once a downloaded update is ready
-//! (default 重启安装, then 稍后). It also opens 已更新到 once after an
+//! one alert (2.10) only for 安装更新, once a downloaded update is ready
+//! (default 安装更新, then 稍后). It also opens 已更新到 once after an
 //! update. It renders [`Updater`] state and calls its commands; nothing here
 //! touches the network.
 
@@ -50,7 +50,7 @@ pub fn banner_text(phase: &Phase) -> Option<String> {
 }
 
 /// Which sheet a phase shows, keyed by version: only a ready update asks
-/// (重启安装); a sheet the user closed does not come back for it.
+/// (安装更新); a sheet the user closed does not come back for it.
 fn sheet_key(phase: &Phase) -> Option<String> {
     match phase {
         Phase::Ready { info, .. } => Some(format!("ready-{}", info.version)),
@@ -89,7 +89,7 @@ impl UpdateSheet {
         }
     }
 
-    /// Under the ready alert's body (F49): the 12 muted 查看更新内容 link,
+    /// Under the ready alert's body (F49): the 查看更新内容 link (link color),
     /// or, once chosen, the notes themselves in a scrolling well.
     fn notes(
         &self,
@@ -129,8 +129,9 @@ impl UpdateSheet {
                 .justify_center()
                 .child(
                     crate::ui::native::borderless_text("update-ready-notes-link", u::NOTES, cx)
-                        .text_color(k.secondary)
-                        .n_footnote()
+                        // §1.3: link text in the info color, so it reads
+                        // as something to press, not a second caption.
+                        .text_color(k.blue)
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.notes_open = true;
                             cx.notify();
@@ -211,7 +212,15 @@ impl Render for UpdateSheet {
                     .join("\n"),
                 )
                 .buttons([
-                    button("update-ok", u::DISMISS, PushStyle::Default, cx).on_click(
+                    alert_button(
+                        "update-quit",
+                        fill(u::QUIT_TO_INSTALL, &[("product", product)]),
+                        PushStyle::Default,
+                        false,
+                        cx,
+                    )
+                    .on_click(|_, _, cx| cx.dispatch_action(&crate::app::Quit)),
+                    button("update-ok", u::DISMISS, PushStyle::Outline, cx).on_click(
                         move |_, window, cx| {
                             u1.update(cx, |up, cx| up.dismiss(cx));
                             window.close_dialog(cx);
@@ -236,7 +245,7 @@ impl Render for UpdateSheet {
     }
 }
 
-/// The update in the main window: the 重启安装 sheet once a downloaded
+/// The update in the main window: the 安装更新 sheet once a downloaded
 /// update is ready; nothing while it downloads (Settings › 通用 and the app
 /// menu show that).
 pub struct UpdateBanner {
@@ -347,7 +356,7 @@ pub fn update_card(
         Sym,
         icons::icon as sym_icon,
         native::{
-            IconSize, card_surface, icon_button, progress,
+            IconSize, icon_button, panel_card_surface, progress,
             tokens::{icon, radius, space},
         },
     };
@@ -355,7 +364,6 @@ pub fn update_card(
     let info = phase.info()?.clone();
     let v = info.version.as_str();
     let product = env!("PRODUCT_NAME");
-    let headline = super::notes::Notes::parse(v, &info.notes).headline;
     let has_notes = !info.notes.trim().is_empty();
     let button = |id: &'static str, label: SharedString, style: PushStyle, cx: &App| {
         crate::ui::native::push_button(id, label, style, PushSize::Small, cx).w_full()
@@ -378,6 +386,9 @@ pub fn update_card(
     let mut buttons: Vec<gpui_component::button::Button> = Vec::new();
     let (sym, tint, title, detail): (Sym, gpui::Hsla, String, String) = match phase {
         Phase::Available(_) => {
+            if has_notes {
+                buttons.push(notes_button(cx));
+            }
             buttons.push(
                 button(
                     "update-card-update",
@@ -387,9 +398,6 @@ pub fn update_card(
                 )
                 .on_click(move |_, _, cx| up.update(cx, |u, cx| u.start_update(cx))),
             );
-            if has_notes {
-                buttons.push(notes_button(cx));
-            }
             let up = updater.clone();
             close = Some(
                 icon_button(
@@ -406,11 +414,9 @@ pub fn update_card(
                 Sym::Download,
                 k.blue,
                 fill(u::CARD_AVAILABLE, &[("version", v)]),
-                if headline.is_empty() {
-                    u::CARD_AVAILABLE_DETAIL.to_string()
-                } else {
-                    headline
-                },
+                // The headline lives in 改了什么: the card stays one height
+                // and always says the app will reopen.
+                u::CARD_AVAILABLE_DETAIL.to_string(),
             )
         }
         Phase::Downloading { done, total, .. } => {
@@ -441,6 +447,9 @@ pub fn update_card(
             )
         }
         Phase::Ready { .. } => {
+            if has_notes {
+                buttons.push(notes_button(cx));
+            }
             buttons.push(
                 button(
                     "update-card-restart",
@@ -450,9 +459,6 @@ pub fn update_card(
                 )
                 .on_click(move |_, _, cx| up.update(cx, |u, cx| u.install_now(cx))),
             );
-            if has_notes {
-                buttons.push(notes_button(cx));
-            }
             (
                 Sym::Done,
                 k.green,
@@ -482,6 +488,17 @@ pub fn update_card(
                 )
                 .on_click(move |_, _, cx| up.update(cx, |u, cx| u.dismiss(cx))),
             );
+            // Sized to its label: the product's name never cuts.
+            buttons.push(
+                crate::ui::native::push_button(
+                    "update-card-quit",
+                    fill(u::QUIT_TO_INSTALL, &[("product", product)]),
+                    PushStyle::Default,
+                    PushSize::Small,
+                    cx,
+                )
+                .on_click(|_, _, cx| cx.dispatch_action(&crate::app::Quit)),
+            );
             (
                 Sym::Warning,
                 k.amber,
@@ -489,31 +506,43 @@ pub fn update_card(
                 fill(u::CARD_MANUAL_DETAIL, &[("product", product)]),
             )
         }
-        Phase::Failed { .. } => {
+        Phase::Failed { failure, .. } => {
+            let later = updater.clone();
+            buttons.push(
+                button("update-card-later", u::LATER.into(), PushStyle::Outline, cx)
+                    .on_click(move |_, _, cx| later.update(cx, |u, cx| u.postpone(cx))),
+            );
             buttons.push(
                 button("update-card-retry", u::RETRY.into(), PushStyle::Default, cx)
                     .on_click(move |_, _, cx| up.update(cx, |u, cx| u.start_update(cx))),
-            );
-            let up = updater.clone();
-            buttons.push(
-                button("update-card-later", u::LATER.into(), PushStyle::Outline, cx)
-                    .on_click(move |_, _, cx| up.update(cx, |u, cx| u.postpone(cx))),
             );
             (
                 Sym::Alert,
                 k.red,
                 fill(o::UPDATE_FAILED_TITLE, &[("version", v)]),
-                banner_text(phase).unwrap_or_default(),
+                // The title says it failed: the line says why and what to do.
+                match failure {
+                    Failure::Check => u::CARD_FAILED_CHECK_DETAIL,
+                    Failure::Download => u::CARD_FAILED_DOWNLOAD_DETAIL,
+                    Failure::Checksum => u::CARD_FAILED_CHECKSUM_DETAIL,
+                    Failure::Install => u::CARD_FAILED_INSTALL_DETAIL,
+                }
+                .to_string(),
             )
         }
         _ => return None,
     };
     let busy = matches!(phase, Phase::WaitingForSends(_) | Phase::Installing(_));
+    // 退出 {product}, the primary at the row's end, keeps its label whole.
+    let hugging = matches!(phase, Phase::Manual(_)).then_some(1);
     let mark = div()
         .flex_none()
         .size(icon::LG)
         .rounded(radius::ITEM)
         .bg(k.fill)
+        // The dark card is lifted to the group fill: the box takes the next
+        // step up, so it still reads as a box.
+        .when(crate::theme::is_dark(cx), |d| d.bg(k.push))
         .flex()
         .items_center()
         .justify_center()
@@ -531,8 +560,11 @@ pub fn update_card(
             .mx(metrics::SIDEBAR_ROW_INSET)
             .pb(space::S8)
             .child(
-                card_surface(cx)
+                panel_card_surface(cx)
                     .rounded(radius::CONTAINER)
+                    // The dark sidebar already has the card's fill: lift the
+                    // card one step there, so it reads as a surface.
+                    .when(crate::theme::is_dark(cx), |d| d.bg(k.group))
                     .p(space::S12)
                     .flex()
                     .flex_col()
@@ -565,13 +597,20 @@ pub fn update_card(
                             .child(detail),
                     )
                     .when(!buttons.is_empty(), |d| {
-                        d.child(
-                            div().flex().gap(space::S8).children(
-                                buttons
-                                    .into_iter()
-                                    .map(|b| div().flex_1().min_w(gpui::Pixels::ZERO).child(b)),
-                            ),
-                        )
+                        d.child(div().flex().gap(space::S8).children(
+                            buttons.into_iter().enumerate().map(|(ix, b)| {
+                                div()
+                                    .min_w(gpui::Pixels::ZERO)
+                                    .map(|d| {
+                                        if hugging == Some(ix) {
+                                            d.flex_none()
+                                        } else {
+                                            d.flex_1()
+                                        }
+                                    })
+                                    .child(b)
+                            }),
+                        ))
                     }),
             )
             .into_any_element(),
