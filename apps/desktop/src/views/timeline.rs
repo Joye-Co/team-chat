@@ -162,6 +162,12 @@ pub struct TimelineView {
     focus: focus::FocusState,
     /// ⌘F: the find bar and its matches (`timeline/find.rs`).
     find: Option<find::FindState>,
+    /// The long answers shown whole (`markdown::fold`): opened by the person,
+    /// or the target of a search, a reference jump or ⌘F. By row key.
+    unfolded: std::collections::HashSet<String>,
+    /// Rows a search, ⌘F or a reference jump pointed into: their code fences stay open.
+    /// The value says whether something points there now.
+    code_open: std::collections::HashMap<String, bool>,
     /// The message row under the pointer (its hover toolbar shows).
     hovered: Option<String>,
     /// R2-12, E3: the thread is a Tab stop; ↑↓ move the row whose toolbar
@@ -279,19 +285,45 @@ impl TimelineView {
     }
 
     pub fn new(services: Services, cx: &mut Context<Self>) -> Self {
+        let refs_hub = crate::views::refs::hub(cx);
         let subscriptions = vec![
+            // 引用了 n 处 opened or folded: that row has a new height.
+            cx.subscribe(
+                &refs_hub,
+                |this, _, event: &crate::views::refs::RefsEvent, cx| {
+                    if let crate::views::refs::RefsEvent::SentRefsToggled(key) = event {
+                        this.remeasure_key(key);
+                        cx.notify();
+                    }
+                },
+            ),
             cx.subscribe(&services.hub, |this, _, changes: &Changes, cx| {
                 let Some((g, tid)) = this.open.clone() else {
                     return;
                 };
+                // Back online: a page of older messages asked for while the
+                // connection was down was not sent. Ask again on the next draw.
+                if this.older_requested
+                    && !this.provider_loading
+                    && changes.any(|c| matches!(c, Change::Connection))
+                    && matches!(
+                        this.services.provider.connection(),
+                        crate::data::ConnectionState::Online
+                    )
+                {
+                    this.older_requested = false;
+                    cx.notify();
+                }
                 let touches = changes.touches_topic(&g, &tid)
                     || changes.any(|c| match c {
                         Change::Topics { group_id } => *group_id == g,
                         Change::Runs { group_id, topic_id } => *group_id == g && *topic_id == tid,
+                        // Connection: a message waiting to send shows whether it can.
                         Change::RunLog { .. }
                         | Change::Members
                         | Change::Session
-                        | Change::Groups => true,
+                        | Change::Groups
+                        | Change::Connection => true,
                         _ => false,
                     });
                 if touches {
@@ -349,6 +381,8 @@ impl TimelineView {
             activation: None,
             focus: focus::FocusState::default(),
             find: None,
+            unfolded: Default::default(),
+            code_open: Default::default(),
             hovered: None,
             key_focus: cx.focus_handle().tab_index(0).tab_stop(true),
             keyboard_row: false,
@@ -1309,6 +1343,50 @@ mod keyboard_tests {
         data::ChatProvider,
         fake::v2::{DEV, T_RECONNECT, V2Samples},
     };
+
+    /// 引用了 n 处 starts folded; opening it makes the row taller by its lines,
+    /// and folding it gives the height back.
+    #[gpui::test]
+    fn the_sent_references_open_and_fold_in_the_row(cx: &mut gpui::TestAppContext) {
+        use crate::fake::v2::{GROWTH, T_REPORT, refs_samples::THREE_MESSAGE};
+        cx.update(|cx| {
+            gpui_component::init(cx);
+            bind_keys(cx);
+        });
+        let provider: Arc<dyn ChatProvider> = V2Samples::with_refs();
+        let (view, cx) = cx.add_window_view(move |_, cx| {
+            let services = Services::new(provider, cx);
+            services.nav.update(cx, |nav, cx| {
+                nav.open_topic(GROWTH.into(), T_REPORT.into(), cx)
+            });
+            TimelineView::new(services, cx)
+        });
+        cx.run_until_parked();
+        let mut grow = 0.;
+        let mut height = |view: &Entity<TimelineView>, cx: &mut gpui::VisualTestContext| {
+            // A taller window draws a frame without measuring the rows again.
+            grow += 1.;
+            cx.simulate_resize(gpui::size(px(900.), px(1600.) + px(grow)));
+            cx.run_until_parked();
+            view.update(cx, |this, _| {
+                let ix = this.row_index(THREE_MESSAGE).expect("the row is listed");
+                let row = this.list.bounds_for_item(ix).expect("the row is drawn");
+                row.size.height
+            })
+        };
+        let folded = height(&view, cx);
+        let toggle = |cx: &mut gpui::VisualTestContext| {
+            cx.update(|_, cx| {
+                crate::views::refs::hub(cx)
+                    .update(cx, |h, cx| h.toggle_sent_refs(THREE_MESSAGE.into(), cx))
+            })
+        };
+        toggle(cx);
+        let open = height(&view, cx);
+        assert!(open > folded, "the lines show under the row: {open:?}");
+        toggle(cx);
+        assert_eq!(height(&view, cx), folded);
+    }
 
     /// R2-12: with the thread focused, ↑ picks the newest message (its
     /// toolbar shows, as under the pointer) and walks back; ↓ comes forward.

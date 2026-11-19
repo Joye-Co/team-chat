@@ -40,7 +40,14 @@ struct Data {
     /// The other members' runs at work with a plan, and their step times:
     /// 计划 shows one block per run (A2-11).
     others: Vec<(BotRunSummary, Vec<Millis>)>,
+    /// The runs at work on a known computer, `run` first: 在哪干活 lists each.
+    at_work: Vec<BotRunSummary>,
+    /// The 话题 has an order or runs of several members: 计划 names the member
+    /// of every block.
+    plan_led: bool,
     changes: Option<TopicChanges>,
+    /// `run` is at work: the thread's working card draws its plan.
+    run_on_thread: bool,
     artifacts: Vec<ArtifactSummary>,
     /// The preview of the newest 产出.
     preview: Option<ArtifactPreview>,
@@ -58,9 +65,15 @@ impl Data {
         let p = &services.provider;
         let topic = p.topic(g, t);
         let all_runs = p.runs(g, t);
+        let relay = topic.as_ref().and_then(|t| t.relay.as_ref());
+        let plan_led = relay.is_some()
+            || all_runs
+                .first()
+                .is_some_and(|a| all_runs.iter().any(|r| r.bot_id != a.bot_id));
         let run = rail_run(
             all_runs.clone(),
             topic.as_ref().and_then(|t| t.owner_id.as_deref()),
+            relay,
         );
         let others: Vec<(BotRunSummary, Vec<Millis>)> =
             crate::views::topic_page::working_runs(&all_runs)
@@ -68,12 +81,24 @@ impl Data {
                 .filter(|r| !r.plan.is_empty() && run.as_ref().is_none_or(|x| x.id != r.id))
                 .map(|r| (r.clone(), p.run_step_times(&r.id)))
                 .collect();
+        let mut at_work: Vec<BotRunSummary> = crate::views::topic_page::working_runs(&all_runs)
+            .into_iter()
+            .filter(|r| r.machine_name.is_some())
+            .cloned()
+            .collect();
+        at_work.sort_by_key(|r| run.as_ref().is_none_or(|x| x.id != r.id));
+        let run_on_thread = run.as_ref().is_some_and(|x| {
+            crate::views::topic_page::working_runs(&all_runs)
+                .iter()
+                .any(|r| r.id == x.id)
+        });
         let artifacts = p.artifacts(g, t);
         let preview = artifacts
             .first()
             .and_then(|a| p.artifact_preview(&a.id, a.version));
         let decisions = p.topic_decisions(g, t);
         let mut ids: Vec<&str> = others.iter().map(|(r, _)| r.bot_id.as_str()).collect();
+        ids.extend(at_work.iter().map(|r| r.bot_id.as_str()));
         if let Some(t) = &topic {
             ids.extend(t.owner_id.as_deref());
             ids.push(&t.created_by);
@@ -98,7 +123,10 @@ impl Data {
                 .map(|r| p.run_step_times(&r.id))
                 .unwrap_or_default(),
             changes: p.topic_changes(g, t),
+            run_on_thread,
             others,
+            at_work,
+            plan_led,
             cost: p.topic_cost(g, t),
             recording: topic_recording(services, g, t),
             topic,
@@ -126,9 +154,10 @@ impl Data {
 mod native;
 pub use native::run_since;
 
-/// The members 成员 marks, in order (design-relay §3.6): the AI members at work here (在做,
-/// the newest start first), then those that took part (参与过), then the one who 提出 the
-/// 话题 (提出) unless already marked.
+/// The members 成员 marks, in order (design-relay §3.6): the member a paused 按顺序做 is
+/// stuck at (卡住了, the word its bar uses), the AI members at work here (在做, the newest
+/// start first), then those that took part (参与过), then the one who 提出 the 话题 (提出)
+/// unless already marked.
 pub fn people_marks(topic: &Topic) -> Vec<(MemberId, &'static str)> {
     use crate::copy::relay as r;
     let mut ps: Vec<&crate::data::TopicParticipant> = topic.participants.iter().collect();
@@ -144,11 +173,26 @@ pub fn people_marks(topic: &Topic) -> Vec<(MemberId, &'static str)> {
             (p.member_id.clone(), tag)
         })
         .collect();
+    // 参与过 would read as finished: the stuck member leads with the bar's word.
+    if let Some(relay) = topic.relay.as_ref().filter(|r| r.state == "paused")
+        && let Some(step) = relay.steps.get(relay.current as usize)
+        && !step.member_id.is_empty()
+    {
+        out.retain(|(id, _)| *id != step.member_id);
+        out.insert(0, (step.member_id.clone(), r::PEOPLE_STUCK));
+    }
     let by = &topic.created_by;
     if !by.is_empty() && !out.iter().any(|(id, _)| id == by) {
         out.push((by.clone(), c::INSPECTOR_ASKED));
     }
     out
+}
+
+/// While the PR merges, the member the state names (`Forge 正在合并`) leads the
+/// list with that word: 在做 would claim a run, 参与过 that it left.
+fn mark_merging(marks: &mut Vec<(MemberId, &'static str)>, owner: &MemberId) {
+    marks.retain(|(id, _)| id != owner);
+    marks.insert(0, (owner.clone(), c::STATE_MERGING_SHORT));
 }
 
 // --- v12/fx-topic: one trailing pane width (coordinator decision): the
@@ -256,7 +300,7 @@ impl TopicRail {
 
     /// The actions of the 话题 at the top of the pane (owner decision,
     /// 2026-11-08: no pinned full-width footer): 标记完成 (outline, with a
-    /// check) and 交给… (ghost, a menu of the 群's members), small, side by
+    /// check) and 交给… (outline, §2.5; a menu of the 群's members), small, side by
     /// side. While the 话题 waits on a review, an answer or a merge,
     /// 标记完成 is not the next step (R2-17); 交给… stays.
     fn actions(&self, topic: &Topic, cx: &mut Context<Self>) -> AnyElement {
@@ -302,7 +346,15 @@ impl TopicRail {
             .items_center()
             .gap(space::S8)
             .children(done)
-            .child(hand)
+            // Alone, the ghost's padding has no visible edge: its label takes
+            // the pane's content edge and the hover overhangs into the inset.
+            .child(
+                div()
+                    .when(waits, |el| {
+                        el.ml(-crate::ui::native::metrics::BUTTON_SMALL_PAD)
+                    })
+                    .child(hand),
+            )
             .into_any_element()
     }
 }
@@ -518,7 +570,11 @@ pub fn preview_thumbnail(preview: &ArtifactPreview, cx: &App) -> AnyElement {
 
 /// The run of a 话题 the rail shows (runs come newest first): the owner's newest run, so
 /// the 负责 card and the 计划 card belong to the same member; else the newest run.
-fn rail_run(runs: Vec<BotRunSummary>, owner: Option<&str>) -> Option<BotRunSummary> {
+fn rail_run(
+    runs: Vec<BotRunSummary>,
+    owner: Option<&str>,
+    relay: Option<&crate::data::TopicRelay>,
+) -> Option<BotRunSummary> {
     // R2-04: while a member works, the rail shows the run the title bar and
     // the working card name (`topic_page::lead_run`), never an older one.
     if let Some(lead) = crate::views::topic_page::lead_run(&runs, owner)
@@ -526,7 +582,14 @@ fn rail_run(runs: Vec<BotRunSummary>, owner: Option<&str>) -> Option<BotRunSumma
     {
         return Some(lead.clone());
     }
-    let own = owner.and_then(|o| runs.iter().position(|r| r.bot_id == o));
+    // The run the state names comes first: the current step of an order that
+    // has not finished, never the finished plan of an earlier step.
+    let step = relay
+        .filter(|r| r.state != "done")
+        .and_then(|r| r.steps.get(r.current as usize))
+        .and_then(|s| s.run_id.as_deref())
+        .and_then(|id| runs.iter().position(|r| r.id == id));
+    let own = step.or_else(|| owner.and_then(|o| runs.iter().position(|r| r.bot_id == o)));
     let mut runs = runs;
     match own {
         Some(i) => Some(runs.swap_remove(i)),
@@ -576,7 +639,14 @@ impl Render for TopicRail {
         );
         // Usable (design-relay §3.6): who works here now and who took part, never one
         // responsible member.
-        let marks = topic.map(people_marks).unwrap_or_default();
+        let mut marks = topic.map(people_marks).unwrap_or_default();
+        if d.changes
+            .as_ref()
+            .is_some_and(|ch| ch.state == crate::data::v2::ChangeState::Merging)
+            && let Some(owner) = topic.and_then(|t| t.owner_id.as_ref())
+        {
+            mark_merging(&mut marks, owner);
+        }
         sections.push(self.native_owner(&d, &marks, cx));
         let mut empty: Vec<&'static str> = Vec::new();
         let mut add =
@@ -584,10 +654,14 @@ impl Render for TopicRail {
                 Some(el) => sections.push(el),
                 None => empty.push(name),
             };
-        let plan = run
-            .filter(|r| !r.plan.is_empty())
-            .map(|r| self.native_plan(&d, r, cx));
-        add(plan, c::RAIL_EMPTY_NAME_PLAN, &mut sections);
+        // A run at work has its plan on the thread's working card: never the
+        // same steps twice on one screen, and never named empty here either.
+        if !run.is_some_and(|r| d.run_on_thread && !r.plan.is_empty()) {
+            let plan = run
+                .filter(|r| !r.plan.is_empty())
+                .map(|r| self.native_plan(&d, r, cx));
+            add(plan, c::RAIL_EMPTY_NAME_PLAN, &mut sections);
+        }
         let changes = self.native_changes(&d, window, cx);
         add(changes, c::RAIL_EMPTY_NAME_CHANGES, &mut sections);
         let outputs = self.native_outputs(&d, window, cx);
@@ -602,11 +676,15 @@ impl Render for TopicRail {
             sections.push(
                 div()
                     .w_full()
-                    .px(px(2.))
                     .n_subheadline()
                     .text_color(k.secondary)
                     .child(fill(
-                        c::RAIL_EMPTY_REST,
+                        // A 完成 话题 expects nothing more: never 还没有.
+                        if topic.is_some_and(|t| t.status == crate::data::TopicStatus::Done) {
+                            c::RAIL_EMPTY_REST_DONE
+                        } else {
+                            c::RAIL_EMPTY_REST
+                        },
                         &[("names", &empty.join(crate::copy::rail::RAIL_NAMES_SEP))],
                     ))
                     .into_any_element(),
@@ -667,7 +745,7 @@ impl PaneView for ChangesPane {
 }
 
 impl Render for ChangesPane {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let topic = self.services.nav.read(cx).topic.clone();
         let p = &self.services.provider;
         let changes = topic.as_ref().and_then(|(g, t)| p.topic_changes(g, t));
@@ -695,7 +773,7 @@ impl Render for ChangesPane {
                 cx.notify();
             });
         });
-        native::changes_pane_body(changes, diff, &self.open, toggle, cx)
+        native::changes_pane_body(changes, diff, &self.open, toggle, window, cx)
     }
 }
 
@@ -750,10 +828,10 @@ mod run_tests {
                 run("old", "Forge"),
             ]
         };
-        assert_eq!(rail_run(runs(), Some("Forge")).unwrap().id, "forge");
-        assert_eq!(rail_run(runs(), Some("Taro")).unwrap().id, "scout");
-        assert_eq!(rail_run(runs(), None).unwrap().id, "scout");
-        assert!(rail_run(vec![], Some("Forge")).is_none());
+        assert_eq!(rail_run(runs(), Some("Forge"), None).unwrap().id, "forge");
+        assert_eq!(rail_run(runs(), Some("Taro"), None).unwrap().id, "scout");
+        assert_eq!(rail_run(runs(), None, None).unwrap().id, "scout");
+        assert!(rail_run(vec![], Some("Forge"), None).is_none());
     }
 }
 
@@ -823,5 +901,43 @@ mod people_tests {
         let t = topic(vec![], "me", Some("a"));
         assert_eq!(people_marks(&t), vec![("me".to_string(), "提出")]);
         assert!(people_marks(&topic(vec![], "", None)).is_empty());
+    }
+
+    #[test]
+    fn the_member_a_paused_order_is_stuck_at_leads_as_stuck() {
+        use crate::data::{TopicRelay, TopicRelayStep};
+        let step = |id: &str, state: &str| TopicRelayStep {
+            member_id: id.into(),
+            note: None,
+            state: state.into(),
+            run_id: None,
+        };
+        let mut t = topic(
+            vec![who("forge", false, 5), who("scout", false, 9)],
+            "me",
+            None,
+        );
+        t.relay = Some(TopicRelay {
+            id: "r".into(),
+            started_by: "me".into(),
+            goal: String::new(),
+            current: 1,
+            state: "paused".into(),
+            reason: None,
+            stopped_by: None,
+            updated_at: 0,
+            steps: vec![step("forge", "done"), step("scout", "failed")],
+        });
+        assert_eq!(
+            people_marks(&t),
+            vec![
+                ("scout".to_string(), "卡住了"),
+                ("forge".to_string(), "参与过"),
+                ("me".to_string(), "提出"),
+            ]
+        );
+        // A running order marks nobody stuck.
+        t.relay.as_mut().unwrap().state = "running".into();
+        assert!(people_marks(&t).iter().all(|(_, tag)| *tag != "卡住了"));
     }
 }

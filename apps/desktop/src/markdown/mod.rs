@@ -5,8 +5,12 @@
 //! browser only for safe schemes, `@name` as a mention pill, and code fences
 //! read the way Slack reads them, and Chinese `**结论：**正文` in bold (see
 //! [`source::fix_cjk_strong`]). Views call [`message_body`]; they never
-//! build a `TextView` for message text themselves.
+//! build a `TextView` for message text themselves. A Markdown 产出 renders
+//! through [`document_body_marked`]. Code fences show their language and are
+//! highlighted ([`code`]); in the timeline a long one is folded ([`fold`]).
 
+mod code;
+pub mod fold;
 mod source;
 
 use std::hash::{Hash, Hasher};
@@ -124,17 +128,132 @@ pub fn message_body_refs(
     diagrams: Option<&DiagramContext>,
     refs: Option<&crate::views::refs::markdown::RefsBody>,
 ) -> (TextView, bool) {
+    message_body_found(id, text, mentions, edited, diagrams, refs, Vec::new())
+}
+
+/// The ⌘F matches inside one code fence of a body: the fence's code and, as byte ranges
+/// of that code, what to fill and with which color.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CodeMark {
+    pub code: String,
+    pub spans: Vec<(std::ops::Range<usize>, gpui::Hsla)>,
+}
+
+/// [`message_body_refs`] with the ⌘F matches inside its code fences filled.
+pub fn message_body_found(
+    id: impl Into<ElementId>,
+    text: impl Into<SharedString>,
+    mentions: &[MentionTarget],
+    edited: bool,
+    diagrams: Option<&DiagramContext>,
+    refs: Option<&crate::views::refs::markdown::RefsBody>,
+    code_marks: Vec<CodeMark>,
+) -> (TextView, bool) {
+    build(
+        id,
+        text,
+        mentions,
+        edited,
+        diagrams.map(|d| DiagramsOf {
+            home: DiagramHome::Message {
+                message_id: d.message_id.clone(),
+                topic_id: d.topic_id.clone(),
+            },
+            streaming: d.streaming,
+        }),
+        refs,
+        // A long code fence of a finished timeline message is folded; while
+        // the body streams its text still changes under the fold.
+        match diagrams {
+            Some(d) if !d.streaming && d.open_code => CodeFolds::Open,
+            Some(d) if !d.streaming => CodeFolds::Folded,
+            _ => CodeFolds::None,
+        },
+        code_marks,
+    )
+}
+
+/// The 产出 version a Markdown document is, and which of its parts a body is
+/// (a document is drawn as one body per heading).
+#[derive(Clone, Debug)]
+pub struct DocContext {
+    pub artifact_id: String,
+    pub version: u32,
+    pub part: usize,
+}
+
+/// A selectable Markdown view of one part of a Markdown 产出: like a message
+/// body, and its ```mermaid fences are drawn as diagrams (at most
+/// [`crate::diagrams::MAX_PER_MESSAGE`] per part). Nothing in a document is
+/// folded: the reader is where the whole text is read.
+///
+/// `code_marks` are the find bar's matches inside its code fences.
+pub fn document_body_marked(
+    id: impl Into<ElementId>,
+    text: impl Into<SharedString>,
+    doc: &DocContext,
+    code_marks: Vec<CodeMark>,
+) -> TextView {
+    build(
+        id,
+        text,
+        &[],
+        false,
+        Some(DiagramsOf {
+            home: DiagramHome::Document(doc.clone()),
+            streaming: false,
+        }),
+        None,
+        CodeFolds::None,
+        code_marks,
+    )
+    .0
+}
+
+/// What a body does with its long code fences.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CodeFolds {
+    /// Nothing: they are drawn whole, with no 展开 or 收起.
+    None,
+    /// Each shows its first lines until the person opens it.
+    Folded,
+    /// Each is open until the person closes it (something points into this body).
+    Open,
+}
+
+/// The diagrams of a body: where the body lives, and whether it still streams.
+struct DiagramsOf {
+    home: DiagramHome,
+    streaming: bool,
+}
+
+fn build(
+    id: impl Into<ElementId>,
+    text: impl Into<SharedString>,
+    mentions: &[MentionTarget],
+    edited: bool,
+    diagrams: Option<DiagramsOf>,
+    refs: Option<&crate::views::refs::markdown::RefsBody>,
+    code_folds: CodeFolds,
+    code_marks: Vec<CodeMark>,
+) -> (TextView, bool) {
     let text: SharedString = text.into();
     let source = link_mentions(&fix_cjk_strong(&normalize_fences(&text)), mentions);
     let marked = edited
         .then(|| append_edited_mark(&source, t::EDITED))
         .flatten();
     let inline = marked.is_some();
-    let source = marked.unwrap_or(source);
+    // The whole body, and the one drawn (its long code fences cut).
+    let full_source = marked.unwrap_or(source);
+    let fold_code = code_folds != CodeFolds::None;
+    let source = if fold_code {
+        fold::fold_code_remembered(&full_source, code_folds == CodeFolds::Open)
+    } else {
+        full_source.clone()
+    };
     let diagram_plugin = diagrams.map(|d| DiagramPlugin {
         allowed: crate::diagrams::diagram_fences(&source, d.streaming),
-        message_id: d.message_id.clone(),
-        topic_id: d.topic_id.clone(),
+        home: d.home,
         // inc-refs: `md:<index>` of each fence (REFS §A2.1), counted in the stored body.
         blocks: top_level_blocks(&source),
         block_offset: refs.map_or(0, |r| r.block_offset),
@@ -143,7 +262,7 @@ pub fn message_body_refs(
     let refs = refs.filter(|r| !r.message_id.is_empty());
     let table_plugin =
         refs.map(|r| crate::views::refs::markdown::TablePlugin::new(r.clone(), &source));
-    let code_refs = refs.map(|r| (r.clone(), source.clone()));
+    let code_refs = refs.map(|r| (r.clone(), full_source));
     // --- end inc-refs ---
     let view = TextView::markdown(id, source)
         .selectable(true)
@@ -154,11 +273,94 @@ pub fn message_body_refs(
         .plugin(EditedPlugin)
         .when_some(diagram_plugin, |view, p| view.plugin(p))
         .when_some(table_plugin, |view, p| view.plugin(p))
+        .code_block_highlighter(code::marked_highlighter(code_marks))
+        .code_block_backdrop(|code, _window, cx| {
+            diff_lines(&code.code(), code.lang().as_deref(), cx)
+        })
         .code_block_actions(move |code, _window, cx| {
-            let text = code.code();
+            // The highlighter is built without the app: it learns the colors here.
+            code::sync_colors(cx);
+            let shown = code.code();
+            // A long fence: the actions work on its whole code, not the lines drawn.
+            let fold = fold_code.then(|| fold::fold_of(&shown)).flatten();
+            let text: SharedString = match &fold {
+                Some(f) => f.full.clone().into(),
+                None => shown.clone(),
+            };
             let mut hasher = std::collections::hash_map::DefaultHasher::new();
             text.hash(&mut hasher);
             let hash = hasher.finish();
+            let k = theme::colors(cx);
+            let language = code.lang().and_then(|info| code::label(&info)).map(|name| {
+                div()
+                    .px(theme::space::S4)
+                    .text_size(theme::type_scale::META.0)
+                    .line_height(theme::type_scale::META.1)
+                    .font_family(crate::theme::ui_font_family())
+                    .text_color(k.text_3)
+                    .child(name)
+            });
+            let toggle =
+                |part: &str, open: bool, label: String, style: crate::ui::native::PushStyle| {
+                    let full = text.clone();
+                    crate::ui::native::push_button(
+                        ElementId::Name(format!("fold-code-{part}-{hash:x}").into()),
+                        label,
+                        style,
+                        crate::ui::native::PushSize::Small,
+                        cx,
+                    )
+                    .on_click(move |_, _, cx| {
+                        cx.stop_propagation();
+                        fold::set_code_open(&full, open);
+                        cx.refresh_windows();
+                    })
+                };
+            let lines = fold.as_ref().map_or(0, |f| f.lines).to_string();
+            // 收起 sits in the strip; 展开 sits on the cut line, where the code stops.
+            let collapse = fold.as_ref().filter(|f| f.open).map(|_| {
+                toggle(
+                    "top",
+                    false,
+                    t::CODE_COLLAPSE.to_string(),
+                    crate::ui::native::PushStyle::Ghost,
+                )
+            });
+            // The line under the code's last one, or the cut line of a folded block: an
+            // outline button, as text on the code's fill reads as code, with its edge on the
+            // copy glyph's.
+            let at_end = |line: usize, button: gpui_component::button::Button| {
+                use crate::ui::native::tokens::text;
+                div()
+                    .absolute()
+                    .top(CODE_STRIP - px(8.) + text::MONO.1 * line as f32 - theme::space::S4)
+                    .right(CODE_END_INSET)
+                    .child(button)
+            };
+            let expand = fold.as_ref().filter(|f| !f.open).map(|_| {
+                at_end(
+                    crate::ui::native::metrics::CODE_FOLD_LINES,
+                    toggle(
+                        "end",
+                        true,
+                        crate::copy::fill(t::CODE_EXPAND, &[("n", &lines)]),
+                        crate::ui::native::PushStyle::Outline,
+                    ),
+                )
+            });
+            // A long open block folds again where the reading stopped, too: the strip's
+            // 收起 has scrolled away by then.
+            let collapse_end = fold.as_ref().filter(|f| f.open).map(|f| {
+                at_end(
+                    f.lines,
+                    toggle(
+                        "end",
+                        false,
+                        t::CODE_COLLAPSE.to_string(),
+                        crate::ui::native::PushStyle::Outline,
+                    ),
+                )
+            });
             let copy = Clipboard::new(ElementId::Name(format!("copy-code-{hash:x}").into()))
                 .value(text.clone())
                 .tooltip(t::COPY_CODE);
@@ -170,20 +372,35 @@ pub fn message_body_refs(
                     crate::views::refs::markdown::code_target(body, source, &text)
                 })
                 .map(|target| {
-                    crate::views::refs::affordance::hover_button(
-                        &format!("code-{}-{hash:x}", target.block_id),
+                    let hover = format!("code-{}-{hash:x}", target.block_id);
+                    let button = crate::views::refs::affordance::hover_button(
+                        &hover,
                         std::rc::Rc::new(move |_: &gpui::App| target.clone()),
                         cx,
-                    )
+                    );
+                    (hover, button)
                 });
+            let (ask_hover, ask): (Option<String>, Option<gpui::AnyElement>) = ask.unzip();
             div()
+                .id(ElementId::Name(format!("code-actions-{hash:x}").into()))
                 .h(CODE_ACTIONS)
                 .flex()
                 .items_center()
                 .gap(theme::space::S4)
+                // Resting anywhere on the strip offers 问这里.
+                .when_some(ask_hover, |d, hover| {
+                    d.on_hover(crate::views::refs::affordance::track_hover(hover))
+                })
+                .children(code_end_cover(&shown, cx))
+                // The hidden 问这里 keeps its width: it goes first, so the language
+                // rests beside the copy button.
                 .children(ask)
+                .children(language)
+                .children(collapse)
                 .child(copy)
-                .child(code_edge_fade(&text, cx))
+                .child(code_edge_fade(&shown, cx))
+                .children(expand)
+                .children(collapse_end)
         })
         .on_link_click(|url, _event, _window, cx| {
             if let Some(url) = safe_link(url) {
@@ -203,17 +420,22 @@ fn body_style() -> TextViewStyle {
     TextViewStyle::default()
         .table(table)
         .code_block(code_block_style())
+        .code_block_one_line(
+            StyleRefinement::default()
+                .pt(CODE_ONE_LINE_PAD)
+                .pb(CODE_ONE_LINE_PAD)
+                .pr(crate::ui::native::metrics::CODE_BLOCK_ONE_LINE_END),
+            Some(CODE_ONE_LINE_ACTIONS_TOP),
+        )
 }
 
-/// The top strip of a code block that holds 问这里 and the copy button: the
-/// actions sit 8 from the top (gpui-base) and are at most 24 tall, so the
-/// strip is 32 and the first line's ascenders are never under the actions'
-/// fill (review 3 K-05).
-const CODE_STRIP: gpui::Pixels = px(32.);
-/// The tallest action in the strip.
-const CODE_ACTIONS: gpui::Pixels = px(24.);
-/// The bottom padding of a code block.
-const CODE_PAD_BOTTOM: gpui::Pixels = px(14.);
+use crate::ui::native::metrics::{
+    CODE_BLOCK_ACTIONS as CODE_ACTIONS, CODE_BLOCK_ACTIONS_INSET as CODE_ACTIONS_INSET,
+    CODE_BLOCK_END_INSET as CODE_END_INSET,
+    CODE_BLOCK_ONE_LINE_ACTIONS_TOP as CODE_ONE_LINE_ACTIONS_TOP,
+    CODE_BLOCK_ONE_LINE_PAD as CODE_ONE_LINE_PAD, CODE_BLOCK_PAD_BOTTOM as CODE_PAD_BOTTOM,
+    CODE_BLOCK_STRIP as CODE_STRIP,
+};
 
 /// The code block (§2.4, §2.17; review 2 R1-04):
 /// - one width: the in-thread width (640), or the column when it is
@@ -247,25 +469,65 @@ fn code_block_style() -> StyleRefinement {
     code
 }
 
+/// A block of one line has no action strip: its actions sit on the line.
+pub(crate) fn code_is_one_line(code: &str) -> bool {
+    !code.trim_end_matches('\n').contains('\n')
+}
+
+/// The `+` and `-` lines of a diff fence: each tint runs the block's whole inner width,
+/// as a Card v2 diff row does (a text run's own background would stop at its last letter).
+/// It holds while the code scrolls sideways; a tint this light leaves the text over it as
+/// it is.
+fn diff_lines(code: &str, info: Option<&str>, cx: &App) -> gpui::Div {
+    use crate::ui::native::tokens::{card_v2, layout, text};
+    let k = theme::colors(cx);
+    let first_line = if code_is_one_line(code) {
+        CODE_ONE_LINE_PAD
+    } else {
+        CODE_STRIP
+    };
+    // The block's own width: 640, or the column when that is narrower.
+    div().relative().w(layout::IN_THREAD).max_w_full().children(
+        code::diff_lines(code, info.unwrap_or_default())
+            .into_iter()
+            .map(|(line, added)| {
+                div()
+                    .absolute()
+                    .top(layout::BORDER + first_line + text::MONO.1 * line as f32)
+                    .left(layout::BORDER)
+                    .right(layout::BORDER)
+                    .h(text::MONO.1)
+                    .bg(if added { k.ok } else { k.bad }.opacity(card_v2::DIFF_FILL))
+            }),
+    )
+}
+
 /// The scroll cue of a code block (§2.17 "never a hard clip"): a 16 fade
 /// from transparent to the block fill over the block's right padding, from
 /// under the action strip to the bottom padding. A line that fits ends
 /// before it (the 16 padding), so the fade shows only on a line that runs
 /// past the edge, where it softens the cut into a cue that the block
 /// scrolls. It is drawn from the pinned actions, so it stays at the edge
-/// while the code scrolls.
+/// while the code scrolls. On a block of one line the actions share the line, so the
+/// fade ends at their leading edge.
 fn code_edge_fade(code: &str, cx: &App) -> impl IntoElement {
-    use crate::ui::native::tokens::text;
+    use crate::ui::native::tokens::{layout, text};
     let lines = code.trim_end_matches('\n').lines().count().max(1) as f32;
     let fill = gpui_component::ActiveTheme::theme(cx).muted;
     // The actions sit 8 in from the block's top and right edges (gpui-base);
     // the fade starts at the end of the strip and stops at the last line.
-    let inset = px(8.);
+    let inset = CODE_ACTIONS_INSET;
     div()
         .absolute()
-        .top(CODE_STRIP - inset)
-        // Inside the block's 1 px border.
-        .right(px(1.) - inset)
+        .map(|d| {
+            if code_is_one_line(code) {
+                d.top(layout::BORDER + CODE_ONE_LINE_PAD - CODE_ONE_LINE_ACTIONS_TOP)
+                    .right(gpui::relative(1.))
+            } else {
+                // Inside the block's 1 px border.
+                d.top(CODE_STRIP - inset).right(px(1.) - inset)
+            }
+        })
         .w(theme::space::S16)
         .h(text::MONO.1 * lines)
         .bg(gpui::linear_gradient(
@@ -273,6 +535,23 @@ fn code_edge_fade(code: &str, cx: &App) -> impl IntoElement {
             gpui::linear_color_stop(fill.opacity(0.), 0.),
             gpui::linear_color_stop(fill, 1.),
         ))
+}
+
+/// A block of one line scrolls under its actions: this fills the inset between them and the
+/// block's edge, so no cut letter shows past the copy button. It starts under the button, to
+/// close the actions' rounded corners too.
+fn code_end_cover(code: &str, cx: &App) -> Option<gpui::Div> {
+    use crate::ui::native::tokens::{layout, text};
+    code_is_one_line(code).then(|| {
+        div()
+            .absolute()
+            .top(layout::BORDER + CODE_ONE_LINE_PAD - CODE_ONE_LINE_ACTIONS_TOP)
+            // Inside the block's 1 px border.
+            .right(layout::BORDER - CODE_ACTIONS_INSET)
+            .w(CODE_ACTIONS_INSET * 2. - layout::BORDER)
+            .h(text::MONO.1)
+            .bg(gpui_component::ActiveTheme::theme(cx).muted)
+    })
 }
 
 // --- v11/inc-diagrams: ```mermaid fences drawn as diagrams (REFS §B1) ---
@@ -283,6 +562,9 @@ pub struct DiagramContext {
     pub message_id: String,
     pub topic_id: String,
     pub streaming: bool,
+    /// A search, ⌘F or a reference jump pointed into this body: its long code
+    /// fences stay open, since what is pointed at may be past their cut.
+    pub open_code: bool,
 }
 
 /// Draws the first [`crate::diagrams::MAX_PER_MESSAGE`] closed ```mermaid fences of a
@@ -290,8 +572,7 @@ pub struct DiagramContext {
 struct DiagramPlugin {
     /// Byte offsets of the opening lines of the fences to draw.
     allowed: Vec<usize>,
-    message_id: String,
-    topic_id: String,
+    home: DiagramHome,
     blocks: Vec<(MdBlock, std::ops::Range<usize>)>,
     block_offset: usize,
 }
@@ -302,8 +583,17 @@ struct DiagramNode {
     index: Option<usize>,
     /// Diagrams drawn in this body (the `{block}` segment is omitted when there is one).
     count: usize,
-    message_id: String,
-    topic_id: String,
+    home: DiagramHome,
+}
+
+/// Where the body of a diagram fence lives.
+#[derive(Clone, Debug)]
+enum DiagramHome {
+    Message {
+        message_id: String,
+        topic_id: String,
+    },
+    Document(DocContext),
 }
 
 impl MarkdownPlugin for DiagramPlugin {
@@ -340,8 +630,7 @@ impl MarkdownPlugin for DiagramPlugin {
                         .position(|(_, r)| r.start <= at && at < r.end.max(r.start + 1))
                         .map(|i| i + self.block_offset),
                     count: self.allowed.len(),
-                    message_id: self.message_id.clone(),
-                    topic_id: self.topic_id.clone(),
+                    home: self.home.clone(),
                 },
             )
             .text(code.value.clone()),
@@ -352,19 +641,44 @@ impl MarkdownPlugin for DiagramPlugin {
         let Some(d) = node.data::<DiagramNode>() else {
             return div().into_any_element();
         };
+        let (id, message_id, topic_id, artifact, index) = match &d.home {
+            DiagramHome::Message {
+                message_id,
+                topic_id,
+            } => (
+                format!("{message_id}-{}", d.offset),
+                Some(message_id.clone()),
+                Some(topic_id.clone()),
+                None,
+                d.index,
+            ),
+            // A node of a document's diagram is not referenced: the block index of
+            // a reference is counted in a message body, and a document is drawn in
+            // parts. Without an index the diagram offers no 问这里.
+            DiagramHome::Document(doc) => (
+                format!(
+                    "{}-v{}-p{}-{}",
+                    doc.artifact_id, doc.version, doc.part, d.offset
+                ),
+                None,
+                None,
+                Some((doc.artifact_id.clone(), doc.version)),
+                None,
+            ),
+        };
         let spec = crate::diagrams::view::InlineSpec {
-            id: format!("{}-{}", d.message_id, d.offset).into(),
+            id: id.into(),
             source: d.source.clone(),
             title: None,
             caption: None,
             alt: None,
             origin: crate::diagrams::DiagramSource {
-                message_id: Some(d.message_id.clone()),
-                topic_id: Some(d.topic_id.clone()),
-                artifact: None,
+                message_id,
+                topic_id,
+                artifact,
                 block: crate::diagrams::DiagramBlock::MarkdownFence {
                     offset: d.offset,
-                    index: d.index,
+                    index,
                 },
                 block_name: crate::views::refs::parts::block_name(
                     None,

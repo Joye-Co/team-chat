@@ -1821,6 +1821,26 @@ fn day_label(now: Millis, at: Millis) -> String {
     }
 }
 
+impl ArtifactPage {
+    /// ⌘F on the 产出 list: the caret goes to the toolbar's search field,
+    /// with its text selected. False when the page shows one 产出 (or the
+    /// list has not drawn yet), where there is no such field.
+    pub fn focus_search(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        if self.open(cx).is_some() {
+            return false;
+        }
+        let Some(search) = self.search.clone() else {
+            return false;
+        };
+        search.update(cx, |state, cx| {
+            let end = state.value().len();
+            state.focus(window, cx);
+            state.set_selected_range(0..end, cx);
+        });
+        true
+    }
+}
+
 impl Render for ArtifactPage {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let k = theme::colors(cx);

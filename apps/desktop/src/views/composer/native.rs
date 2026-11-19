@@ -287,12 +287,25 @@ impl ComposerView {
                     .into_any_element(),
                 );
             }
-            // §2.17: at most 2 rows of reference chips, the rest fold into "+N".
+            // §2.17: at most 2 rows of reference chips, the rest fold into "+N". The
+            // fold counts the rows the chips take in the row's painted width, so chips
+            // that fit in two rows all show; before the first paint it is the fixed 3.
             let ref_labels: Vec<String> = self.refs.iter().map(|r| r.input.label.clone()).collect();
-            chips.extend(crate::views::refs::chips::capped(
-                self.render_refs(cx),
-                &ref_labels,
-            ));
+            let room = self.chips_room.get();
+            let ref_chips = self.render_refs(cx);
+            chips.extend(if room > 0. && chips.is_empty() {
+                use crate::views::refs::chips as rc;
+                let provider = self.services.provider.clone();
+                let widths: Vec<f32> = self
+                    .refs
+                    .iter()
+                    .map(|r| rc::chip_width(r, rc::updated(r, &provider)))
+                    .collect();
+                let shown = rc::shown_in_two_rows(&widths, room, f32::from(space::S6));
+                rc::capped_at(ref_chips, &ref_labels, shown)
+            } else {
+                crate::views::refs::chips::capped(ref_chips, &ref_labels)
+            });
             // Images show as thumbnails in one row (above the chips); other files as chips.
             let images: Vec<_> = self.files.iter().filter(|f| f.is_image).cloned().collect();
             if !images.is_empty() {
@@ -314,43 +327,83 @@ impl ComposerView {
         }
         let has_chips = !chips.is_empty();
         if has_chips {
+            let room = self.chips_room.clone();
             above.push(
                 div()
+                    .relative()
                     .flex()
                     .flex_wrap()
                     .gap(space::S6)
+                    // Measures the row for the fold above; a new width draws again.
+                    .child(
+                        gpui::canvas(
+                            move |bounds, window, _| {
+                                let w = f32::from(bounds.size.width);
+                                if (room.get() - w).abs() > 0.5 {
+                                    room.set(w);
+                                    window.request_animation_frame();
+                                }
+                            },
+                            |_, _, _, _| {},
+                        )
+                        .absolute()
+                        .top_0()
+                        .left_0()
+                        .w_full()
+                        .h_0(),
+                    )
                     .children(chips)
                     .into_any_element(),
             );
         }
+        // An error line (D14: red is never the only carrier): the destructive
+        // x-circle in red, the words in foreground.
+        let error_line = |text: SharedString| {
+            div()
+                .flex()
+                .items_start()
+                .gap(space::S4)
+                .n_callout()
+                .text_color(k.label)
+                .child(
+                    div()
+                        .flex_none()
+                        .h(ui::native::tokens::text::CALLOUT.1)
+                        .flex()
+                        .items_center()
+                        .child(ui::icons::icon(
+                            Sym::Failed,
+                            ui::native::tokens::icon::SM,
+                            k.red,
+                        )),
+                )
+                .child(div().flex_1().min_w_0().child(text))
+        };
         if self.too_long {
-            above.push(
-                div()
-                    .n_callout()
-                    .text_color(k.red)
-                    .child(cc::TOO_LONG)
-                    .into_any_element(),
-            );
+            above.push(error_line(cc::TOO_LONG.into()).into_any_element());
         }
         for line in &self.rejected {
-            above.push(
-                div()
-                    .n_callout()
-                    .text_color(k.red)
-                    .child(line.clone())
-                    .into_any_element(),
-            );
+            above.push(error_line(line.clone().into()).into_any_element());
         }
-        // Usable: 按顺序做 (design-relay §3.6), a hint muted, a refusal in red.
-        if let Some(line) = self.relay_line_now() {
-            above.push(
+        // Usable: 按顺序做 (design-relay §3.6): a hint muted, a refusal as an
+        // error line.
+        let relay_line = self.relay_line_now();
+        // The draft starts an order: Send does that, it is not a note to the
+        // member at work.
+        let starts_order = relay_line.as_ref().is_some_and(|l| l.order);
+        if let Some(line) = relay_line {
+            above.push(if line.error {
+                error_line(line.text.into())
+                    .id("composer-relay-line")
+                    .into_any_element()
+            } else {
                 div()
                     .id("composer-relay-line")
                     .n_callout()
-                    .text_color(if line.error { k.red } else { k.secondary })
+                    .text_color(k.secondary)
                     .child(line.text)
-                    .into_any_element(),
-            );
+                    .into_any_element()
+            });
         }
 
         let has_text = !self.last_text.trim().is_empty() || has_chips;
@@ -389,6 +442,8 @@ impl ComposerView {
                         &[("name", &name)],
                     )
                 })
+        } else if starts_order {
+            None
         } else {
             self.working
                 .as_ref()
@@ -414,7 +469,9 @@ impl ComposerView {
             .when(!above.is_empty(), |el| {
                 el.child(
                     div()
-                        .px(space::S4)
+                        // The lines above the field share the text's left edge:
+                        // the editor's S4 and the 4 pt the Textarea keeps inside.
+                        .px(space::S8)
                         .flex()
                         .flex_col()
                         .gap(space::S6)
@@ -513,7 +570,6 @@ impl ComposerView {
     ) -> AnyElement {
         use crate::ui::native::tokens::{gallery, radius};
         use gpui::img;
-        use gpui_component::button::{ButtonCustomVariant, ButtonVariants as _};
         let k = native_colors(cx);
         let side = gallery::DRAFT_THUMB;
         let live: std::collections::HashSet<String> = images.iter().map(|f| f.id.clone()).collect();
@@ -537,22 +593,12 @@ impl ComposerView {
                 }
             };
             let id = file.id.clone();
-            let remove = Button::new(ElementId::Name(SharedString::from(format!(
-                "image-remove-{}",
-                file.id
-            ))))
-            .custom(
-                ButtonCustomVariant::new(cx)
-                    .color(gpui::hsla(0., 0., 0., 0.55))
-                    .foreground(gpui::white())
-                    .hover(gpui::hsla(0., 0., 0., 0.75))
-                    .active(gpui::hsla(0., 0., 0., 0.85)),
+            let remove = ui::native::over_image_button(
+                ElementId::Name(SharedString::from(format!("image-remove-{}", file.id))),
+                Sym::Close,
+                crate::copy::files::DRAFT_IMAGE_REMOVE,
+                cx,
             )
-            .icon(ui::button_glyph(Sym::Close, px(10.), px(20.)))
-            .with_size(px(20.))
-            .size(px(20.))
-            .rounded_full()
-            .tooltip(crate::copy::files::DRAFT_IMAGE_REMOVE)
             .on_click(cx.listener(move |this, _, _, cx| this.remove_file(&id, cx)));
             draft_thumb(picture, side)
                 .id(ElementId::Name(SharedString::from(format!(
