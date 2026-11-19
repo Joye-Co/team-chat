@@ -2,7 +2,7 @@
 // copy; the result is checked as a whole card (the write schema: style keys and every write
 // rule). Nothing changes when an op or the result fails.
 import { CardV2, type CardV2Block, type PatchOp, childIds, MAX_CARD_V2_REVS } from "@chat/protocol";
-import { ApiError, schemaReason } from "../core/errors";
+import { ApiError, issuesText, schemaReason } from "../core/errors";
 
 type Block = CardV2Block;
 type Draft = Record<string, unknown> & { blocks: Block[]; data?: unknown };
@@ -86,7 +86,9 @@ function pointer(doc: unknown, path: string, value: unknown, del: boolean, i: nu
  * `invalid` (op index in the message, or the write rule's `reason`) and changes nothing.
  */
 export function applyPatch(card: CardV2, ops: PatchOp[]): CardV2 {
-  if (card.rev >= MAX_CARD_V2_REVS) throw new ApiError("too_large", `at most ${MAX_CARD_V2_REVS} revs per card`, "card.rev_limit");
+  if (card.rev >= MAX_CARD_V2_REVS) {
+    throw new ApiError("too_large", `at most ${MAX_CARD_V2_REVS} revs per card: post a new card (and close this one's ask) to go on`, "card.rev_limit");
+  }
   const d = structuredClone(card) as unknown as Draft;
   ops.forEach((op, i) => {
     const at = (id: string) => d.blocks.findIndex((b) => b.id === id);
@@ -166,7 +168,7 @@ export function applyPatch(card: CardV2, ops: PatchOp[]): CardV2 {
   return checkCard(d);
 }
 
-/** Parses a card with the write schema; the first problem becomes `invalid` with its reason. */
+/** Parses a card with the write schema: `invalid` names every problem, with the first one's reason. */
 export function checkCard(raw: unknown): CardV2 {
   const r = CardV2.safeParse(raw);
   if (r.success) return r.data;
@@ -174,5 +176,5 @@ export function checkCard(raw: unknown): CardV2 {
   const reason =
     schemaReason(raw as Record<string, unknown>, issue?.message) ?? schemaReason({ cardV2: raw }, issue?.message, ["cardV2", ...(issue?.path ?? [])]);
   if (/exceeds 64 KiB/.test(issue?.message ?? "")) throw new ApiError("too_large", "card exceeds 64 KiB");
-  throw new ApiError("invalid", `the patched card: ${issue?.path.join(".") || "(root)"} ${issue?.message ?? ""}`.trim(), reason);
+  throw new ApiError("invalid", `the patched card: ${issuesText(r.error.issues)}`, reason);
 }

@@ -16,6 +16,7 @@ import { z } from "zod";
 import { isGroupMember } from "../core/db";
 import { roomStub } from "../core/env";
 import { ApiError, unwrap } from "../core/errors";
+import { readQuery } from "../core/http";
 import { ulid } from "../core/ids";
 import { type ArchivedEvent, registerEventWriter, registerRoomMigration, registerRoomRpc, registerRoute } from "../core/registry";
 import type { CardAnswerArgs } from "./index";
@@ -248,11 +249,10 @@ registerRoute({
   auth: "member",
   async handler({ env, url, params, auth }) {
     const a = auth as NonNullable<typeof auth>;
-    const q = Query.safeParse(Object.fromEntries(url.searchParams));
-    if (!q.success) throw new ApiError("invalid", "bad beforeSeq or limit");
+    const q = readQuery(url, Query);
     if (!(await isGroupMember(env.DB, params.id, a.memberId))) throw new ApiError("not_found", "group not found");
     const actor = { id: a.memberId, level: a.member.level, kind: a.member.kind, tokenId: a.tokenId };
-    return unwrap(await roomStub(env, params.id).rpc(params.id, DECISIONS_RPC, actor, q.data)) as DecisionsResponse;
+    return unwrap(await roomStub(env, params.id).rpc(params.id, DECISIONS_RPC, actor, q)) as DecisionsResponse;
   },
 });
 

@@ -11,7 +11,7 @@ import {
 } from "@chat/protocol";
 import product from "../../../product.json";
 import { auditStatement } from "../core/audit";
-import type { AuthContext } from "../core/auth";
+import { type AuthContext, requireAdmin } from "../core/auth";
 import { sha256Hex, newToken, timingSafeEqualString } from "../core/crypto";
 import { type MemberRow, getMember, toMember } from "../core/db";
 import type { Env } from "../core/env";
@@ -136,8 +136,8 @@ registerRoute({
     const e = env as EmailEnv;
     const { email } = await body(EmailCodeRequest);
     requireMail(e);
-    await takeAttempt(env.DB, `email-send-ip:${await ipKey(request)}`, SEND_PER_IP);
-    await takeAttempt(env.DB, `email-send:${await sha256Hex(email)}`, SEND_PER_ADDRESS);
+    await takeAttempt(env.DB, `email-send-ip:${await ipKey(request)}`, SEND_PER_IP, "email codes");
+    await takeAttempt(env.DB, `email-send:${await sha256Hex(email)}`, SEND_PER_ADDRESS, "email codes");
     const now = Date.now();
     const owner = await env.DB.prepare(
       `SELECT e.member_id FROM member_emails e JOIN members m ON m.id = e.member_id
@@ -156,7 +156,7 @@ registerRoute({
   path: "/v1/auth/email/sign-in",
   auth: "none",
   async handler({ env, body, request }): Promise<RedeemResponse> {
-    const attempt = await takeAttempt(env.DB, `email-check-ip:${await ipKey(request)}`, CHECK_PER_IP);
+    const attempt = await takeAttempt(env.DB, `email-check-ip:${await ipKey(request)}`, CHECK_PER_IP, "email code attempts");
     const { email, code, deviceName } = await body(EmailSignInRequest);
     const now = Date.now();
     await takeCode(env, email, "sign_in", "", code, now);
@@ -204,7 +204,7 @@ registerRoute({
     const e = env as EmailEnv;
     const { email } = await body(EmailCodeRequest);
     requireMail(e);
-    await takeAttempt(env.DB, `email-send:${await sha256Hex(email)}`, SEND_PER_ADDRESS);
+    await takeAttempt(env.DB, `email-send:${await sha256Hex(email)}`, SEND_PER_ADDRESS, "email codes");
     const taken = await env.DB.prepare("SELECT member_id FROM member_emails WHERE email = ? AND member_id != ?")
       .bind(email, a.memberId)
       .first();
@@ -220,7 +220,7 @@ registerRoute({
   async handler({ env, auth, body, request }): Promise<MyEmailResponse> {
     const a = auth as AuthContext;
     humanOnly(a);
-    const attempt = await takeAttempt(env.DB, `email-check-ip:${await ipKey(request)}`, CHECK_PER_IP);
+    const attempt = await takeAttempt(env.DB, `email-check-ip:${await ipKey(request)}`, CHECK_PER_IP, "email code attempts");
     const { email, code } = await body(VerifyEmailRequest);
     const now = Date.now();
     await takeCode(env, email, "add", a.memberId, code, now);
@@ -260,11 +260,8 @@ registerRoute({
   path: "/v1/admin/email-outbox",
   auth: "none",
   async handler({ env, request }) {
-    const given = request.headers.get("x-admin-secret") ?? "";
-    const expected = env.ADMIN_SECRET ?? "";
-    if (!usesOutbox(env) || !expected || !(await timingSafeEqualString(given, expected))) {
-      throw new ApiError("unauthorized", "invalid admin secret");
-    }
+    if (!usesOutbox(env)) throw new ApiError("unauthorized", "invalid admin secret");
+    await requireAdmin(request, env);
     const email = (new URL(request.url).searchParams.get("email") ?? "").trim().toLowerCase();
     const r = await env.DB.prepare("SELECT purpose, code, at FROM email_outbox WHERE email = ? ORDER BY at DESC LIMIT 20")
       .bind(email)

@@ -1313,7 +1313,7 @@ export class GroupRoom extends DurableObject<Env> {
       const key = `${actor.id}:${messageId}`;
       const now = Date.now();
       const last = this.cardPressAt.get(key);
-      if (last !== undefined && now - last < CARD_PRESS_INTERVAL_MS) throw new ApiError("rate_limited", "one press per second");
+      if (last !== undefined && now - last < CARD_PRESS_INTERVAL_MS) throw new ApiError("rate_limited", "one press per second", undefined, CARD_PRESS_INTERVAL_MS - (now - last));
       this.cardPressAt.set(key, now);
       if (this.cardPressAt.size > 1000) {
         for (const [k, t] of this.cardPressAt) if (now - t >= CARD_PRESS_INTERVAL_MS) this.cardPressAt.delete(k);
