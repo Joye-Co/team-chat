@@ -23,7 +23,8 @@ pub fn card(cx: &App) -> Div {
     crate::ui::native::cards::card_frame(cx).flex().flex_col()
 }
 
-/// The header of an inline card: glyph, name, meta, then trailing tools.
+/// The header of an inline card: glyph, name 14 semibold (§2.4), meta, then trailing
+/// tools.
 pub fn card_header(icon: Sym, title: impl Into<SharedString>, cx: &App) -> Div {
     let k = theme::colors(cx);
     div()
@@ -40,8 +41,8 @@ pub fn card_header(icon: Sym, title: impl Into<SharedString>, cx: &App) -> Div {
         ))
         .child(
             crate::ui::native::file_name(title)
-                .t_small()
-                .medium()
+                .t_ui()
+                .semibold()
                 .text_color(k.text_1)
                 .flex_shrink(1.)
                 .min_w(px(0.)),
@@ -199,15 +200,18 @@ pub fn save_to_downloads(paths: &[&Path], cx: &mut App) {
     toast(cm::SAVED, cx);
 }
 
+/// Whether [`send_image`] has a 话题 to put a picture into: an attachment opened from the
+/// files list has none, so its viewer offers no 发到话题.
+pub fn can_send_image(target: &Target) -> bool {
+    target.provider.is_some() && !target.group_id.is_empty() && !target.topic_id.is_empty()
+}
+
 /// Puts a picture into the 话题's composer as a pending image: the person adds words and
 /// sends it (nothing is sent without them).
 pub fn send_image(target: &Target, bytes: Vec<u8>, cx: &mut App) {
-    let Some(provider) = &target.provider else {
+    let Some(provider) = target.provider.as_ref().filter(|_| can_send_image(target)) else {
         return;
     };
-    if target.group_id.is_empty() || target.topic_id.is_empty() {
-        return;
-    }
     provider.attach_files(
         &DraftKey::topic(target.group_id.clone(), target.topic_id.clone()),
         vec![NewFile::Image {

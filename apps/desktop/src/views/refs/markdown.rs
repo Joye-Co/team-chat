@@ -164,7 +164,7 @@ impl TableRefs {
                 .h(px(0.))
                 .flex()
                 .items_center()
-                .child(super::affordance::inline_button(
+                .child(super::affordance::inline_button_flat(
                     &id,
                     Rc::new(move |_: &App| {
                         target(TablePick::Cell { row, col }).unwrap_or_else(super::empty_target)
@@ -499,9 +499,9 @@ impl MarkdownPlugin for TablePlugin {
     }
 }
 
-/// Column width from its longest cell, in points.
-fn column_width(columns: &[String], rows: &[Vec<String>], col: usize) -> f32 {
-    let longest = std::iter::once(columns.get(col).map(String::as_str).unwrap_or(""))
+/// The length of a column's longest cell, in Latin letters (a CJK character is 1.8).
+fn column_length(columns: &[String], rows: &[Vec<String>], col: usize) -> f32 {
+    std::iter::once(columns.get(col).map(String::as_str).unwrap_or(""))
         .chain(
             rows.iter()
                 .map(|r| r.get(col).map(String::as_str).unwrap_or("")),
@@ -511,15 +511,31 @@ fn column_width(columns: &[String], rows: &[Vec<String>], col: usize) -> f32 {
                 .map(|ch| if ch.is_ascii() { 1.0 } else { 1.8 })
                 .sum::<f32>()
         })
-        .fold(0.0_f32, f32::max);
-    (longest * 7.0 + 24.0).clamp(64.0, 280.0)
+        .fold(0.0_f32, f32::max)
+}
+
+/// Column width from its longest cell, in points.
+fn column_width(columns: &[String], rows: &[Vec<String>], col: usize) -> f32 {
+    (column_length(columns, rows, col) * 7.0 + 24.0).clamp(64.0, 280.0)
+}
+
+/// The column that takes a table's free width: the text column with the longest content,
+/// the first of equals; with only number columns, the first.
+fn growing_column(columns: &[String], rows: &[Vec<String>], right: &[bool]) -> usize {
+    (0..columns.len())
+        .filter(|i| !right.get(*i).copied().unwrap_or(false))
+        .rev()
+        .max_by(|a, b| {
+            column_length(columns, rows, *a).total_cmp(&column_length(columns, rows, *b))
+        })
+        .unwrap_or(0)
 }
 
 /// A table (§2.7): a frame (radius 10, 1 px border), a header row h40 on the muted fill
 /// (12 medium muted, compact in a thread), rows h40 with a line between them, cells px 12
-/// (16 at the frame's edges). The first text column takes the free width, so the columns
-/// fill the frame; number columns keep the width of their longest value and never
-/// truncate. A table wider than the frame scrolls sideways inside it.
+/// (16 at the frame's edges). The text column with the longest content takes the free
+/// width, so the columns fill the frame; number columns keep the width of their longest
+/// value and never truncate. A table wider than the frame scrolls sideways inside it.
 pub fn table(
     key: &str,
     columns: &[String],
@@ -539,10 +555,7 @@ pub fn table(
         *w += NAME_ROOM;
     }
     let last = columns.len().saturating_sub(1);
-    // The column that takes the free width: the first one that is not a number column.
-    let grow = (0..columns.len())
-        .find(|i| !right.get(*i).copied().unwrap_or(false))
-        .unwrap_or(0);
+    let grow = growing_column(columns, rows, right);
     let cell = |text: String, i: usize, width: f32, right: bool| -> Div {
         div()
             .when(i == grow, |d| d.flex_1().min_w(px(width)))

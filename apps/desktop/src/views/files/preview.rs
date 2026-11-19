@@ -21,6 +21,77 @@ pub struct FilesPreview {
     image: Option<PathBuf>,
     /// The gallery samples, by file id.
     pictures: Vec<(String, PathBuf)>,
+    /// `files-inline`: the documents a person attached, already in the file
+    /// cache (file id, path). Empty in the other scenes.
+    documents: Vec<(String, PathBuf)>,
+}
+
+/// The table a person attached in `files-inline`.
+fn feedback_csv() -> FileAttachment {
+    FileAttachment {
+        file_id: "f-doc-csv".into(),
+        name: "用户反馈汇总.csv".into(),
+        size: FEEDBACK_CSV.len() as u64,
+        mime: "text/csv".into(),
+        width: None,
+        height: None,
+        sha256: "4".repeat(64),
+    }
+}
+
+/// The notes a person attached in `files-inline`.
+fn notes_md() -> FileAttachment {
+    FileAttachment {
+        file_id: "f-doc-md".into(),
+        name: "访谈纪要.md".into(),
+        size: NOTES_MD.len() as u64,
+        mime: "text/markdown".into(),
+        width: None,
+        height: None,
+        sha256: "5".repeat(64),
+    }
+}
+
+const FEEDBACK_CSV: &str = "\
+日期,渠道,问题,条数,已处理
+11-01,应用商店,登录收不到验证码,42,38
+11-01,客服邮箱,导出的表格乱码,17,17
+11-02,群内反馈,重连后消息重复,31,9
+11-02,应用商店,深色模式看不清,12,0
+11-03,客服邮箱,邀请码过期太快,8,8
+11-03,群内反馈,搜索找不到两个字的词,23,23
+";
+
+const NOTES_MD: &str = "\
+# 访谈纪要
+
+## 结论
+
+三位受访者都把「重连后消息重复」排在第一位，其次是验证码。
+
+## 原话
+
+- 「断一次网，群里就刷出两遍。」
+- 「验证码等了两分钟才到。」
+
+## 后续
+
+- [x] 重复消息已修
+- [ ] 验证码换一家短信通道
+";
+
+/// The documents of `files-inline`, written once to the temp folder.
+fn write_documents() -> Vec<(String, PathBuf)> {
+    let dir = std::env::temp_dir().join("team-chat-files-inline");
+    let _ = std::fs::create_dir_all(&dir);
+    [(feedback_csv(), FEEDBACK_CSV), (notes_md(), NOTES_MD)]
+        .into_iter()
+        .filter_map(|(file, text)| {
+            let path = dir.join(&file.name);
+            std::fs::write(&path, text).ok()?;
+            Some((file.file_id, path))
+        })
+        .collect()
 }
 
 /// The gallery samples: (file id, width, height) of a message with three pictures and one
@@ -127,8 +198,20 @@ fn sheet() -> FileAttachment {
 }
 
 impl FilesPreview {
+    /// [`Self::new`] with a message whose attached table and notes are in the
+    /// file cache: the timeline shows them in their viewers (`files-inline`).
+    pub fn with_documents(inner: Arc<dyn ChatProvider>) -> Arc<Self> {
+        let mut this = Self::build(inner);
+        this.documents = write_documents();
+        Arc::new(this)
+    }
+
     /// Wraps `inner`; file data goes into its first ordinary topic.
     pub fn new(inner: Arc<dyn ChatProvider>) -> Arc<Self> {
+        Arc::new(Self::build(inner))
+    }
+
+    fn build(inner: Arc<dyn ChatProvider>) -> Self {
         let group = inner.groups().first().cloned();
         let topic = group.as_ref().and_then(|g| {
             inner
@@ -146,13 +229,14 @@ impl FilesPreview {
         let pictures = (0..PICTURES.len())
             .filter_map(|i| Some((PICTURES[i].0.to_string(), draw_picture(i)?)))
             .collect();
-        Arc::new(Self {
+        Self {
             inner,
             group_id: group.map(|g| g.id).unwrap_or_default(),
             topic_id: topic.map(|t| t.id).unwrap_or_default(),
             image: image.is_file().then_some(image),
             pictures,
-        })
+            documents: Vec::new(),
+        }
     }
 
     fn mine(&self, g: &str, t: &str) -> bool {
@@ -230,6 +314,18 @@ impl FilesPreview {
             sha256: String::new(),
             ..sheet()
         }];
+        if !self.documents.is_empty() {
+            // `files-inline`: only the message with the attached documents, so
+            // both viewers fit the window.
+            let mut d = base(
+                "pv-doc",
+                &other,
+                "这周的用户反馈和访谈纪要，表格里是原始数据。",
+                now - 60_000,
+            );
+            d.attachments = vec![feedback_csv(), notes_md()];
+            return vec![d];
+        }
         vec![a, b, g1, g2, c]
     }
 }
@@ -335,6 +431,9 @@ impl ChatProvider for FilesPreview {
             .flatten()
     }
     fn cached_file(&self, file: &FileAttachment) -> Option<PathBuf> {
+        if let Some((_, p)) = self.documents.iter().find(|(id, _)| *id == file.file_id) {
+            return Some(p.clone());
+        }
         self.thumbnail("", "", file)
     }
     fn topic_files(&self, group_id: &str, topic_id: &str) -> Vec<TopicFile> {
@@ -414,6 +513,28 @@ pub fn open(
         .nav
         .update(cx, |nav, cx| nav.set_side_panel_open(true, cx));
     open_main(services, content, cx)
+}
+
+/// The `files-inline` scene: a message with an attached table and notes, both
+/// shown in their viewers.
+pub fn open_inline(
+    services: Services,
+    content: Size<Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    crate::views::media::store::clear(cx);
+    let provider: Arc<dyn ChatProvider> = FilesPreview::with_documents(services.provider.clone());
+    let services = Services::new(provider, cx);
+    open_first_topic(&services, cx);
+    open_main(services, content, cx)
+}
+
+/// True once both attached documents of `files-inline` were read.
+pub fn inline_ready(cx: &App) -> bool {
+    use crate::views::media::store::{self, MediaKey};
+    [feedback_csv(), notes_md()]
+        .iter()
+        .all(|f| store::ready(&MediaKey::file(&f.sha256), cx).is_some())
 }
 
 /// The `files-quick-look` scene: the `files` scene after Space on the image off the Mac

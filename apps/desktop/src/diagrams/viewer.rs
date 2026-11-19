@@ -281,7 +281,7 @@ impl DiagramViewer {
     /// Tab and ⇧Tab step through the diagram's nodes before the header's buttons
     /// (C-03, E3): `false` when the step leaves the nodes, so focus moves on.
     fn step_node(&mut self, forward: bool, cx: &mut Context<Self>) -> bool {
-        if !crate::views::refs::enabled(cx) {
+        if !crate::views::refs::enabled(cx) || !self.spec.origin.can_ref() {
             return false;
         }
         let Some(r) = self.ready(cx) else {
@@ -510,7 +510,7 @@ impl DiagramViewer {
                 .w(px(w))
                 .h(px(h)),
         );
-        let refs_on = crate::views::refs::enabled(cx);
+        let refs_on = crate::views::refs::enabled(cx) && self.spec.origin.can_ref();
         for (i, node) in ready.meta.nodes.iter().enumerate() {
             let (x, y, nw, nh) = hit_rect(node, z);
             let (_, _, _, oh) = super::view::outline_rect(node, z);
@@ -651,6 +651,14 @@ impl Render for DiagramViewer {
         .left_0()
         .top_0()
         .size_full();
+        // The size of what the canvas scrolls (see `canvas_layer`), for the scrollbars.
+        let content = ready.as_ref().map(|r| {
+            (
+                (r.meta.width * self.zoom + 2. * MARGIN).max(self.viewport.0),
+                r.meta.height * self.zoom + 2. * MARGIN,
+            )
+        });
+        let corner = crate::ui::native::metrics::SHEET_RADIUS;
         let body: AnyElement = match &ready {
             Some(r) => self.canvas_layer(r, cx),
             None => div()
@@ -670,7 +678,9 @@ impl Render for DiagramViewer {
             .size_full()
             .flex()
             .flex_col()
-            .rounded(radius::LG)
+            // The sheet's own radius: a tighter one draws a second outline inside
+            // the sheet's corners.
+            .rounded(crate::ui::native::metrics::SHEET_RADIUS)
             .overflow_hidden()
             .bg(k.raised)
             .track_focus(&self.focus)
@@ -760,11 +770,56 @@ impl Render for DiagramViewer {
                             )
                             // Both scrollbars show while the diagram is larger than the
                             // sheet, so a cut edge always reads as "scrolls" (C-02).
-                            .child(
-                                div().absolute().inset_0().child(
-                                    gpui_component::scroll::Scrollbar::new(&self.scroll)
-                                        .mode(gpui_component::scroll::ScrollbarMode::Always),
-                                ),
+                            // Each keeps clear of the sheet's bottom corners: the bar on
+                            // the bottom edge ends where the corner curve starts, and
+                            // so does the one on the right edge. A bar drawn in a
+                            // shorter box takes the content's length less the same
+                            // inset, so it shows exactly when the canvas scrolls.
+                            .when_some(
+                                content.filter(|c| c.0 > self.viewport.0 + 0.5),
+                                |el, (w, h)| {
+                                    el.child(
+                                        div()
+                                            .absolute()
+                                            .top_0()
+                                            .bottom_0()
+                                            .left(corner)
+                                            .right(corner)
+                                            .child(
+                                                gpui_component::scroll::Scrollbar::horizontal(
+                                                    &self.scroll,
+                                                )
+                                                .viewport_from_layout()
+                                                .scroll_size(gpui::size(px(w) - corner * 2., px(h)))
+                                                .mode(
+                                                    gpui_component::scroll::ScrollbarMode::Always,
+                                                ),
+                                            ),
+                                    )
+                                },
+                            )
+                            .when_some(
+                                content.filter(|c| c.1 > self.viewport.1 + 0.5),
+                                |el, (w, h)| {
+                                    el.child(
+                                        div()
+                                            .absolute()
+                                            .top_0()
+                                            .left_0()
+                                            .right_0()
+                                            .bottom(corner)
+                                            .child(
+                                                gpui_component::scroll::Scrollbar::vertical(
+                                                    &self.scroll,
+                                                )
+                                                .viewport_from_layout()
+                                                .scroll_size(gpui::size(px(w), px(h) - corner))
+                                                .mode(
+                                                    gpui_component::scroll::ScrollbarMode::Always,
+                                                ),
+                                            ),
+                                    )
+                                },
                             ),
                     )
                     .when(self.show_source, |el| {

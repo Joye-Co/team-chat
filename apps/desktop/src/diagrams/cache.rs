@@ -83,6 +83,9 @@ pub struct Node {
     pub y: f32,
     pub w: f32,
     pub h: f32,
+    /// A sequence participant: the height of its head box.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub head: Option<f32>,
 }
 
 /// `<key>.json`: what the PNG shows.

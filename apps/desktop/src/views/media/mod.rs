@@ -17,6 +17,7 @@
 //!
 //! [`WebEmbed`]: crate::ui::web_embed::WebEmbed
 
+pub mod find;
 pub mod full;
 pub mod in_place;
 pub mod inline;
@@ -68,12 +69,14 @@ impl MediaKind {
 
     pub fn icon(self) -> Sym {
         match self {
-            MediaKind::Html | MediaKind::Markdown | MediaKind::Pdf => Sym::Document,
+            MediaKind::Html => Sym::Globe,
+            MediaKind::Pdf => Sym::PdfFile,
+            MediaKind::Markdown => Sym::Document,
             MediaKind::Image => Sym::Image,
             MediaKind::ImageSet => Sym::Images,
             MediaKind::Video => Sym::Video,
             MediaKind::Audio => Sym::Audio,
-            MediaKind::Code => Sym::CodeFile,
+            MediaKind::Code => Sym::Code,
             MediaKind::Table => Sym::Table,
             MediaKind::File => Sym::File,
         }
@@ -120,6 +123,8 @@ pub fn file_kind(path: &str, mime: &str) -> MediaKind {
     match e.as_str() {
         "html" | "htm" => MediaKind::Html,
         "md" | "markdown" => MediaKind::Markdown,
+        // A mermaid file is read as a document of one diagram (`store::analyze`).
+        "mmd" | "mermaid" => MediaKind::Markdown,
         "mp4" | "mov" | "m4v" | "webm" if mime.starts_with("video/") || mime.is_empty() => {
             MediaKind::Video
         }
@@ -212,16 +217,6 @@ pub fn time_text(seconds: f64) -> String {
     }
 }
 
-/// `09:40` (minutes always two digits), for transcripts and audio positions.
-pub fn clock_text(seconds: f64) -> String {
-    let s = seconds.max(0.).round() as u64;
-    if s >= 3600 {
-        time_text(seconds)
-    } else {
-        format!("{:02}:{:02}", s / 60, s % 60)
-    }
-}
-
 // --- the dark "screen" behind video and the lightbox (Media.dc.html `--screen`) ---------
 
 pub struct Screen {
@@ -236,7 +231,8 @@ pub fn screen(cx: &App) -> Screen {
     Screen {
         bg: if dark { rgb(0x0B0B0D) } else { rgb(0x16161A) }.into(),
         ink: rgb(0xC9C9D1).into(),
-        dim: if dark { rgb(0x6E6E78) } else { rgb(0x7A7A84) }.into(),
+        // This screen is dark in both themes: the dark palette's muted text.
+        dim: crate::ui::native::tokens::Palette::dark().muted_foreground,
         line: gpui::hsla(0., 0., 1., 0.14),
     }
 }
@@ -313,6 +309,5 @@ mod tests {
         assert_eq!(time_text(42.), "0:42");
         assert_eq!(time_text(1868.), "31:08");
         assert_eq!(time_text(3723.), "1:02:03");
-        assert_eq!(clock_text(580.), "09:40");
     }
 }

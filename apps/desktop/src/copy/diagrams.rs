@@ -2,7 +2,6 @@
 
 crate::copy! {
     BLOCK = "图",
-    CHIP_COUNT = "图 {n}",
     TYPE_FLOWCHART = "流程图",
     TYPE_SEQUENCE = "时序图",
     TYPE_STATE = "状态图",
@@ -33,7 +32,7 @@ crate::copy! {
     ERROR_FAILED_DESC = "原文里有写错的地方，改好后会重新画。",
     ERROR_UNSUPPORTED_DESC = "可以看原文，或者换成流程图、时序图来画。",
     ERROR_FORBIDDEN_DESC = "原文里有链接或脚本，为了安全这里不画。",
-    ERROR_TOO_BIG_DESC = "节点太多，这里只留原文。",
+    ERROR_TOO_BIG_DESC = "节点太多，这里画不下，可以看原文。",
     OPEN_VIEWER = "打开查看器",
     TOO_DENSE = "图太大了，这里看不清",
     ALT = "{type}：{n} 个节点。",
