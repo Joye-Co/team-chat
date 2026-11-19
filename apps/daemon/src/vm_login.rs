@@ -543,11 +543,10 @@ async fn refresh_pi(rt: &RuntimeConfig, host: &Path, provider: &str, secs: u64) 
         .and_then(Result::ok)
         .is_some_and(|o| o.status.success());
     if !ok {
-        eprintln!(
-            "{} pi: the sign-in of {} could not be refreshed",
-            now_ms(),
+        crate::problems::warn(format_args!(
+            "pi: the sign-in of {} could not be refreshed",
             crate::chat_run::safe_word(provider)
-        );
+        ));
     }
     ok
 }
@@ -651,7 +650,7 @@ async fn refresh_codex(rt: &RuntimeConfig) -> bool {
     let _ = child.start_kill();
     let _ = tokio::time::timeout(Duration::from_secs(2), child.wait()).await;
     if !ok {
-        eprintln!("{} codex: the sign-in could not be refreshed", now_ms());
+        crate::problems::warn(format_args!("codex: the sign-in could not be refreshed"));
     }
     ok
 }

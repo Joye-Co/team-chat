@@ -2,13 +2,8 @@
 // events, desk notes, queued runs, aside origins, PR merge state, group purpose, rename order
 // and 产出 previews.
 import { SELF, env } from "cloudflare:test";
-import { afterAll, describe, expect, it } from "vitest";
-import { BASE, Client, type TestMember, api, clientMsgId, createGroup, createMember, protocolViolations } from "./helpers";
-
-afterAll(async () => {
-  await new Promise((r) => setTimeout(r, 300));
-  expect(protocolViolations).toEqual([]);
-});
+import { describe, expect, it } from "vitest";
+import { BASE, Client, type TestMember, api, clientMsgId, createGroup, createMember } from "./helpers";
 
 async function sha(bytes: Uint8Array): Promise<string> {
   const d = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));

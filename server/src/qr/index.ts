@@ -114,7 +114,7 @@ registerRoute({
   path: "/v1/auth/qr/claim",
   auth: "none",
   async handler({ env, body, request }): Promise<RedeemResponse> {
-    const attempt = await takeAttempt(env.DB, `qr-code-ip:${await ipKey(request)}`, CODE_PER_IP);
+    const attempt = await takeAttempt(env.DB, `qr-code-ip:${await ipKey(request)}`, CODE_PER_IP, "sign-in code attempts");
     const { code, deviceName } = await body(QrClaimRequest);
     const now = Date.now();
     const refused = new ApiError("unauthorized", "the code is wrong, used or expired");
@@ -142,7 +142,7 @@ registerRoute({
   path: "/v1/auth/qr/request",
   auth: "none",
   async handler({ env, body, request }): Promise<QrRequestResponse> {
-    await takeAttempt(env.DB, `qr-request-ip:${await ipKey(request)}`, REQUEST_PER_IP);
+    await takeAttempt(env.DB, `qr-request-ip:${await ipKey(request)}`, REQUEST_PER_IP, "sign-in requests");
     const { deviceName } = await body(QrRequestRequest);
     const now = Date.now();
     await prune(env, now);
@@ -165,7 +165,7 @@ registerRoute({
   path: "/v1/auth/qr/poll",
   auth: "none",
   async handler({ env, body, request }): Promise<QrPollResponse> {
-    await takeAttempt(env.DB, `qr-poll-ip:${await ipKey(request)}`, POLL_PER_IP);
+    await takeAttempt(env.DB, `qr-poll-ip:${await ipKey(request)}`, POLL_PER_IP, "sign-in requests");
     const { id, secret } = await body(QrPollRequest);
     const now = Date.now();
     const row = await env.DB.prepare(
@@ -194,7 +194,7 @@ registerRoute({
 
 /** The request a signed-in person typed or scanned; counts a try against the IP. */
 async function requestFor(env: Env, request: Request, code: string): Promise<{ row: Row; attempt: Awaited<ReturnType<typeof takeAttempt>> }> {
-  const attempt = await takeAttempt(env.DB, `qr-code-ip:${await ipKey(request)}`, CODE_PER_IP);
+  const attempt = await takeAttempt(env.DB, `qr-code-ip:${await ipKey(request)}`, CODE_PER_IP, "sign-in code attempts");
   const row = await findByCode(env, "request", code, Date.now());
   if (!row) throw new ApiError("not_found", "the code is wrong, used or expired");
   return { row, attempt };

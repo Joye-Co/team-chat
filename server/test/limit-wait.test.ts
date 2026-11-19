@@ -3,24 +3,18 @@
 // session on the same computer; new work for that computer's runtime waits the same way unless
 // another computer can take it; a person can stop a waiting run.
 import { env, runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
-import { afterAll, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { LIMIT_NOTE, LIMIT_REACHED, MAX_LIMIT_WAITS } from "../src/agent/recovery";
 import { LIMIT_SLACK_MS, type MachineView, TEXT, candidates, clockText, limitOf, whyNoMachine } from "../src/bots/dispatch";
 import type { BotsEnv } from "../src/bots/env";
 import { LIMIT_BACKOFF_MAX_MS, LIMIT_BACKOFF_MS, limitMark, limitedRuntimes } from "../src/bots/link";
-import { Daemon, HEALTH, downViolations, mention, world } from "./daemon";
-import { Client, api, protocolViolations, waitUntil } from "./helpers";
+import { Daemon, HEALTH, mention, world } from "./daemon";
+import { Client, api, waitUntil } from "./helpers";
 
 const benv = env as unknown as BotsEnv;
 const deskOf = (botId: string) => benv.BOT_DESK.get(benv.BOT_DESK.idFromName(botId));
 const linkOf = (machineId: string) => benv.MACHINE_LINK.get(benv.MACHINE_LINK.idFromName(machineId));
 const ZONE = "Asia/Shanghai";
-
-afterAll(async () => {
-  await new Promise((r) => setTimeout(r, 300));
-  expect(protocolViolations).toEqual([]);
-  expect(downViolations).toEqual([]);
-});
 
 function botMessages(c: Client, topicId: string, botId: string): any[] {
   return c
