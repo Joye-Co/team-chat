@@ -1,0 +1,13 @@
+{
+  "v": 2,
+  "rev": 1,
+  "intent": "info",
+  "title": "验收：登录页改版",
+  "fallback": "登录页改版验收：预发可以打开，和设计稿对过；Safari 下按钮错位还没修。",
+  "blocks": [
+    { "type": "evidence", "id": "staging", "label": "预发环境可以打开", "state": "pass", "url": "https://staging.example.com/login" },
+    { "type": "evidence", "id": "design", "label": "和设计稿逐屏对过", "state": "pass", "artifact": { "artifactId": "ARTIFACT_ID", "version": 2 } },
+    { "type": "evidence", "id": "safari", "label": "Safari 下按钮错位", "state": "fail", "detail": "宽度小于 380 时“登录”按钮换行。" },
+    { "type": "ref", "id": "pr", "label": "改动在这个 PR", "target": { "kind": "pr", "url": "https://example.com/app/pull/128", "state": "open" } }
+  ]
+}

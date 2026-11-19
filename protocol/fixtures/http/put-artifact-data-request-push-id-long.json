@@ -1,0 +1,9 @@
+{
+  "kind": "PutArtifactDataRequest",
+  "valid": false,
+  "description": "clientPushId is 1..64 characters",
+  "value": {
+    "data": {},
+    "clientPushId": "ppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp"
+  }
+}

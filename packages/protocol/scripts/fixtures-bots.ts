@@ -183,7 +183,7 @@ export function addBotsFixtures({ ok, bad, T0, ID, base }: BotsCtx) {
     ],
     runs: [
       { runId: "01JA0000000000000000000R01", memberId: ID.bot, state: "running", startedAt: T0 - 600_000, bootMs: 1250, cpuCores: 1.25, memBytes: 1395864371, scratchBytes: 734003200 },
-      { runId: "01JA0000000000000000000R02", memberId: ID.bot, state: "waiting", startedAt: T0 - 60_000 },
+      { runId: "01JA0000000000000000000R02", memberId: ID.bot, groupId: ID.general, topicId: ID.topic, state: "waiting", startedAt: T0 - 60_000 },
       { runId: "01JA0000000000000000000R03", state: "queued" },
     ],
     members: [{ memberId: ID.bot, running: 6, waiting: 2, queued: 1, cpuCores: 2.65, memBytes: 10307921510, tokensToday: 6800000, finishedToday: 48 }],

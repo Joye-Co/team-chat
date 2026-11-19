@@ -132,19 +132,23 @@ types: {blocks}. `chat-run card schema` prints its JSON Schema; `chat-run --help
 
 /// The JSON Schema of a Card v2 document (`protocol/schema/CardV2.schema.json`, made from the
 /// protocol package's Zod with `bun run gen:protocol`): the shape; the server checks the write
-/// rules too.
+/// rules too. Each block type is `$defs.<type>`; `$defs.block` is their union.
 pub const CARD_SCHEMA: &str = include_str!("../../../protocol/schema/CardV2.schema.json");
+
+fn schema() -> &'static Value {
+    static SCHEMA: OnceLock<Value> = OnceLock::new();
+    SCHEMA.get_or_init(|| serde_json::from_str(CARD_SCHEMA).unwrap_or_default())
+}
 
 /// The block types of [`CARD_SCHEMA`], in catalog order.
 pub fn block_types() -> &'static [String] {
     static TYPES: OnceLock<Vec<String>> = OnceLock::new();
     TYPES.get_or_init(|| {
-        let v: Value = serde_json::from_str(CARD_SCHEMA).unwrap_or_default();
-        v["properties"]["blocks"]["items"]["oneOf"]
+        schema()["$defs"]["block"]["oneOf"]
             .as_array()
             .map(|a| {
                 a.iter()
-                    .filter_map(|b| b["properties"]["type"]["const"].as_str())
+                    .filter_map(|b| b["$ref"].as_str()?.strip_prefix("#/$defs/"))
                     .map(str::to_string)
                     .collect()
             })
@@ -906,12 +910,18 @@ fn result_json(r: RunOutputResult) -> Value {
         code,
         reason,
         message,
+        retry_after_ms,
     } = r.error.unwrap_or(RunOutputError {
         code: "failed".into(),
         reason: None,
         message: "the server did not say why".into(),
+        retry_after_ms: None,
     });
-    error(&code, reason.as_deref(), message)
+    let mut refused = error(&code, reason.as_deref(), message);
+    if let Some(ms) = retry_after_ms {
+        refused["error"]["retryAfterMs"] = json!(ms);
+    }
+    refused
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -2636,6 +2646,7 @@ mod tests {
                 code: "conflict".into(),
                 reason: Some("card.stale_rev".into()),
                 message: "the card changed".into(),
+                retry_after_ms: None,
             }),
         }));
         let v = client.await.unwrap().unwrap();
@@ -2909,6 +2920,7 @@ mod tests {
                 code: "conflict".into(),
                 reason: Some("card.stale_rev".into()),
                 message: "the card changed".into(),
+                retry_after_ms: None,
             }),
         }));
         let v = client.await.unwrap().unwrap();

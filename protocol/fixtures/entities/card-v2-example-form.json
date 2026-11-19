@@ -1,0 +1,65 @@
+{
+  "kind": "CardV2",
+  "valid": true,
+  "description": "chat-run card example form (apps/daemon/examples/cards/form.json)",
+  "value": {
+    "v": 2,
+    "rev": 1,
+    "intent": "ask",
+    "title": "订场地还差三项",
+    "fallback": "订场地还差三项：活动名称、人数、场地。",
+    "ask": {
+      "from": [
+        "requester"
+      ]
+    },
+    "blocks": [
+      {
+        "type": "input",
+        "id": "name",
+        "kind": "text",
+        "label": "活动名称",
+        "required": true,
+        "placeholder": "例如：春季发布会"
+      },
+      {
+        "type": "input",
+        "id": "seats",
+        "kind": "number",
+        "label": "人数",
+        "min": 1,
+        "max": 500,
+        "unit": "人"
+      },
+      {
+        "type": "input",
+        "id": "room",
+        "kind": "select",
+        "label": "场地",
+        "required": true,
+        "options": [
+          {
+            "id": "a",
+            "label": "A 厅（80 人）"
+          },
+          {
+            "id": "b",
+            "label": "B 厅（300 人）"
+          }
+        ]
+      }
+    ],
+    "actions": [
+      {
+        "id": "send",
+        "label": "提交",
+        "style": "primary",
+        "inputs": [
+          "name",
+          "seats",
+          "room"
+        ]
+      }
+    ]
+  }
+}

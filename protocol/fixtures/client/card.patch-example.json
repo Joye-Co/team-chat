@@ -1,0 +1,49 @@
+{
+  "kind": "ClientFrame",
+  "valid": true,
+  "description": "chat-run card example patch (apps/daemon/examples/cards/patch.json)",
+  "value": {
+    "t": "card.patch",
+    "rid": "r-example",
+    "groupId": "01JBX0GENERAL000000000000A",
+    "messageId": "01JBX0MSG000000000000000AE",
+    "baseRev": 1,
+    "ops": [
+      {
+        "op": "set",
+        "id": "bar",
+        "props": {
+          "value": 0.66,
+          "label": "2/3"
+        }
+      },
+      {
+        "op": "set",
+        "id": "steps",
+        "props": {
+          "items": [
+            {
+              "text": "备份生产库",
+              "state": "done"
+            },
+            {
+              "text": "在预发演练一遍",
+              "state": "current"
+            },
+            {
+              "text": "周六凌晨切换",
+              "state": "pending"
+            }
+          ]
+        }
+      },
+      {
+        "op": "card",
+        "props": {
+          "summary": "第 2 步，共 3 步。",
+          "fallback": "正在迁移数据库：预发演练中（2/3）。"
+        }
+      }
+    ]
+  }
+}

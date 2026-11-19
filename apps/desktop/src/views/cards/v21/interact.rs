@@ -1024,6 +1024,7 @@ mod tests {
                         by: "b".into(),
                         mode,
                         eta_ms: None,
+                        reason: None,
                     },
                 },
                 at,

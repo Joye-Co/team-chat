@@ -1,0 +1,12 @@
+{
+  "kind": "PutArtifactDataRequest",
+  "valid": true,
+  "value": {
+    "data": {
+      "channels": {
+        "douyin": 8
+      }
+    },
+    "clientPushId": "push-7"
+  }
+}

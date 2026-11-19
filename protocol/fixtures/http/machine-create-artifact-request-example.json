@@ -1,0 +1,84 @@
+{
+  "kind": "MachineCreateArtifactRequest",
+  "valid": true,
+  "description": "chat-run artifact example (apps/daemon/examples/page)",
+  "value": {
+    "title": "发布前清单",
+    "kind": "html",
+    "entry": "index.html",
+    "files": [
+      {
+        "path": "index.html",
+        "fileId": "01JBX0MSG000000000000000AE"
+      }
+    ],
+    "events": [
+      {
+        "name": "item.toggle",
+        "kind": "emit",
+        "label": "勾选一项",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "maxLength": 64
+            },
+            "done": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "id",
+            "done"
+          ]
+        }
+      },
+      {
+        "name": "item.add",
+        "kind": "ask",
+        "label": "加一项",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "text": {
+              "type": "string",
+              "maxLength": 80
+            }
+          },
+          "required": [
+            "text"
+          ]
+        }
+      }
+    ],
+    "data": {
+      "items": [
+        {
+          "id": "a",
+          "text": "跑完回归测试",
+          "done": true
+        },
+        {
+          "id": "b",
+          "text": "更新发布说明",
+          "done": false
+        },
+        {
+          "id": "c",
+          "text": "通知客服",
+          "done": false
+        }
+      ]
+    },
+    "preview": {
+      "summary": "发布前要做完的三件事",
+      "metrics": [
+        {
+          "label": "已完成",
+          "value": "1 / 3"
+        }
+      ]
+    }
+  }
+}

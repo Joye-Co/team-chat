@@ -167,7 +167,11 @@ export function tcSchemaProblem(schema: unknown, depth = 1): string | undefined 
   }
   return undefined;
 }
-export const TcSchema = z.json().refine((v) => tcSchemaProblem(v) === undefined, { message: "unsupported schema" });
+export const TcSchema = z.json().superRefine((v, ctx) => {
+  // The message says what is wrong (`unsupported schema: schema key $ref is not supported`).
+  const problem = tcSchemaProblem(v);
+  if (problem !== undefined) ctx.addIssue({ code: "custom", message: `unsupported schema: ${problem}` });
+});
 
 /** An event an interactive 产出 page may send. Only declared names of the declared kind are accepted. */
 export const ArtifactEventDecl = z.object({
@@ -268,6 +272,11 @@ export const AddArtifactVersionRequest = z.object({
   title: Title.optional(),
   /** Usable: an existing version this one was made from; absent = the current version. */
   parentVersion: z.int().positive().optional(),
+  /**
+   * True: without `data`, the version starts with the data snapshot of its parent version when
+   * the same bot member made both (what people did on the page stays). Absent: it starts empty.
+   */
+  keepData: z.boolean().optional(),
 });
 export type AddArtifactVersionRequest = z.infer<typeof AddArtifactVersionRequest>;
 /**
@@ -335,7 +344,8 @@ export const ArtifactDataFrame = z.object({
   clientPushId: ClientEventId.optional(),
 });
 export type ArtifactDataFrame = z.infer<typeof ArtifactDataFrame>;
-export const ArtifactDataAck = z.object({ dataRev: z.int().positive() });
+/** `duplicate`: a `clientPushId` the server took before; `dataRev` is the rev that push made. */
+export const ArtifactDataAck = z.object({ dataRev: z.int().positive(), duplicate: z.boolean().optional() });
 export type ArtifactDataAck = z.infer<typeof ArtifactDataAck>;
 
 export const ArtifactReplyError = z.object({
@@ -422,6 +432,8 @@ export const PutArtifactDataRequest = z.object({
   data: jsonMax(MAX_ARTIFACT_DATA_BYTES, "data"),
   baseDataRev: Count.optional(),
   cause: Id.optional(),
+  /** As `artifact.data.clientPushId`: a retry with the same id is not applied again. */
+  clientPushId: ClientEventId.optional(),
 });
 export type PutArtifactDataRequest = z.infer<typeof PutArtifactDataRequest>;
 

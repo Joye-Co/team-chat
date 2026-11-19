@@ -574,7 +574,10 @@ export function addInteractFixtures({ ok, bad, T0, ID, base, message }: Interact
   ok("http/card-event-ack-answer.json", "CardEventAck", { eventId: EV(3), stored: true, answerId: "01JC0AN0000000000000000001", duplicate: true, expect: { by: LEDGER, mode: "run", etaMs: 10_000 } });
   ok("http/card-patch-ack.json", "CardPatchAck", { message: { ...message, authorId: LEDGER, kind: "card", body: report.fallback, cardV2: { ...report, rev: 2 }, cause }, rev: 2 });
   ok("http/artifact-event-ack.json", "ArtifactEventAck", { eventId: EV(20), expect: { by: LEDGER, mode: "live" } });
+  ok("http/card-event-ack-none-reason.json", "CardEventAck", { eventId: EV(4), stored: false, expect: { by: LEDGER, mode: "none", reason: "run.limit" } }, "nobody responds, and why");
+  ok("http/artifact-event-ack-none-reason.json", "ArtifactEventAck", { eventId: EV(22), expect: { by: LEDGER, mode: "none", reason: "runner.off" } });
   ok("http/artifact-data-ack.json", "ArtifactDataAck", { dataRev: 2 });
+  ok("http/artifact-data-ack-duplicate.json", "ArtifactDataAck", { dataRev: 2, duplicate: true }, "a push id the server took before, with the rev it made");
   ok("server/welcome-features.json", "ServerFrame", {
     t: "welcome",
     protocol: 1,
@@ -676,11 +679,15 @@ export function addInteractFixtures({ ok, bad, T0, ID, base, message }: Interact
   bad("http/create-artifact-schema-ref.json", "CreateArtifactRequest", { ...createArt, events: [{ name: "x", schema: { $ref: "#/data/x" } }] }, "no $ref in a page event schema");
   bad("http/create-artifact-reserved-path.json", "CreateArtifactRequest", { ...createArt, files: [{ path: "__teamchat/mermaid.min.js", fileId: FILE }] }, "paths under __teamchat/ are reserved");
   bad("http/create-artifact-media-too-big.json", "CreateArtifactRequest", { ...createArt, media: { kind: "html", mime: "text/html", bytes: 30_000_000, preview: "pending" } }, "an html version is at most 20 MB");
+  ok("http/add-artifact-version-keep-data.json", "AddArtifactVersionRequest", { entry: "index.html", files: [{ path: "index.html", fileId: FILE }], events: [{ name: "pick" }], keepData: true });
+  bad("http/add-artifact-version-keep-data-bad.json", "AddArtifactVersionRequest", { entry: "index.html", files: [{ path: "index.html", fileId: FILE }], keepData: "yes" }, "keepData is a boolean");
   ok("http/add-artifact-version-media.json", "AddArtifactVersionRequest", { entry: "index.html", files: [{ path: "index.html", fileId: FILE }], events: [{ name: "pick" }], media: { kind: "html", mime: "text/html", bytes: 1000, preview: "ready" }, data: null });
   ok("http/artifact-data-response.json", "ArtifactDataResponse", { data: { channels: { douyin: 7 } }, dataRev: 2, updatedAt: T0 });
   ok("http/artifact-data-response-empty.json", "ArtifactDataResponse", { data: null, dataRev: 0, updatedAt: T0 });
   ok("http/put-artifact-data-request.json", "PutArtifactDataRequest", { data: { channels: { douyin: 7 } }, baseDataRev: 1, cause: EV(21) });
   bad("http/put-artifact-data-request-missing.json", "PutArtifactDataRequest", { baseDataRev: 1 }, "data is required");
+  ok("http/put-artifact-data-request-push-id.json", "PutArtifactDataRequest", { data: { channels: { douyin: 8 } }, clientPushId: "push-7" });
+  bad("http/put-artifact-data-request-push-id-long.json", "PutArtifactDataRequest", { data: {}, clientPushId: "p".repeat(65) }, "clientPushId is 1..64 characters");
 
   // -------------------------------------------------------------------------
   // Machine: answers, interactions and chat-run output
@@ -715,6 +722,22 @@ export function addInteractFixtures({ ok, bad, T0, ID, base, message }: Interact
     },
     "a vote of a counts-only poll: no voter, no value, the tally",
   );
+  ok(
+    "machine/run.interaction-card-older-rev.json",
+    "MachineDownFrame",
+    {
+      t: "run.interaction",
+      runId: RUN,
+      inputId: "in-9",
+      source: { kind: "card", messageId: M, blockId: "check", rev: 1, currentRev: 3 },
+      event: "choice.change",
+      value: { value: "wrong" },
+      actor,
+      eventId: EV(2),
+      block: { id: "check", type: "decision", options: [{ id: "ok", label: "对" }, { id: "wrong", label: "有问题" }] },
+    },
+    "sent from rev 1 of a card that is at rev 3 now: the block is the one of rev 3",
+  );
   ok("machine/run.interaction-card.json", "MachineDownFrame", {
     t: "run.interaction",
     runId: RUN,
@@ -737,6 +760,13 @@ export function addInteractFixtures({ ok, bad, T0, ID, base, message }: Interact
   });
   ok("machine/run.output.result.json", "MachineDownFrame", { t: "run.output.result", runId: RUN, outputId: "o1", ok: true, result: { rev: 2 } });
   ok("machine/run.output.result-error.json", "MachineDownFrame", { t: "run.output.result", runId: RUN, outputId: "o2", ok: false, error: { code: "conflict", reason: "card.stale_rev", message: "the card changed" } });
+  ok("machine/run.output.result-rate-limited.json", "MachineDownFrame", {
+    t: "run.output.result",
+    runId: RUN,
+    outputId: "o3",
+    ok: false,
+    error: { code: "rate_limited", message: "too many patches for this card: wait 1 s and send the same patch again", retryAfterMs: 640 },
+  });
   ok("machine/run.event-output-patch.json", "MachineUpFrame", {
     t: "run.event",
     runId: RUN,

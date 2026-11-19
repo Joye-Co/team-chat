@@ -110,6 +110,8 @@
       {
         "runId": "01JA0000000000000000000R02",
         "memberId": "01JBX0BOT000000000000000AC",
+        "groupId": "01JBX0GENERAL000000000000A",
+        "topicId": "01JBX0TOPIC0000000000000AD",
         "state": "waiting",
         "startedAt": 1762127940000
       },
