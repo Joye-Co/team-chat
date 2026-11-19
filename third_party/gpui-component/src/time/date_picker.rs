@@ -1,11 +1,12 @@
 use std::rc::Rc;
 
-use chrono::{NaiveDate, NaiveDateTime, NaiveTime, Weekday};
+use chrono::{Days, Months, NaiveDate, NaiveDateTime, NaiveTime, Weekday};
 use gpui::{
     App, AppContext, Bounds, ClickEvent, Context, ElementId, Empty, Entity, EventEmitter,
     FocusHandle, Focusable, InteractiveElement as _, IntoElement, KeyBinding, MouseButton,
     ParentElement as _, Pixels, Render, RenderOnce, SharedString, StatefulInteractiveElement as _,
-    StyleRefinement, Styled, Subscription, Window, deferred, div, prelude::FluentBuilder as _, px,
+    StyleRefinement, Styled, Subscription, Window, actions, deferred, div,
+    prelude::FluentBuilder as _, px,
 };
 use rust_i18n::t;
 
@@ -25,10 +26,22 @@ use super::time_field::{
 };
 use gpui_base::{DatePicker as BaseDatePicker, ElementExt as _};
 
+actions!(
+    date_picker,
+    [PrevDay, NextDay, PrevWeek, NextWeek, PrevMonth, NextMonth]
+);
+
 const CONTEXT: &'static str = "DatePicker";
 pub(crate) fn init(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new("enter", Confirm { secondary: false }, Some(CONTEXT)),
+        KeyBinding::new("space", Confirm { secondary: false }, Some(CONTEXT)),
+        KeyBinding::new("left", PrevDay, Some(CONTEXT)),
+        KeyBinding::new("right", NextDay, Some(CONTEXT)),
+        KeyBinding::new("up", PrevWeek, Some(CONTEXT)),
+        KeyBinding::new("down", NextWeek, Some(CONTEXT)),
+        KeyBinding::new("pageup", PrevMonth, Some(CONTEXT)),
+        KeyBinding::new("pagedown", NextMonth, Some(CONTEXT)),
         KeyBinding::new("escape", Cancel, Some(CONTEXT)),
         KeyBinding::new("delete", Delete, Some(CONTEXT)),
         KeyBinding::new("backspace", Delete, Some(CONTEXT)),
@@ -420,6 +433,7 @@ impl DatePickerState {
     fn update_date(&mut self, date: Date, emit: bool, window: &mut Window, cx: &mut Context<Self>) {
         self.date = date;
         self.calendar.update(cx, |view, cx| {
+            view.set_cursor(None);
             view.set_date(date, window, cx);
         });
         self.open = false;
@@ -446,7 +460,76 @@ impl DatePickerState {
             self.focus_back_if_need(window, cx);
         }
         self.open = open;
+        // Opened from the keyboard unless a click says otherwise: the keyboard starts on
+        // the value, or on today.
+        let start = open.then(|| self.cursor_start(cx));
+        self.calendar.update(cx, |view, _| view.set_cursor(start));
         cx.notify();
+    }
+
+    fn cursor_start(&self, cx: &App) -> NaiveDate {
+        self.date
+            .start()
+            .unwrap_or_else(|| self.calendar.read(cx).today())
+    }
+
+    /// Moves the keyboard's day. A closed picker leaves the key to the page around it.
+    fn move_cursor(
+        &mut self,
+        step: impl Fn(NaiveDate) -> Option<NaiveDate>,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.open {
+            cx.propagate();
+            return;
+        }
+        let from = self
+            .calendar
+            .read(cx)
+            .cursor()
+            .unwrap_or_else(|| self.cursor_start(cx));
+        if let Some(day) = step(from) {
+            self.calendar.update(cx, |view, cx| {
+                view.set_cursor(Some(day));
+                cx.notify();
+            });
+            cx.notify();
+        }
+    }
+
+    fn on_prev_day(&mut self, _: &PrevDay, _: &mut Window, cx: &mut Context<Self>) {
+        self.move_cursor(|d| d.checked_sub_days(Days::new(1)), cx);
+    }
+
+    fn on_next_day(&mut self, _: &NextDay, _: &mut Window, cx: &mut Context<Self>) {
+        self.move_cursor(|d| d.checked_add_days(Days::new(1)), cx);
+    }
+
+    fn on_prev_week(&mut self, _: &PrevWeek, _: &mut Window, cx: &mut Context<Self>) {
+        self.move_cursor(|d| d.checked_sub_days(Days::new(7)), cx);
+    }
+
+    fn on_next_week(&mut self, _: &NextWeek, _: &mut Window, cx: &mut Context<Self>) {
+        self.move_cursor(|d| d.checked_add_days(Days::new(7)), cx);
+    }
+
+    fn on_prev_month(&mut self, _: &PrevMonth, _: &mut Window, cx: &mut Context<Self>) {
+        self.move_cursor(|d| d.checked_sub_months(Months::new(1)), cx);
+    }
+
+    fn on_next_month(&mut self, _: &NextMonth, _: &mut Window, cx: &mut Context<Self>) {
+        self.move_cursor(|d| d.checked_add_months(Months::new(1)), cx);
+    }
+
+    /// Enter on an open calendar: picks the keyboard's day, which closes it. A disabled
+    /// day stays open; a calendar opened by a click has no keyboard day and just closes.
+    fn confirm_cursor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        match self.calendar.read(cx).cursor() {
+            Some(day) => self.calendar.update(cx, |view, cx| {
+                view.activate_date(day, cx);
+            }),
+            None => self.set_open(false, window, cx),
+        }
     }
 
     fn on_escape(&mut self, _: &Cancel, window: &mut Window, cx: &mut Context<Self>) {
@@ -503,6 +586,8 @@ impl DatePickerState {
     ) {
         let open = !self.open;
         self.set_open(open, window, cx);
+        // A click shows the calendar without a keyboard day.
+        self.calendar.update(cx, |view, _| view.set_cursor(None));
     }
 
     fn select_preset(
@@ -551,6 +636,7 @@ pub struct DatePicker {
     appearance: bool,
     focus_ring_enabled: bool,
     disabled: bool,
+    popup_gap: Pixels,
 }
 
 impl Sizable for DatePicker {
@@ -610,7 +696,14 @@ impl DatePicker {
             appearance: true,
             focus_ring_enabled: true,
             disabled: false,
+            popup_gap: crate::popover::DROPDOWN_GAP,
         }
+    }
+
+    /// Set the space between the picker and its calendar.
+    pub fn popup_gap(mut self, gap: Pixels) -> Self {
+        self.popup_gap = gap;
+        self
     }
 
     /// Set the placeholder of the date picker, default: "".
@@ -693,6 +786,7 @@ impl RenderOnce for DatePicker {
         let (bg, fg) = input_style(self.disabled, cx);
 
         let picker_state = self.state.clone();
+        let confirm_state = self.state.clone();
 
         BaseDatePicker::new(self.id, &state.focus_handle)
             .open(state.open)
@@ -703,8 +797,17 @@ impl RenderOnce for DatePicker {
             .on_open_change(move |open, window, cx| {
                 picker_state.update(cx, |state, cx| state.set_open(open, window, cx));
             })
+            .on_confirm(move |window, cx| {
+                confirm_state.update(cx, |state, cx| state.confirm_cursor(window, cx));
+            })
             .key_context(CONTEXT)
             .on_action(window.listener_for(&self.state, DatePickerState::on_delete))
+            .on_action(window.listener_for(&self.state, DatePickerState::on_prev_day))
+            .on_action(window.listener_for(&self.state, DatePickerState::on_next_day))
+            .on_action(window.listener_for(&self.state, DatePickerState::on_prev_week))
+            .on_action(window.listener_for(&self.state, DatePickerState::on_next_week))
+            .on_action(window.listener_for(&self.state, DatePickerState::on_prev_month))
+            .on_action(window.listener_for(&self.state, DatePickerState::on_next_month))
             .flex_none()
             .w_full()
             .relative()
@@ -718,6 +821,7 @@ impl RenderOnce for DatePicker {
                 div()
                     .id("date-picker-input")
                     .relative()
+                    .w_full()
                     .flex()
                     .items_center()
                     .justify_between()
@@ -777,7 +881,7 @@ impl RenderOnce for DatePicker {
                                 .when(!show_clean, |this| {
                                     this.child(
                                         Icon::new(IconName::Calendar)
-                                            .xsmall()
+                                            .with_size(Size::Medium)
                                             .text_color(cx.theme().muted_foreground),
                                     )
                                 })
@@ -786,9 +890,10 @@ impl RenderOnce for DatePicker {
             )
             .when(state.open, |this| {
                 this.child(
-                    deferred(crate::popover::dropdown_popup(
+                    deferred(crate::popover::dropdown_popup_with_gap(
                         ("date-picker-popup", self.state.entity_id()),
                         state.bounds,
+                        self.popup_gap,
                         div()
                             .occlude()
                             .p_3()
