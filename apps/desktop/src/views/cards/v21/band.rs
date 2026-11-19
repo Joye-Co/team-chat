@@ -181,7 +181,10 @@ fn ask_kind(card: &CardV2) -> Option<String> {
         CardV2Block::Confirm { .. } => c::BAND_CONFIRM.into(),
         CardV2Block::ImageChoice { .. } => c::BAND_IMAGE.into(),
         CardV2Block::Slots { .. } => c::BAND_SLOTS.into(),
-        CardV2Block::Matrix { .. } => c::BAND_MATRIX.into(),
+        b @ CardV2Block::Matrix { .. } if super::leaves::matrix_all_required(b) => {
+            c::BAND_MATRIX.into()
+        }
+        CardV2Block::Matrix { .. } => c::BAND_MATRIX_SOME.into(),
         CardV2Block::Table { .. } => c::BAND_TABLE.into(),
         CardV2Block::Input { .. } => c::BAND_FILL.into(),
         _ => return None,
@@ -465,6 +468,10 @@ pub enum PendTone {
     Live,
     /// Grey, a still mark: no answer came, or the author will see it later.
     Quiet,
+    /// Grey, the ban mark: the author was turned off or left, nothing is coming.
+    Gone,
+    /// Grey, the ring: the author's computer is off.
+    Off,
     /// Red 失败: the step was not sent, or the author cannot take it now.
     Bad,
 }
@@ -482,18 +489,36 @@ pub struct PendBand {
 /// The band of a pending stage: the stage itself is the band's word (等 Ledger 回应, Ledger
 /// 还在处理, Ledger 没有回应), never a 处理中 that stays after the author stopped; a step that
 /// was not sent is the red 失败 of CARD21 §2 with the reason.
-pub fn pend_band(stage: interact::Stage, author: &str) -> Option<(String, String, PendTone)> {
+pub fn pend_band(
+    stage: interact::Stage,
+    reason: Option<crate::data::page_host::NoneReason>,
+    author: &str,
+) -> Option<(String, String, PendTone)> {
     use interact::Stage as S;
     let words = interact::stage_words(stage, author);
     Some(match stage {
         S::Quiet => return None,
         // The author has it: waiting on someone else is the muted clock (§2.12).
-        S::Wait | S::Slow => (words, String::new(), PendTone::Quiet),
+        S::Wait => (words, String::new(), PendTone::Quiet),
+        // 还在处理: the member is at it, the working loader (§2.12).
+        S::Slow => (words, String::new(), PendTone::Live),
         S::Silent | S::OfflineAnswer => (words, String::new(), PendTone::Quiet),
         // `expect.mode: none` (a block that takes no action, or a short-run limit): nothing
-        // failed and nothing is left to retry, so the band is the muted clock (D1-70).
-        S::Refused => (words, String::new(), PendTone::Quiet),
-        S::OfflineLive | S::Busy => (c::BAND_FAILED.to_string(), words, PendTone::Bad),
+        // failed, so the band is muted (D1-70). Its mark says what the reason is (§2.12): the
+        // ban for a member turned off, the ring for a computer that is off, the clock for
+        // the rest. The badge holds a short state; the rest is the meta line after it.
+        S::Refused | S::RefusedAnswer => (
+            crate::copy::fill(c::BUSY_STATE, &[("name", author)]),
+            crate::views::artifacts::host::none_why(reason).to_string(),
+            match reason {
+                Some(crate::data::page_host::NoneReason::MemberInactive) => PendTone::Gone,
+                Some(crate::data::page_host::NoneReason::RunnerOff) => PendTone::Off,
+                _ => PendTone::Quiet,
+            },
+        ),
+        S::OfflineLive | S::Busy | S::Forbidden | S::Rejected | S::Unhandled => {
+            (c::BAND_FAILED.to_string(), words, PendTone::Bad)
+        }
     })
 }
 
@@ -507,8 +532,8 @@ pub fn pending(ctx: &Ctx) -> Option<PendBand> {
         .env
         .provider
         .card_v2_events(&ctx.msg.group_id, &ctx.msg.message_id);
-    let p = interact::pending(&events, ctx.env.now())?;
-    let (label, detail, tone) = pend_band(p.stage, &ctx.author)?;
+    let p = interact::pending(&interact::current(&events, ctx.card.rev), ctx.env.now())?;
+    let (label, detail, tone) = pend_band(p.stage, interact::none_reason(&p.event), &ctx.author)?;
     Some(PendBand {
         event_id: p.event.client_event_id,
         stage: p.stage,

@@ -5,7 +5,7 @@
 use gpui::{
     AnyElement, App, Div, ElementId, InteractiveElement as _, IntoElement, ObjectFit,
     ParentElement, StatefulInteractiveElement as _, Styled, StyledImage as _, Window, div, img,
-    prelude::FluentBuilder as _, px, relative,
+    prelude::FluentBuilder as _, px,
 };
 use gpui_component::{Disableable as _, button::Button};
 
@@ -246,6 +246,9 @@ fn field_value(value: &str, color: gpui::Hsla) -> AnyElement {
     }
 }
 
+/// A table cell's side padding (§2.7).
+const CELL_PAD: gpui::Pixels = space::S12;
+
 /// Width of a table column from its longest cell, in pixels. A text column stops at 240
 /// and cuts its cells with "…"; a number column takes its widest number, since numbers
 /// never cut (§2.7, F3): a tabular figure at 12 is about 7.6 wide, a CJK header 12.6.
@@ -262,11 +265,12 @@ fn column_width(columns: &[String], rows: &[Vec<String>], col: usize, numeric: b
                 .sum::<f32>()
         })
         .fold(0.0_f32, f32::max);
-    let w = (longest + 20.0).max(72.0);
+    let w = (longest + 2. * f32::from(CELL_PAD)).max(72.0);
     if numeric { w.ceil() } else { w.min(240.0) }
 }
 
-fn more_button(key: &str, hidden: usize, expanded: bool) -> Button {
+/// The 展开其余 n 行 / 收起 button of a folded table; the v2 tables and diffs share it.
+pub(crate) fn more_button(key: &str, hidden: usize, expanded: bool) -> Button {
     let label = if expanded {
         c::TABLE_LESS.to_string()
     } else {
@@ -323,10 +327,18 @@ fn render_table(
     let cell_in = |ci: usize, text: String, width: f32, head: bool| -> Div {
         let num = numeric.get(ci).copied().unwrap_or(false);
         div()
-            .w(px(width))
-            .flex_none()
-            .px(space::S10)
-            .py(space::S6)
+            // §2.7: the columns fill the frame. The first (text) column takes the room
+            // that is left, with its measured width as the least; the others keep
+            // theirs, so the last one ends at the frame's right inset.
+            .map(|el| {
+                if ci == 0 {
+                    el.flex_grow(1.).flex_shrink(0.).min_w(px(width))
+                } else {
+                    el.w(px(width)).flex_none()
+                }
+            })
+            .px(CELL_PAD)
+            .h_full()
             .flex()
             .items_center()
             .when(num, |el| el.justify_end())
@@ -343,8 +355,12 @@ fn render_table(
                 ui::truncate::TruncText::new(text).into_any_element()
             })
     };
+    // Compact rows, 40 apart (§2.7): 问这里 has air inside the hovered row.
+    let row_h = crate::ui::native::tokens::height::TABLE_ROW_COMPACT;
     let header = div()
         .flex()
+        .items_center()
+        .h(row_h)
         .t_meta_medium()
         .text_color(colors.text_3)
         .children(
@@ -359,17 +375,12 @@ fn render_table(
                         None => el.into_any_element(),
                     }
                 }),
-        )
-        .when(table_refs.is_some(), |el| {
-            el.child(
-                div()
-                    .w(px(crate::views::refs::markdown::ROW_BUTTON_SLOT))
-                    .flex_none(),
-            )
-        });
+        );
     let body = rows[..shown].iter().enumerate().map(|(ri, row)| {
         let line = div()
             .flex()
+            .items_center()
+            .h(row_h)
             .border_t(theme::HAIRLINE)
             .border_color(colors.sep)
             .t_small()
@@ -382,11 +393,16 @@ fn render_table(
         // 问这里 after the row's name when the first column holds both (Refs.dc.html).
         let beside = table_refs.as_ref().is_some_and(|r| {
             let name = row.first().map(String::as_str).unwrap_or("");
-            let inner = widths.first().map(|w| w - 2. * f32::from(space::S10));
+            let inner = widths.first().map(|w| w - 2. * f32::from(CELL_PAD));
             r.beside(name, inner, window)
         });
+        let hides = table_refs.as_ref().filter(|_| !beside).map_or(0, |r| {
+            let trailing = widths.iter().skip(1).rev().copied();
+            r.row_end_hides(ri, trailing, f32::from(space::S12), cx)
+        });
         line.children(widths.iter().enumerate().map(|(i, w)| {
-            let mut el = cell_in(i, row.get(i).cloned().unwrap_or_default(), *w, false);
+            let mut el = cell_in(i, row.get(i).cloned().unwrap_or_default(), *w, false)
+                .when(i + hides >= widths.len(), |d| d.opacity(0.));
             if i == 0 && beside {
                 el = el.children(table_refs.as_ref().and_then(|r| r.name_button(ri, 0., cx)));
             }
@@ -395,8 +411,8 @@ fn render_table(
                 None => el.into_any_element(),
             }
         }))
-        .when_some(table_refs.as_ref(), |el, r| {
-            el.child(r.row_end_unless(ri, beside, cx))
+        .when_some(table_refs.as_ref().filter(|_| !beside), |el, r| {
+            el.child(r.row_end_over(ri, cx))
         })
     });
     div()
@@ -545,7 +561,7 @@ fn render_list(
 }
 
 /// A progress block: the label `small` `text-2` with the percent at the
-/// right (12 `text-3`, tabular), then a 4 pt `accent` bar on a `field` track.
+/// right (12 `text-3`, tabular), then the one Progress (`ui::native::progress`).
 fn render_progress(_key: &str, value: f64, label: Option<&str>, cx: &App) -> AnyElement {
     let k = theme::colors(cx);
     let percent = (value * 100.0).round();
@@ -576,15 +592,8 @@ fn render_progress(_key: &str, value: f64, label: Option<&str>, cx: &App) -> Any
                         .child(format!("{percent}%")),
                 ),
         )
-        .child(
-            div().h(px(4.)).w_full().rounded(px(2.)).bg(k.field).child(
-                div()
-                    .h_full()
-                    .w(relative(value.clamp(0.0, 1.0) as f32))
-                    .rounded(px(2.))
-                    .bg(k.accent),
-            ),
-        )
+        // The one Progress (D12): primary on primary 20 %, never the accent.
+        .child(crate::ui::native::progress(value as f32, cx))
         .into_any_element()
 }
 
@@ -744,8 +753,12 @@ fn link_button(
         } => {
             let provider = ctx.provider.clone();
             let (id, version) = (artifact_id.clone(), *version);
+            // The symbol of the kind, the same on every screen.
+            let glyph = provider.artifact(&id).map_or(Sym::Document, |a| {
+                crate::views::artifact_page::list::ListKind::of(provider.as_ref(), &a.summary).sym()
+            });
             button
-                .icon(Sym::Document)
+                .icon(glyph)
                 .tooltip(c::OPEN_ARTIFACT)
                 .on_click(move |_, _, cx| {
                     crate::views::artifacts::window::open_artifact(&provider, &id, version, cx)
@@ -782,7 +795,7 @@ mod tests {
     fn a_number_column_fits_its_widest_number() {
         let cols = vec!["名称".to_string(), "数".to_string()];
         let rows = vec![vec!["a".to_string(), "1,284,567,890".to_string()]];
-        // 13 tabular figures at 12 plus the 10 + 10 padding, never cut at 240.
+        // 13 tabular figures at 12 plus the cell padding, never cut at 240.
         assert!(column_width(&cols, &rows, 1, true) >= 13. * 7.6 + 20.);
         let long = vec![vec!["a".to_string(), "9".repeat(40)]];
         assert!(column_width(&cols, &long, 1, true) > 240.);

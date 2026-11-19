@@ -1056,6 +1056,7 @@ pub fn all() -> Vec<&'static Scene> {
         // --- end cards v2 track ---
         // --- inc-cards21 ---
         crate::views::cards::v21::scenes::SCENES,
+        crate::views::cards::v21::scenes::KEY_SCENES,
         // --- end inc-cards21 ---
         // --- inc-host track ---
         HOST_SCENES,

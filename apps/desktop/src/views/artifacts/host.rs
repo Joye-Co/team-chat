@@ -34,10 +34,10 @@ use serde_json::{Value, json};
 
 use crate::{
     app::{Changes, Services},
-    copy::{fill, page_host as cp},
+    copy::{cards21 as cc, fill, page_host as cp},
     data::{
         Change, ChatProvider, SessionState,
-        page_host::{ExpectMode, PageBridge, PageEventKind, PageSendError, PageSignal},
+        page_host::{ExpectMode, NoneReason, PageBridge, PageEventKind, PageSendError, PageSignal},
     },
     theme,
     ui::web_embed::{self, WebEmbedState},
@@ -622,6 +622,19 @@ fn reject_for(reason: &str) -> Reject {
         Reject::NotAllowed
     } else {
         Reject::Failed
+    }
+}
+
+/// The words after {name} 接不了 for `expect.reason`; a reason this version does not know
+/// (or none) locks the block just the same, so it says the block is read-only.
+pub fn none_why(reason: Option<NoneReason>) -> &'static str {
+    match reason {
+        Some(NoneReason::MemberInactive) => cc::NONE_MEMBER_INACTIVE,
+        Some(NoneReason::RunnerOff) => cc::NONE_RUNNER_OFF,
+        Some(NoneReason::RunExternal) => cc::NONE_RUN_EXTERNAL,
+        Some(NoneReason::RunLimit) => cc::NONE_RUN_LIMIT,
+        Some(NoneReason::RunFailed) => cc::NONE_RUN_FAILED,
+        None => cc::NONE_READ_ONLY,
     }
 }
 

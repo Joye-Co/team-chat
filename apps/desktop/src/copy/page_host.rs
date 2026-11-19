@@ -11,6 +11,7 @@ crate::copy! {
     PAGE_NO_ANSWER = "{name} 没有回应",
     PAGE_OFFLINE = "{name} 不在线，这一步没有发出",
     PAGE_BUSY = "{name} 现在接不了，稍后再试",
+    PAGE_NONE = "{name} 接不了，{why}",
     PAGE_PUSHED = "{name} 推来了新数据",
     PAGE_ANSWERED = "{name} 在页面里回答了",
     PAGE_RETRY = "重试",
