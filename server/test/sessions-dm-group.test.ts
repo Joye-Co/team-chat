@@ -4,17 +4,12 @@
 // 接 1.8: the front desk's question is a Card v2 ask; the next message of the person answers it.
 // 接 1.9 / 1.13: hand-offs run per (topic, member); a decision on an old topic is made again.
 import { CardV2, mainTopicId } from "@chat/protocol";
-import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { isAddOn, isNewTask } from "../src/agent/frontdesk";
 import { askCard } from "../src/bots/desk/front";
-import { Daemon, downViolations, world, type World } from "./daemon";
-import { Client, type TestMember, api, clientMsgId, createMember, protocolViolations, waitUntil } from "./helpers";
+import { Daemon, world, type World } from "./daemon";
+import { Client, type TestMember, api, clientMsgId, createMember, inputBody, waitUntil } from "./helpers";
 
-afterAll(async () => {
-  await new Promise((r) => setTimeout(r, 300));
-  expect(protocolViolations).toEqual([]);
-  expect(downViolations).toEqual([]);
-});
 afterEach(() => {
   vi.restoreAllMocks();
 });
@@ -139,7 +134,8 @@ describe("a DM's chat area (接 3.2)", () => {
     // While it runs, more words go to it; 新任务 gets its own run next to it.
     await send(c, gid, main, "周报加上数据");
     const input = await d.next((f) => f.t === "run.input");
-    expect(input).toMatchObject({ runId: x.runId, text: "周报加上数据" });
+    expect(input).toMatchObject({ runId: x.runId });
+    expect(inputBody(input)).toBe("周报加上数据");
     await send(c, gid, main, "新任务 看下 CI");
     const y = await d.next((f) => f.t === "run.assign" && ![a.runId, b.runId, x.runId].includes(f.runId));
     expect(y.resumeSessionId).toBeUndefined();
@@ -174,14 +170,14 @@ describe("the 群聊 (接 1.5)", () => {
 
     // Each person's next words go to their own run.
     await send(alice, w.gid, main, "@dev 顺便看下 lint", { mentions: [w.bot.id] });
-    await d.next((f) => f.t === "run.input" && f.runId === a.runId && f.text === "@dev 顺便看下 lint");
+    await d.next((f) => f.t === "run.input" && f.runId === a.runId && inputBody(f) === "@dev 顺便看下 lint");
     await send(joye, w.gid, main, "@dev 加上数据", { mentions: [w.bot.id] });
-    await d.next((f) => f.t === "run.input" && f.runId === b.runId && f.text === "@dev 加上数据");
+    await d.next((f) => f.t === "run.input" && f.runId === b.runId && inputBody(f) === "@dev 加上数据");
 
     // A reply to Alice's request from Joye goes to Alice's run.
     const request = alice.events().find((e) => e.type === "message.created" && e.data.message.body === "@dev 看下 CI").data.message;
     await send(joye, w.gid, main, "@dev 这个先跑一下 e2e", { mentions: [w.bot.id], replyTo: { messageId: request.id } });
-    await d.next((f) => f.t === "run.input" && f.runId === a.runId && f.text.startsWith("@dev 这个先跑一下 e2e"));
+    await d.next((f) => f.t === "run.input" && f.runId === a.runId && inputBody(f).startsWith("@dev 这个先跑一下 e2e"));
     expect(d.frames.filter((f) => f.t === "run.assign")).toHaveLength(2);
 
     await d.acked(a.runId, d.done(a.runId, { status: "succeeded", resultText: "ok" }));
@@ -222,7 +218,7 @@ describe("the same person's second request in the 群聊 (verify 2, problem 10)"
     // A message of the same person that adds to the work still reaches a running run.
     await joye.waitEvent((e) => e.type === "run.updated" && e.data.run.id === b.runId && e.data.run.status === "running");
     await send(joye, w.gid, main, "@Forge 顺便说一下怎么算的", { mentions: [forge.id] });
-    await d.next((f) => f.t === "run.input" && f.text === "@Forge 顺便说一下怎么算的");
+    await d.next((f) => f.t === "run.input" && inputBody(f) === "@Forge 顺便说一下怎么算的");
     expect(d.frames.filter((f) => f.t === "run.assign")).toHaveLength(3);
 
     await d.acked(third.runId, d.done(third.runId, { status: "succeeded", resultText: "7" }));

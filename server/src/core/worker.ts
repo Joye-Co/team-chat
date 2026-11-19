@@ -3,7 +3,7 @@ import { authenticate } from "./auth";
 import { type Env, gatewayStub } from "./env";
 import { ApiError } from "./errors";
 import { INTERNAL_HEADERS } from "./gateway";
-import { type CompiledRoute, compilePath, errorResponse, json, matchRoute, readJson } from "./http";
+import { type CompiledRoute, compilePath, errorResponse, json, matchRoute, methodNotAllowed, readJson } from "./http";
 import { logger } from "./logger";
 import { LIMITS } from "./ratelimit";
 import { type RouteContext, type RouteDef, routes, scheduledHandlers } from "./registry";
@@ -23,7 +23,7 @@ function table(): CompiledRoute<RouteDef>[] {
 }
 
 async function handleWebSocket(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-  if (request.method !== "GET") throw new ApiError("invalid", "use GET");
+  if (request.method !== "GET") return methodNotAllowed(["GET"]);
   if (request.headers.get("upgrade")?.toLowerCase() !== "websocket") {
     return json({ error: { code: "invalid", message: "expected a websocket upgrade" } }, 426);
   }
@@ -52,7 +52,10 @@ export async function handleFetch(request: Request, env: Env, ctx: ExecutionCont
     }
     const m = matchRoute(table(), request.method, url.pathname);
     if (!m.route) {
-      throw m.pathMatched ? new ApiError("invalid", "method not allowed") : new ApiError("not_found", "no such route");
+      if (!m.pathMatched) throw new ApiError("not_found", "no such route");
+      const res = methodNotAllowed(m.allow);
+      status = res.status;
+      return res;
     }
     const def = m.route.handler;
     let auth = null;

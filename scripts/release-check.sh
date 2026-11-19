@@ -20,7 +20,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --tag) TAG_CHECK=1; shift ;;
     --env) ENV_NAME="${2:-}"; [ -n "$ENV_NAME" ] || die "--env needs an env"; shift 2 ;;
-    -h | --help) sed -n '2,12p' "$0"; exit 0 ;;
+    -h | --help) usage; exit 0 ;;
     -*) die "unknown option: $1" ;;
     *) [ -z "$VERSION" ] || die "more than one version given"; VERSION="${1#v}"; shift ;;
   esac

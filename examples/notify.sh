@@ -32,13 +32,26 @@ payload="$(jq -n \
 
 # The header comes from a file so the token is not in the process list.
 header_file="$(mktemp)"
-trap 'rm -f "$header_file"' EXIT
+# The answer goes to a file: curl starts the file again on each retry, so only the last answer is in it.
+response_file="$(mktemp)"
+trap 'rm -f "$header_file" "$response_file"' EXIT
 chmod 600 "$header_file"
 printf 'Authorization: Bearer %s\n' "$(tr -d '[:space:]' < "$token_file")" > "$header_file"
 
+status=0
 curl --silent --show-error --fail-with-body \
   --retry 3 --retry-connrefused --max-time 30 \
   -H @"$header_file" \
   -H 'Content-Type: application/json' \
   --data "$payload" \
-  "${CHAT_URL%/}/v1/groups/${group_id}/messages" | jq -c '{messageId: .message.id, topicId: .message.topicId, duplicate: (.duplicate // false)}'
+  --output "$response_file" \
+  "${CHAT_URL%/}/v1/groups/${group_id}/messages" || status=$?
+
+if [[ $status -ne 0 ]]; then
+  # The server's error as "code: message"; any other answer (a proxy page) as it came.
+  if [[ -s "$response_file" ]]; then
+    jq -er '.error | select(.) | "\(.code): \(.message)"' "$response_file" >&2 2>/dev/null || { cat "$response_file"; echo; } >&2
+  fi
+  exit "$status"
+fi
+jq -c '{messageId: .message.id, topicId: .message.topicId, duplicate: (.duplicate // false)}' "$response_file"

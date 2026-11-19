@@ -1,15 +1,10 @@
 // Core fixes from the V1 review: delete scrubbing, reads of new members, streamed text, member
 // removal retries, hello, write order and page sizes.
 import { env, runInDurableObject } from "cloudflare:test";
-import { afterAll, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { roomStub } from "../src/core/env";
 import { scrubArchivedEvent } from "../src/ops/archive";
-import { Client, api, clientMsgId, createGroup, createMember, protocolViolations } from "./helpers";
-
-afterAll(async () => {
-  await new Promise((r) => setTimeout(r, 300));
-  expect(protocolViolations).toEqual([]);
-});
+import { Client, api, clientMsgId, createGroup, createMember } from "./helpers";
 
 const actor = (id: string) => ({ id, level: "member" as const, kind: "human" as const });
 

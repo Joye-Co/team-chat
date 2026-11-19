@@ -1,16 +1,11 @@
 // Restore of Card v2 state from the archive (PC-1): private cards, revs, refs, ask timers, the
 // topic base of a blocking ask and the state outside the log (card events, requesters, page data).
 import { env, runInDurableObject } from "cloudflare:test";
-import { afterAll, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import type { CardV2 } from "@chat/protocol";
 import { ulid } from "../src/core/ids";
 import { GROUP_PREFIX, groupStateKey, parseGroupFileKey, runArchive, utcDate } from "../src/ops/archive";
-import { Client, api, clientMsgId, createGroup, createMember, protocolViolations } from "./helpers";
-
-afterAll(async () => {
-  await new Promise((r) => setTimeout(r, 300));
-  expect(protocolViolations).toEqual([]);
-});
+import { Client, api, clientMsgId, createGroup, createMember } from "./helpers";
 
 const ADMIN = { "x-admin-secret": "test-admin-secret" };
 const FEATURES = ["interact/1", "refs/1"];

@@ -51,9 +51,11 @@ export interface Attempt {
 
 /**
  * Counts one attempt for `key` in the current fixed window (D1, so every location shares the
- * count). Throws `rate_limited` once the window holds more than `max` attempts.
+ * count). Throws `rate_limited` once the window holds more than `max` attempts, with the time
+ * until the window ends as `retryAfterMs`. `what` names the limited thing in the message
+ * (`too many <what>`), e.g. `password attempts`.
  */
-export async function takeAttempt(db: D1Database, key: string, rate: { windowMs: number; max: number }): Promise<Attempt> {
+export async function takeAttempt(db: D1Database, key: string, rate: { windowMs: number; max: number }, what = "attempts"): Promise<Attempt> {
   const now = Date.now();
   const window = Math.floor(now / rate.windowMs) * rate.windowMs;
   const row = await db
@@ -70,7 +72,10 @@ export async function takeAttempt(db: D1Database, key: string, rate: { windowMs:
       .run()
       .catch(() => {});
   }
-  if ((row?.count ?? 1) > rate.max) throw new ApiError("rate_limited", "too many invite code attempts");
+  if ((row?.count ?? 1) > rate.max) {
+    const waitMs = window + rate.windowMs - now;
+    throw new ApiError("rate_limited", `too many ${what}, try again in ${Math.max(1, Math.ceil(waitMs / 1000))} s`, undefined, waitMs);
+  }
   return { key, window };
 }
 
