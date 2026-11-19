@@ -407,6 +407,15 @@ describe("a giver that waits for a machine", () => {
     // qa's slot freed up in qa's desk; dev's desk gives its queued run a machine on its alarm.
     const desk = benv.BOT_DESK.get(benv.BOT_DESK.idFromName(w.bot.id));
     const isNext = (f: any) => f.t === "run.assign" && f.runId === queued.data.run.id;
+    // The part reaches dev's desk on its own path: let it land before the alarm hands out the run,
+    // or a slow runner gives the run its machine first and the part goes in as input instead.
+    await vi.waitFor(async () => {
+      const key = `partsIn:${queued.data.run.id}`;
+      const kept = (await runInDurableObject(desk, (_o, state: DurableObjectState) =>
+        state.storage.sql.exec<{ value: string }>("SELECT value FROM meta WHERE key = ?", key).toArray()[0]?.value ?? null,
+      )) as string | null;
+      expect(kept).toContain("Windows 上通过");
+    }, { timeout: 10_000, interval: 50 });
     await vi.waitFor(async () => {
       await runDurableObjectAlarm(desk);
       expect(d.frames.some(isNext)).toBe(true);
