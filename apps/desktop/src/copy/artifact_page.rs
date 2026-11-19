@@ -95,4 +95,5 @@ crate::copy! {
     ARTIFACT_QUIET_PASSED = "没有替你发出回应",
     ARTIFACT_QUIET_FAILED = "替你发出了回应",
     // --- end v15/r3-pages ---
+    ARTIFACTS_KIND_DOC = "文档",
 }

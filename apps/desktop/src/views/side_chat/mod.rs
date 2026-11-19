@@ -29,7 +29,7 @@ use crate::{
     app::{RightPane, Services},
     copy::{common, fill, side_chat as c},
     data::{
-        Member, MemberId, Millis,
+        Member, MemberId, Millis, TopicStatus,
         v2::{SideChatMessage, SideChatSource, SideChatThread},
     },
     theme::{Type as _, space},
@@ -60,6 +60,12 @@ const STARTERS: [&str; 3] = [
     c::SIDE_CHAT_ASK_PROGRESS,
     c::SIDE_CHAT_ASK_RISK,
     c::SIDE_CHAT_ASK_NEXT,
+];
+/// The suggested questions when the 话题 is 完成: nothing is in progress.
+const STARTERS_DONE: [&str; 3] = [
+    c::SIDE_CHAT_ASK_RESULT,
+    c::SIDE_CHAT_ASK_BASIS,
+    c::SIDE_CHAT_ASK_LEFT,
 ];
 
 pub struct SideChat {
@@ -122,6 +128,17 @@ impl SideChat {
             RightPane::SideChat(m) => Some((g, t, m)),
             _ => None,
         }
+    }
+
+    /// The suggested questions for the 话题's state.
+    fn starters(&self, g: &str, t: &str) -> [&'static str; 3] {
+        let done = self
+            .services
+            .provider
+            .topics(g)
+            .iter()
+            .any(|topic| topic.id == t && topic.status == TopicStatus::Done);
+        if done { STARTERS_DONE } else { STARTERS }
     }
 
     /// Sends one of the suggested questions of the empty aside.
@@ -278,7 +295,13 @@ impl SideChat {
     /// The Empty state of an aside with no messages (§2.5, §2.13): the
     /// 40 icon box, what the member reads, and three suggested questions as
     /// outline sm buttons, centered in the body.
-    fn empty(&self, name: &str, read_upto: Option<Millis>, cx: &mut Context<Self>) -> AnyElement {
+    fn empty(
+        &self,
+        name: &str,
+        read_upto: Option<Millis>,
+        questions: [&'static str; 3],
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let line = match read_upto {
             Some(at) => fill(
                 c::SIDE_CHAT_EMPTY_LINE,
@@ -288,13 +311,13 @@ impl SideChat {
         };
         // Two sentences on two lines, so neither breaks mid-phrase.
         let line = format!("{line}\n{}", c::SIDE_CHAT_EMPTY_PRIVATE);
-        let starters: Vec<_> = STARTERS
-            .iter()
+        let starters: Vec<_> = questions
+            .into_iter()
             .enumerate()
             .map(|(i, q)| {
                 push_button(
                     SharedString::from(format!("side-chat-starter-{i}")),
-                    *q,
+                    q,
                     PushStyle::Outline,
                     PushSize::Small,
                     cx,
@@ -885,12 +908,13 @@ impl Render for SideChat {
         // aside reads from the top (short threads stay top-anchored, A1),
         // and the scroll content ends 24 above the composer (§2.21).
         let mut description = c::SIDE_CHAT_PRIVATE.to_string();
+        let questions = self.starters(&g, &t);
         let body = if thread.messages.is_empty() {
             let read = self.read_upto(&g, &t, None);
             div()
                 .flex_1()
                 .min_h_0()
-                .child(self.empty(&name, read, cx))
+                .child(self.empty(&name, read, questions, cx))
                 .into_any_element()
         } else {
             // R2-18, §2.5: what the member read is the header description,
@@ -918,15 +942,15 @@ impl Render for SideChat {
                 .filter(|msg| Some(&msg.author_id) == me.as_ref())
                 .map(|msg| msg.body.trim())
                 .collect();
-            let next: Vec<AnyElement> = STARTERS
-                .iter()
+            let next: Vec<AnyElement> = questions
+                .into_iter()
                 .enumerate()
                 .filter(|(_, q)| !asked.iter().any(|a| a.contains(q.trim_end_matches('？'))))
                 .take(2)
                 .map(|(i, q)| {
                     push_button(
                         SharedString::from(format!("side-chat-next-{i}")),
-                        *q,
+                        q,
                         PushStyle::Outline,
                         PushSize::Small,
                         cx,

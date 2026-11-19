@@ -147,8 +147,8 @@ pub fn group_members(services: &Services, group_id: &str) -> Vec<Member> {
     members
 }
 
-/// Adds the topic items to `menu`: 重命名, 关注, 静音 and (hide-delete/1) 隐藏话题 and
-/// 删除话题…. Status, who the topic
+/// Adds the topic items to `menu`: 重命名, the 提醒 submenu and (hide-delete/1) 隐藏 and
+/// 删除…. Status, who the topic
 /// waits on and its owner follow the work itself, so nobody sets them by hand.
 /// Every action goes to the provider; the new state arrives as `Change::Topics`.
 pub fn build(
@@ -156,34 +156,48 @@ pub fn build(
     services: &Services,
     group_id: &str,
     topic: &Topic,
-    _window: &mut Window,
-    _cx: &mut Context<PopupMenu>,
+    window: &mut Window,
+    cx: &mut Context<PopupMenu>,
 ) -> PopupMenu {
+    use crate::copy::nav;
     let following = services.provider.topic_following(group_id, &topic.id);
     let muted = services.provider.topic_muted(group_id, &topic.id);
 
     let (s, g, tp) = (services.clone(), group_id.to_string(), topic.clone());
-    menu = menu
-        .item(
-            PopupMenuItem::new(r::RENAME)
-                .on_click(move |_, window, cx| open_rename(s.clone(), &g, &tp, window, cx)),
-        )
-        .separator();
+    menu = menu.item(
+        PopupMenuItem::new(r::RENAME)
+            .on_click(move |_, window, cx| open_rename(s.clone(), &g, &tp, window, cx)),
+    );
 
+    // 提醒: the one level of the 话题 (关注 / 默认 / 静音), as the 详情 pane
+    // sets it (D21), so a 话题 is never followed and muted at once and the
+    // menu shows the level it has.
+    let now = if muted {
+        nav::MUTE
+    } else if following {
+        nav::FOLLOW_ROW
+    } else {
+        nav::NOTIFY_DEFAULT
+    };
     let (s, g, t) = (services.clone(), group_id.to_string(), topic.id.clone());
-    let menu = menu.item(
-        PopupMenuItem::new(if following { r::UNFOLLOW } else { r::FOLLOW })
-            .on_click(move |_, _, _| s.provider.set_topic_following(&g, &t, !following)),
-    );
-    let (s, g, t) = (services.clone(), group_id.to_string(), topic.id.clone());
-    let menu = menu.item(
-        PopupMenuItem::new(if muted {
-            r::TOPIC_UNMUTE
-        } else {
-            r::TOPIC_MUTE
-        })
-        .on_click(move |_, _, _| s.provider.set_topic_muted(&g, &t, !muted)),
-    );
+    let menu =
+        menu.submenu(nav::NOTIFY_LEVEL, window, cx, move |sub, _, _| {
+            [
+                (nav::FOLLOW_ROW, true, false),
+                (nav::NOTIFY_DEFAULT, false, false),
+                (nav::MUTE, false, true),
+            ]
+            .into_iter()
+            .fold(sub, |sub, (label, follow, mute)| {
+                let (s, g, t) = (s.clone(), g.clone(), t.clone());
+                sub.item(PopupMenuItem::new(label).checked(label == now).on_click(
+                    move |_, _, _| {
+                        s.provider.set_topic_muted(&g, &t, mute);
+                        s.provider.set_topic_following(&g, &t, follow);
+                    },
+                ))
+            })
+        });
     crate::views::nav::hide_delete::topic_items(menu, services, group_id, topic)
 }
 

@@ -12,7 +12,7 @@
 //! draft in the provider: text, mentions, quote and pending files. Pasted or
 //! dropped files and images become chips until the message is sent.
 
-mod model;
+pub(crate) mod model;
 mod native;
 mod relay;
 #[cfg(test)]
@@ -962,7 +962,7 @@ impl ComposerView {
     }
 
     /// The 添加文件 button: picks files with the system dialog.
-    fn pick_files(&mut self, cx: &mut Context<Self>) {
+    pub fn pick_files(&mut self, cx: &mut Context<Self>) {
         let paths = cx.prompt_for_paths(gpui::PathPromptOptions {
             files: true,
             directories: false,

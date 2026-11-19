@@ -30,7 +30,7 @@ pub(super) fn topic(
 
 /// The menu of a 群 header or a DM row: 静音 or 取消静音 and the 提醒
 /// submenu (this conversation's own notify level); for a 群 also
-/// 重命名群…, 添加成员 and, apart, 离开群 (it asks first).
+/// 重命名…, 添加成员 and, apart, 离开群 (it asks first).
 pub(super) fn group(
     menu: PopupMenu,
     services: &Services,
@@ -80,7 +80,8 @@ pub(super) fn group(
             }),
         )
         .separator();
-    let menu = nav_views::hide_delete::hide_group_item(menu, services, &hide);
+    // 隐藏 changes nothing for others: the red items sit apart from it.
+    let menu = nav_views::hide_delete::hide_group_item(menu, services, &hide).separator();
     let delete = hide.clone();
     let menu = menu.item(
         // T4-14: a destructive item reads in the destructive color (the

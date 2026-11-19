@@ -1953,8 +1953,8 @@ impl ChatProvider for CoreProvider {
         self.rename_group_inner(group_id, name)
     }
 
-    fn leave_group(&self, group_id: &str) {
-        self.leave_group_inner(group_id);
+    fn leave_group(&self, group_id: &str) -> AdminReply<()> {
+        self.leave_group_inner(group_id)
     }
 
     fn group_muted(&self, group_id: &str) -> bool {
