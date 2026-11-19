@@ -181,7 +181,10 @@ fn ask_kind(card: &CardV2) -> Option<String> {
         CardV2Block::Confirm { .. } => c::BAND_CONFIRM.into(),
         CardV2Block::ImageChoice { .. } => c::BAND_IMAGE.into(),
         CardV2Block::Slots { .. } => c::BAND_SLOTS.into(),
-        CardV2Block::Matrix { .. } => c::BAND_MATRIX.into(),
+        b @ CardV2Block::Matrix { .. } if super::leaves::matrix_all_required(b) => {
+            c::BAND_MATRIX.into()
+        }
+        CardV2Block::Matrix { .. } => c::BAND_MATRIX_SOME.into(),
         CardV2Block::Table { .. } => c::BAND_TABLE.into(),
         CardV2Block::Input { .. } => c::BAND_FILL.into(),
         _ => return None,

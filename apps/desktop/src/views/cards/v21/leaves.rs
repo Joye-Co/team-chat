@@ -62,6 +62,14 @@ pub fn is_required(b: &CardV2Block) -> bool {
     }
 }
 
+/// Whether a matrix asks for every row: the rule `form21` holds the submit button to.
+pub fn matrix_all_required(b: &CardV2Block) -> bool {
+    let CardV2Block::Matrix { required, rows, .. } = b else {
+        return false;
+    };
+    required.unwrap_or(false) || rows.iter().all(|r| r.required.unwrap_or(false))
+}
+
 /// The question line of a questionnaire child.
 pub fn question_label(b: &CardV2Block) -> String {
     match b {
@@ -1130,7 +1138,15 @@ pub fn matrix(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
                 .child(col.label.clone())
         }));
     let mut table = div().flex().flex_col().child(head);
+    // Only a matrix that asks for some of its rows has rows to tell apart.
+    let mark_required = !matrix_all_required(b);
     for (ri, r) in rows.iter().enumerate() {
+        let tag = (mark_required && r.required.unwrap_or(false)).then(|| {
+            meta(div())
+                .flex_none()
+                .text_color(k.ink_3)
+                .child(c::Q_REQUIRED)
+        });
         let mut line = div()
             .flex()
             .items_center()
@@ -1139,12 +1155,20 @@ pub fn matrix(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
                 el.border_b_1().border_color(k.line)
             })
             .child(
-                b20::small(div())
+                div()
                     .flex_1()
                     .min_w(px(0.))
-                    .one_line()
-                    .text_color(k.ink)
-                    .child(crate::ui::truncate::TruncText::new(r.label.clone())),
+                    .flex()
+                    .items_center()
+                    .gap(space::S8)
+                    .child(
+                        b20::small(div())
+                            .min_w(px(0.))
+                            .one_line()
+                            .text_color(k.ink)
+                            .child(crate::ui::truncate::TruncText::new(r.label.clone())),
+                    )
+                    .children(tag),
             );
         for col in columns {
             let on = set.get(&r.id) == Some(&col.id);
@@ -2803,6 +2827,39 @@ pub fn footer(ctx: &Ctx, _window: &mut Window, cx: &mut App) -> Option<Option<An
 mod leaf_tests {
     use super::*;
     use crate::data::{ArtifactFolder, FileError};
+
+    fn matrix(required: Option<bool>, rows: &[Option<bool>]) -> CardV2Block {
+        let rows: Vec<Value> = rows
+            .iter()
+            .enumerate()
+            .map(|(i, r)| {
+                let mut row = json!({ "id": format!("r{i}"), "label": "行" });
+                if let Some(r) = r {
+                    row["required"] = json!(r);
+                }
+                row
+            })
+            .collect();
+        let mut block = json!({
+            "id": "m", "type": "matrix", "label": "矩阵", "fallbackText": "矩阵",
+            "rows": rows, "columns": [ { "id": "a", "label": "甲" } ],
+        });
+        if let Some(required) = required {
+            block["required"] = json!(required);
+        }
+        serde_json::from_value(block).expect("a matrix block")
+    }
+
+    #[test]
+    fn a_matrix_asks_for_every_row_only_when_the_submit_button_does() {
+        assert!(matrix_all_required(&matrix(Some(true), &[None, None])));
+        assert!(matrix_all_required(&matrix(
+            None,
+            &[Some(true), Some(true)]
+        )));
+        assert!(!matrix_all_required(&matrix(None, &[Some(true), None])));
+        assert!(!matrix_all_required(&matrix(None, &[None, None])));
+    }
 
     fn folder(is_page: bool) -> FolderState {
         Some(Ok(ArtifactFolder {

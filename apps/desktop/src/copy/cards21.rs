@@ -267,4 +267,6 @@ crate::copy! {
     NONE_READ_ONLY = "这一块只能看",
     // The gallery's caption over a block the viewer can try again.
     I_NONE_RETRY = "稍后可以再试",
+    // The band of a matrix that does not ask for every row.
+    BAND_MATRIX_SOME = "矩阵，每行最多选一个",
 }
