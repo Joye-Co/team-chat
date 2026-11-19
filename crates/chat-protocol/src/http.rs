@@ -93,7 +93,18 @@ pub struct CreateBotRequest {
         skip_serializing_if = "Option::is_none"
     )]
     pub character: Option<CharacterId>,
+    /// Usable: admins only, the person the new AI member belongs to. A member who is not an
+    /// admin always makes his own.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub owner_id: Option<String>,
 }
+
+/// How many active AI members of his own a member who is not an admin may have.
+pub const MAX_OWN_BOTS: usize = 1;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

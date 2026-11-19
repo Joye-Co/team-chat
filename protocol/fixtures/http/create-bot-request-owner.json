@@ -1,0 +1,9 @@
+{
+  "kind": "CreateBotRequest",
+  "valid": true,
+  "description": "usable: an admin makes an AI member that belongs to Alice",
+  "value": {
+    "name": "小助手",
+    "ownerId": "01JBX0ALICE0000000000000AB"
+  }
+}

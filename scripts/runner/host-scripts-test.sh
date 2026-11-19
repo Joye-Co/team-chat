@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Tests of host-setup.sh (retire_homes, the host rustup step) and runner-vm (export rules, no
-# home commands) in a throwaway privileged container, never on a real host:
+# Tests of host-setup.sh (retire_homes, users_add, the host rustup step) and runner-vm (callers,
+# slots, export rules, no home commands) in a throwaway privileged container, never on a real
+# host:
 #   docker run --rm --privileged -v "$PWD":/w ubuntu:24.04 bash /w/scripts/runner/host-scripts-test.sh
 set -euo pipefail
 [[ -f /.dockerenv ]] || { echo "run it in a container (see the header)" >&2; exit 1; }
@@ -63,12 +64,58 @@ echo "PASS second run is a no-op"
 mv "$H/plain" "$H/plain.legacy"
 retire_homes "$H" "$I"; check; echo "PASS an interrupted run recovers"
 
+echo "== users file"
+eval "$(sed -n '/^users_add() {/,/^}/p' "$here/host-setup.sh")"
+USERS_FILE=/etc/runner-vm.users
+rm -f "$USERS_FILE"
+users_add runner 0 64
+users_add runner 0 64
+users_add alice 64 2
+users_add bob 66 1
+for bad in "carol 65 1" "carol 0 1" "carol 60 10" "alice 70 1" "carol 16383 2" "Bad 100 1"; do
+  # shellcheck disable=SC2086 # the words are the arguments
+  if users_add $bad 2>/dev/null; then echo "FAIL users_add $bad"; exit 1; fi
+done
+[[ "$(cat "$USERS_FILE")" == $'runner 0 64\nalice 64 2\nbob 66 1' ]] || { echo "FAIL users file: $(cat "$USERS_FILE")"; exit 1; }
+echo "PASS users_add is idempotent and refuses overlapping slots"
+
 echo "== runner-vm"
 mkdir -p /stub; printf '#!/bin/sh\necho exportfs "$@"\n' > /stub/exportfs; chmod 755 /stub/exportfs
+for u in alice bob; do id "$u" >/dev/null 2>&1 || useradd --create-home "$u"; done
+id carol >/dev/null 2>&1 || useradd --create-home carol
 key=0123456789abcdef
 mkdir -p /srv/runner/daemon/caches/$key /srv/runner/daemon/lines/k/cli
 ln -sfn /srv/runner/daemon/caches /srv/runner/daemon/alias
-rv() { PATH=/stub:$PATH bash "$here/runner-vm" "$@"; }
+mkdir -p /srv/runner/u/alice/runs/r1 /srv/runner/u/bob/runs/r1 /home/alice/work /home/alice/.config
+rv() { SUDO_USER=runner PATH=/stub:$PATH bash "$here/runner-vm" "$@"; }
+rv_as() { local u="$1"; shift; SUDO_USER="$u" PATH=/stub:$PATH bash "$here/runner-vm" "$@"; }
+refused() { # refused <what the error says> <user> <args...>
+  local want="$1"; shift
+  if rv_as "$@" 2>/tmp/err; then echo "FAIL $* ran"; exit 1; fi
+  grep -qe "$want" /tmp/err || { echo "FAIL $*: $(cat /tmp/err)"; exit 1; }
+}
+refused "not in /etc/runner-vm.users" carol up 70
+refused "not in /etc/runner-vm.users" carol export 70 /home/carol rw
+if SUDO_USER='' bash "$here/runner-vm" up 0 2>/tmp/err; then echo "FAIL no caller ran"; exit 1; fi
+grep -q "cannot tell which user" /tmp/err || { echo "FAIL no caller: $(cat /tmp/err)"; exit 1; }
+if RUNNER_USER=alice SUDO_USER='' bash "$here/runner-vm" up 64 2>/dev/null; then echo "FAIL RUNNER_USER trusted"; exit 1; fi
+refused "--as is for root only" alice --as runner up 0
+echo "PASS an unlisted user and a caller sudo does not name are refused"
+refused "not one of alice's" alice up 0
+refused "not one of alice's" alice down 66
+refused "not one of alice's" alice export 66 /srv/runner/u/alice/runs/r1 rw
+refused "not one of runner's" runner up 64
+echo "PASS a slot outside the caller's range is refused"
+refused "is not inside" alice export 64 /srv/runner/u/bob/runs/r1 rw
+refused "belongs to another user" runner export 0 /srv/runner/u/alice/runs/r1 rw
+refused "is not inside" alice export 64 /srv/runner/daemon/lines/k/cli rw
+refused "is not inside" bob export 66 /home/alice/work rw
+refused "private folder" alice export 64 /home/alice/.config rw
+refused "is not shared" runner export 0 /srv/runner/u rw
+rv_as alice export 65 /srv/runner/u/alice/runs/r1 rw | grep -q "anonuid=$(id -u alice),anongid=$(id -g alice) 10.200.1.6:/srv/runner/u/alice/runs/r1"
+rv_as alice export 64 /home/alice/work rw | grep -q "10.200.1.2:/home/alice/work"
+SUDO_USER='' PATH=/stub:$PATH bash "$here/runner-vm" --as alice export 64 /srv/runner/u/alice/runs/r1 rw | grep -q "10.200.1.2:"
+echo "PASS exports stay in the caller's own trees"
 for p in /srv/runner/daemon/caches /srv/runner/daemon/caches/ /srv/runner/daemon/alias /srv/runner/daemon/caches/$key/..; do
   if rv export 0 "$p" rw 2>/tmp/err; then echo "FAIL $p exported"; exit 1; fi
   grep -q "holds every repository's cache" /tmp/err || { echo "FAIL $p: $(cat /tmp/err)"; exit 1; }

@@ -262,6 +262,8 @@ export const Member = z.object({
   weeklyBudgetCents: z.int().nonnegative().max(MAX_WEEKLY_BUDGET_CENTS).optional(),
   /** Usable: true for a 所有者 (always `level: "owner"`); sent only when true. */
   teamOwner: z.boolean().optional(),
+  /** Usable: an AI member's own person (its 主人), who may edit it and whose machines run it; absent = the team's. */
+  ownerId: Id.optional(),
   /** The AI member was deleted (also deactivated); sent only when true. Clients leave it out of lists. */
   deleted: z.boolean().optional(),
 });
@@ -757,7 +759,15 @@ export type CreateInviteRequest = z.infer<typeof CreateInviteRequest>;
 export const CreateInviteResponse = z.object({ code: z.string(), expiresAt: Millis });
 export type CreateInviteResponse = z.infer<typeof CreateInviteResponse>;
 
-export const CreateBotRequest = z.object({ name: Name, role: z.string().optional(), character: CharacterId.optional() });
+/** How many active AI members of his own a member who is not an admin may have. */
+export const MAX_OWN_BOTS = 1;
+export const CreateBotRequest = z.object({
+  name: Name,
+  role: z.string().optional(),
+  character: CharacterId.optional(),
+  /** Usable: admins only, the person the new AI member belongs to. A member who is not an admin always makes his own. */
+  ownerId: Id.optional(),
+});
 export type CreateBotRequest = z.infer<typeof CreateBotRequest>;
 export const CreateBotResponse = z.object({ member: Member, token: z.string() });
 export type CreateBotResponse = z.infer<typeof CreateBotResponse>;

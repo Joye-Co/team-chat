@@ -1559,6 +1559,7 @@ async fn machine_ownership_requests_reach_the_server_as_written() {
             &UpdateMachineRequest {
                 name: Some("书房的 Mac".into()),
                 owner: None,
+                vm: None,
                 parallel_runs: None,
             },
         )
@@ -1571,6 +1572,7 @@ async fn machine_ownership_requests_reach_the_server_as_written() {
         &UpdateMachineRequest {
             name: None,
             owner: Some(None),
+            vm: None,
             parallel_runs: None,
         },
     )
@@ -1581,7 +1583,30 @@ async fn machine_ownership_requests_reach_the_server_as_written() {
         &UpdateMachineRequest {
             name: None,
             owner: Some(Some(MACHINE_OWNER_ME.into())),
+            vm: None,
             parallel_runs: None,
+        },
+    )
+    .await
+    .unwrap();
+    // The VM size of a computer, and back to the computer's own.
+    h.update_machine(
+        "M1",
+        &UpdateMachineRequest {
+            vm: Some(Some(chat_core::proto::machine::VmSize {
+                vcpus: 2,
+                mem_mib: 4096,
+            })),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    h.update_machine(
+        "M1",
+        &UpdateMachineRequest {
+            vm: Some(None),
+            ..Default::default()
         },
     )
     .await
@@ -1617,16 +1642,18 @@ async fn machine_ownership_requests_reach_the_server_as_written() {
             .is_err()
     );
     let sent = http.with(|s| s.machine_requests.clone());
-    assert_eq!(sent.len(), 6);
+    assert_eq!(sent.len(), 8);
     assert_eq!(sent[0].0, "PATCH");
     assert_eq!(sent[0].2, json!({"name": "书房的 Mac"}));
     assert_eq!(sent[1].2, json!({"owner": null}));
     assert_eq!(sent[2].2, json!({"owner": "me"}));
-    assert_eq!(sent[3].0, "PUT");
-    assert_eq!(sent[3].1, "/v1/machines/M1/bots/B1");
-    assert_eq!(sent[3].2, json!({"repoPath": "/code/app"}));
-    assert_eq!(sent[4].2, json!({"repoPath": null}));
-    assert_eq!(sent[5].0, "DELETE");
+    assert_eq!(sent[3].2, json!({"vm": {"vcpus": 2, "memMib": 4096}}));
+    assert_eq!(sent[4].2, json!({"vm": null}));
+    assert_eq!(sent[5].0, "PUT");
+    assert_eq!(sent[5].1, "/v1/machines/M1/bots/B1");
+    assert_eq!(sent[5].2, json!({"repoPath": "/code/app"}));
+    assert_eq!(sent[6].2, json!({"repoPath": null}));
+    assert_eq!(sent[7].0, "DELETE");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

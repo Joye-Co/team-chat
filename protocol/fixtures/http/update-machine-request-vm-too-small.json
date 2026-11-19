@@ -1,0 +1,11 @@
+{
+  "kind": "UpdateMachineRequest",
+  "valid": false,
+  "description": "memMib is at least 1024",
+  "value": {
+    "vm": {
+      "vcpus": 2,
+      "memMib": 256
+    }
+  }
+}

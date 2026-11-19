@@ -1,0 +1,10 @@
+{
+  "kind": "UpdateMachineRequest",
+  "valid": true,
+  "value": {
+    "vm": {
+      "vcpus": 2,
+      "memMib": 4096
+    }
+  }
+}

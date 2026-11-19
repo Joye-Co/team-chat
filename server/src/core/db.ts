@@ -17,6 +17,8 @@ export interface MemberRow {
   weekly_budget_cents?: number | null;
   /** Usable (migration 0017_roles): 1 for a 所有者; absent before it ran. */
   team_owner?: number;
+  /** Usable (migration 0020_personal_ai): an AI member's own person; absent before it ran. */
+  owner_id?: string | null;
   /** Hide and delete (migration 0020): set when the AI member was deleted; absent before it ran. */
   deleted_at?: number | null;
 }
@@ -56,6 +58,7 @@ export function toMember(row: MemberRow): Member {
   if (character.success) m.character = character.data;
   if (row.reports_to) m.reportsTo = row.reports_to;
   if (typeof row.weekly_budget_cents === "number" && row.weekly_budget_cents >= 0) m.weeklyBudgetCents = row.weekly_budget_cents;
+  if (row.kind === "bot" && row.owner_id) m.ownerId = row.owner_id;
   return m;
 }
 

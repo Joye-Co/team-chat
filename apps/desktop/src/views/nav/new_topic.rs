@@ -457,6 +457,7 @@ mod mention_tests {
             character: None,
             team_owner: false,
             deleted: false,
+            owner_id: None,
         }
     }
 

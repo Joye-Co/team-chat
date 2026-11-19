@@ -338,7 +338,7 @@ pub(crate) fn enum_from<T: DeserializeOwned>(s: String) -> rusqlite::Result<T> {
     serde_json::from_value(serde_json::Value::String(s)).map_err(json_err)
 }
 
-pub(crate) const MEMBER_COLS: &str = "id, kind, name, role, level, avatar_url, deactivated, character, reports_to, weekly_budget_cents, team_owner, deleted";
+pub(crate) const MEMBER_COLS: &str = "id, kind, name, role, level, avatar_url, deactivated, character, reports_to, weekly_budget_cents, team_owner, deleted, owner_id";
 
 pub(crate) fn member_from_row(r: &Row<'_>) -> rusqlite::Result<Member> {
     let deactivated: bool = r.get(6)?;
@@ -363,6 +363,7 @@ pub(crate) fn member_from_row(r: &Row<'_>) -> rusqlite::Result<Member> {
         team_owner: r.get::<_, bool>(10)?.then_some(true),
         // Sent only when true.
         deleted: r.get::<_, bool>(11)?.then_some(true),
+        owner_id: r.get(12)?,
     })
 }
 

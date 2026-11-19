@@ -1,0 +1,9 @@
+{
+  "kind": "CreateMachineRequest",
+  "valid": true,
+  "description": "usable: an admin adds a machine that belongs to Alice",
+  "value": {
+    "name": "实习生电脑",
+    "ownerId": "01JBX0ALICE0000000000000AB"
+  }
+}

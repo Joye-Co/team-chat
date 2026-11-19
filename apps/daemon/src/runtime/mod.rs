@@ -66,6 +66,9 @@ pub struct RunSpec {
     /// Host folders a VM run shares with its VM besides the run folder, working folder and git
     /// dir (the run's cli root, the repository's cache). Only the firecracker executor reads it.
     pub vm_shares: Vec<PathBuf>,
+    /// `run.assign.vm`: the VM size an admin set for this machine. Only the firecracker
+    /// executor reads it, capped at `[vm] max_vcpus / max_mem_mib`.
+    pub vm: Option<crate::proto::VmSize>,
 }
 
 /// A session id the daemon passes on: 1-128 of `[A-Za-z0-9_-]` (it becomes a file name).

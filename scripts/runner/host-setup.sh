@@ -17,6 +17,14 @@
 # It does not touch SSH settings. Run it from its folder in a checkout (it installs siblings).
 # After an update of runner-vm or runner-vm.nft, run it again: it reinstalls both and reloads
 # the firewall.
+# VM slots per daemon user are in /etc/runner-vm.users (`<user> <first slot> <count>`); the team
+# user gets slots 0..63. More daemons on this host, each its own Unix user and machine token:
+#
+#   host-setup.sh add-user <user> <first slot> <count> <disk GB>
+#
+# makes the user (kvm group), a disk image of <disk GB> mounted at /srv/runner/u/<user> for its
+# runs, its slots in /etc/runner-vm.users and its sudoers entry for runner-vm, then prints how
+# to install its daemon. Run the whole script once before.
 # The AI members' home folders of earlier versions (/srv/runner/homes, their images in
 # /srv/runner/home-images) are retired: only the CLIs' session folders stay, so old topics can
 # resume; sign-ins and installed tools are dropped. Let the daemon finish its runs first: a home
@@ -27,6 +35,88 @@ FC_VERSION="${FC_VERSION:-latest}"
 RUNNER_USER="${RUNNER_USER:-runner}"
 RUNNER_HOME_DATA="/srv/runner"
 here="$(cd "$(dirname "$0")" && pwd)"
+USERS_FILE="${USERS_FILE:-/etc/runner-vm.users}"
+# The team user's slots: its daemon's slot_base 0 and up to 64 parallel runs.
+TEAM_SLOTS=64
+
+# users_add <user> <first> <count>: lists the user's VM slots in $USERS_FILE. Running it again
+# with the same range changes nothing; a range that overlaps another user's, or a second range
+# for a listed user, is refused.
+users_add() {
+  local user="$1" first="$2" count="$3" u f n
+  [[ "$user" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || { echo "bad user name: $user" >&2; return 1; }
+  [[ "$first" =~ ^[0-9]{1,5}$ && "$count" =~ ^[0-9]{1,5}$ ]] || { echo "slots must be numbers" >&2; return 1; }
+  first=$(( 10#$first )) count=$(( 10#$count ))
+  (( count >= 1 && first + count <= 16384 )) || { echo "slots must be 1 or more, below 16384" >&2; return 1; }
+  [[ -f "$USERS_FILE" ]] || install -m 644 /dev/null "$USERS_FILE"
+  while read -r u f n _; do
+    [[ -n "$u" && "$u" != \#* ]] || continue
+    f=$(( 10#$f )) n=$(( 10#$n ))
+    if [[ "$u" == "$user" ]]; then
+      (( f == first && n == count )) && return 0
+      echo "$user has slots $f..$(( f + n - 1 )) already in $USERS_FILE" >&2
+      return 1
+    fi
+    if (( first < f + n && f < first + count )); then
+      echo "slots $first..$(( first + count - 1 )) overlap $u's ($f..$(( f + n - 1 )))" >&2
+      return 1
+    fi
+  done < "$USERS_FILE"
+  echo "$user $first $count" >> "$USERS_FILE"
+  chmod 644 "$USERS_FILE"
+}
+
+# add_user <user> <first slot> <count> <disk GB>: another daemon user on this host (see the
+# header). Safe to run again.
+add_user() {
+  local user="$1" first="$2" count="$3" gb="$4"
+  [[ "$gb" =~ ^[0-9]{1,5}$ ]] && (( 10#$gb >= 1 )) || { echo "disk GB must be a number" >&2; return 1; }
+  [[ -x /usr/local/sbin/runner-vm && -d "$RUNNER_HOME_DATA/images" ]] ||
+    { echo "run host-setup.sh without arguments first" >&2; return 1; }
+  users_add "$user" "$first" "$count"
+  id "$user" >/dev/null 2>&1 || useradd --create-home --shell /bin/bash "$user"
+  passwd -l "$user" >/dev/null
+  usermod -aG kvm "$user"
+  loginctl enable-linger "$user"
+  # The user's firecracker opens the shared kernel and base image (read-only); /srv/runner
+  # lets it through to its own tree without listing the folder.
+  chmod 711 "$RUNNER_HOME_DATA"
+  chmod -R o+rX "$RUNNER_HOME_DATA/images" "$RUNNER_HOME_DATA/kernels"
+  install -d -o root -g root -m 711 "$RUNNER_HOME_DATA/u"
+  install -d -o root -g root -m 700 "$RUNNER_HOME_DATA/u-images"
+  local img="$RUNNER_HOME_DATA/u-images/$user.ext4" dir="$RUNNER_HOME_DATA/u/$user"
+  if [[ ! -f "$img" ]]; then
+    truncate -s "$(( 10#$gb ))G" "$img"
+    mkfs.ext4 -q -m 0 "$img"
+  fi
+  [[ -d "$dir" ]] || install -d -m 700 "$dir"
+  grep -qF "$img $dir " /etc/fstab || echo "$img $dir ext4 loop,nosuid,nodev,nofail 0 2" >> /etc/fstab
+  mountpoint -q "$dir" || mount "$dir"
+  chown "$user:$user" "$dir"
+  chmod 700 "$dir"
+  echo "$user ALL=(root) NOPASSWD: /usr/local/sbin/runner-vm" > "/etc/sudoers.d/runner-vm-$user"
+  chmod 440 "/etc/sudoers.d/runner-vm-$user"
+  visudo -cq
+  local slug
+  slug="$(jq -r .slug "$here/../../product.json" 2>/dev/null || echo '<slug>')"
+  cat <<NEXT
+== $user is ready: slots $first..$(( 10#$first + 10#$count - 1 )), $gb GB at $dir
+Next steps:
+  1. Add a machine for $user in the app (its own machine token) and save the token, as $user,
+     at ~$user/.config/$slug/machine-token with mode 600.
+  2. Install the daemon for $user:  $here/install-daemon.sh --owner $user
+  3. As $user (sudo -iu $user), write ~/.config/$slug/daemon.toml with:
+       token_file = "~/.config/$slug/machine-token"
+       work_root = "$dir/runs"
+       max_parallel_runs = 1
+       [vm]
+       kernel = "$RUNNER_HOME_DATA/kernels/vmlinux"     # shared, read-only
+       rootfs = "$RUNNER_HOME_DATA/images/base.ext4"    # shared, read-only
+       dir = "$dir/vms"
+       slot_base = $(( 10#$first ))
+     then run: ~/.local/bin/$slug-daemon doctor && ~/.local/bin/$slug-daemon install-service
+NEXT
+}
 
 # Retires the AI members' home folders of earlier versions (<homes>/<member>, each maybe a loop
 # mount of <images>/<member>.ext4): keeps only the CLIs' session folders, as a plain folder of
@@ -86,6 +176,15 @@ retire_homes() {
 [[ $EUID -eq 0 ]] || { echo "run as root" >&2; exit 1; }
 [[ -e /dev/kvm ]] || { echo "/dev/kvm is missing: this host cannot run Firecracker" >&2; exit 1; }
 
+case "${1:-}" in
+  "") ;;
+  add-user)
+    (( $# == 5 )) || { echo "usage: host-setup.sh add-user <user> <first slot> <count> <disk GB>" >&2; exit 1; }
+    add_user "$2" "$3" "$4" "$5"
+    exit 0 ;;
+  *) echo "usage: host-setup.sh [add-user <user> <first slot> <count> <disk GB>]" >&2; exit 1 ;;
+esac
+
 echo "== packages"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -q
@@ -128,6 +227,11 @@ loginctl enable-linger "$RUNNER_USER"
 install -d -o "$RUNNER_USER" -g "$RUNNER_USER" -m 750 \
   "$RUNNER_HOME_DATA" "$RUNNER_HOME_DATA/images" "$RUNNER_HOME_DATA/kernels" \
   "$RUNNER_HOME_DATA/daemon" "$RUNNER_HOME_DATA/vms"
+# Users of add-user reach their trees and the shared kernel and base image (see add_user).
+if [[ -d "$RUNNER_HOME_DATA/u" ]]; then
+  chmod 711 "$RUNNER_HOME_DATA"
+  chmod -R o+rX "$RUNNER_HOME_DATA/images" "$RUNNER_HOME_DATA/kernels"
+fi
 # An unused folder of earlier versions: the repositories' caches live in the daemon's work root.
 if [[ -d "$RUNNER_HOME_DATA/cache" ]]; then rmdir "$RUNNER_HOME_DATA/cache" 2>/dev/null || true; fi
 retire_homes "$RUNNER_HOME_DATA/homes" "$RUNNER_HOME_DATA/home-images"
@@ -180,6 +284,7 @@ EOF
 sysctl -q --system
 install -m 755 "$here/runner-vm" /usr/local/sbin/runner-vm
 install -m 644 "$here/runner-vm.nft" /etc/runner-vm.nft
+users_add "$RUNNER_USER" 0 "$TEAM_SLOTS"
 echo "$RUNNER_USER ALL=(root) NOPASSWD: /usr/local/sbin/runner-vm" > /etc/sudoers.d/runner-vm
 chmod 440 /etc/sudoers.d/runner-vm
 visudo -cq
