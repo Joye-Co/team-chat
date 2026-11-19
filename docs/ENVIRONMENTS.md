@@ -199,7 +199,7 @@ CARGO_TARGET_DIR=<your target dir> bun apps/daemon/e2e/local-e2e.ts \
 CHAT_URL=<e2e base> CHAT_TOKEN_FILE=<bot token file> bun examples/echo-bot.ts
 
 # Desktop app from the DMG against staging, signed in with a test bot token (never the owner's)
-Cahoots.app/Contents/MacOS/Cahoots --selftest-live <staging base> \
+<name>.app/Contents/MacOS/<name> --selftest-live <staging base> \
   --token-file ~/.config/team-chat/staging/<test bot>.token --report <json>
 ```
 
