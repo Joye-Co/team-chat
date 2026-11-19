@@ -4,6 +4,11 @@
   "workspaces": {
     "": {
       "name": "team-chat",
+      "devDependencies": {
+        "@chat/protocol": "workspace:*",
+        "@types/bun": "^1.4.4",
+        "typescript": "^7.0.2",
+      },
     },
     "ops/monitor": {
       "name": "@chat/monitor",
