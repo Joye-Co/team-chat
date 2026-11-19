@@ -31,7 +31,7 @@
 
 use std::{cell::RefCell, collections::HashMap, rc::Rc, sync::Arc};
 
-use artifact_view::{ArtifactEvent, Capabilities, RefMenu, Reject, Snapshot, VersionSpec, Viewer};
+use artifact_view::{ArtifactEvent, Capabilities, Failure, RefMenu, Snapshot, VersionSpec, Viewer};
 use gpui::{
     AnyWindowHandle, App, AppContext as _, Bounds, Context, DispatchPhase, Element, ElementId,
     Entity, GlobalElementId, Hitbox, HitboxBehavior, InspectorElementId, InteractiveElement as _,
@@ -324,7 +324,7 @@ impl WebEmbedState {
         &self,
         version: u32,
         reply_id: &serde_json::Value,
-        result: Result<serde_json::Value, Reject>,
+        result: Result<serde_json::Value, Failure>,
     ) -> bool {
         #[cfg(any(target_os = "macos", windows))]
         if let Some(n) = &self.native {
@@ -518,6 +518,7 @@ impl WebEmbedState {
             ArtifactEvent::ExternalLink { .. }
             | ArtifactEvent::VersionSelected { .. }
             | ArtifactEvent::Ref { .. }
+            | ArtifactEvent::RequestsEnded { .. }
             | ArtifactEvent::Closed => {}
         }
         cx.notify();

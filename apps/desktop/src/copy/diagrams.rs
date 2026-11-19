@@ -37,4 +37,11 @@ crate::copy! {
     OPEN_VIEWER = "打开查看器",
     TOO_DENSE = "图太大了，这里看不清",
     ALT = "{type}：{n} 个节点。",
+    // The frames of a sequence diagram, in place of the source's keywords.
+    BLOCK_LOOP = "循环",
+    BLOCK_ALT = "分支",
+    BLOCK_OPT = "可选",
+    BLOCK_PAR = "并行",
+    BLOCK_CRITICAL = "关键",
+    BLOCK_BREAK = "中断",
 }
