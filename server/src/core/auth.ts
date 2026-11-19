@@ -1,6 +1,8 @@
-import { sha256Hex } from "./crypto";
+import { sha256Hex, timingSafeEqualString } from "./crypto";
 import { type MemberRow, isTeamOwner, toMember } from "./db";
+import type { Env } from "./env";
 import { ApiError } from "./errors";
+import { logger } from "./logger";
 import type { Member } from "@chat/protocol";
 
 export interface AuthContext {
@@ -58,6 +60,25 @@ export async function authenticateToken(
   }
   const { token_id, revoked_at: _r, last_used_at: _l, ...memberRow } = row;
   return { memberId: row.id, tokenId: token_id, member: toMember(memberRow), row: memberRow };
+}
+
+/**
+ * The admin routes: the `x-admin-secret` header must equal the Worker secret `ADMIN_SECRET`.
+ * A server that has no such secret says so (reason `admin.secret_missing`), so a first-time
+ * operator does not recheck a value that was never the problem.
+ */
+export async function requireAdmin(request: Request, env: Env): Promise<void> {
+  const given = request.headers.get("x-admin-secret") ?? "";
+  const expected = env.ADMIN_SECRET ?? "";
+  if (!expected) {
+    logger.warn("ADMIN_SECRET is not set", { path: new URL(request.url).pathname });
+    throw new ApiError(
+      "unauthorized",
+      "the Worker secret ADMIN_SECRET is not set on this server: run `wrangler secret put ADMIN_SECRET`, then try again",
+      "admin.secret_missing",
+    );
+  }
+  if (!(await timingSafeEqualString(given, expected))) throw new ApiError("unauthorized", "invalid admin secret");
 }
 
 export function requireOwner(auth: AuthContext): void {

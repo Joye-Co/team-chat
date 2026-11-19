@@ -26,6 +26,8 @@ pub const MEMORY_SEARCH: &str = "memory.search";
 /// What the topic and the group produced: 产出, cards, decisions, members, a topic's state.
 pub const ARTIFACT_LIST: &str = "artifact.list";
 pub const ARTIFACT_GET: &str = "artifact.get";
+/// `chat-run artifact data` without `--file`: the current data of a 产出 version and its rev.
+pub const ARTIFACT_DATA_GET: &str = "artifact.data.get";
 pub const CARD_GET: &str = "card.get";
 pub const DECISIONS_LIST: &str = "decisions.list";
 pub const MEMBER_LIST: &str = "member.list";
@@ -41,6 +43,7 @@ pub const OPS: &[&str] = &[
     MEMORY_SEARCH,
     ARTIFACT_LIST,
     ARTIFACT_GET,
+    ARTIFACT_DATA_GET,
     CARD_GET,
     DECISIONS_LIST,
     MEMBER_LIST,
@@ -198,6 +201,15 @@ pub fn read_path(run: &str, op: &str, body: &Value) -> Result<String, Value> {
                 .map(|n| vec![format!("version={n}")])
                 .unwrap_or_default();
             Ok(format!("/v1/machine/runs/{run}/artifacts/{id}{}", query(q)))
+        }
+        ARTIFACT_DATA_GET => {
+            let id = id_field(body, "artifactId")?;
+            let Some(n) = number(body, "version", 1, u32::MAX as u64)? else {
+                return Err(err("invalid", None, "version is required"));
+            };
+            Ok(format!(
+                "/v1/machine/runs/{run}/artifacts/{id}/data?version={n}"
+            ))
         }
         CARD_GET => {
             let id = id_field(body, "messageId")?;
@@ -564,19 +576,23 @@ async fn get(local: &Local, body: &Value) -> Value {
 pub fn memory_body(body: &Value) -> Result<Value, Value> {
     let scope = body["scope"].as_str().unwrap_or("");
     if !matches!(scope, "member" | "person" | "group") {
-        return Err(err("invalid", None, "scope is member, person or group"));
+        return Err(err(
+            "invalid",
+            None,
+            "--scope must be member, person or group",
+        ));
     }
     let kind = body["kind"].as_str().unwrap_or("");
     if !MEMORY_KINDS.contains(&kind) {
         return Err(err(
             "invalid",
             None,
-            format!("kind is one of {}", MEMORY_KINDS.join(", ")),
+            format!("--kind must be one of {}", MEMORY_KINDS.join(", ")),
         ));
     }
     let text = body["text"].as_str().unwrap_or("").trim();
     if text.is_empty() || text.chars().count() > 500 {
-        return Err(err("invalid", None, "text is 1..500 characters"));
+        return Err(err("invalid", None, "--text needs 1-500 characters"));
     }
     let mut out = serde_json::json!({ "scope": scope, "kind": kind, "text": text });
     if let Some(w) = body["when"]
@@ -585,7 +601,7 @@ pub fn memory_body(body: &Value) -> Result<Value, Value> {
         .filter(|w| !w.is_empty())
     {
         if w.chars().count() > 300 {
-            return Err(err("invalid", None, "when is at most 300 characters"));
+            return Err(err("invalid", None, "--when takes at most 300 characters"));
         }
         out["when"] = Value::from(w);
     }
@@ -797,6 +813,22 @@ mod tests {
         assert_eq!(
             p(ARTIFACT_GET, json!({ "artifactId": "A1", "version": 3 })).unwrap(),
             "/v1/machine/runs/R1/artifacts/A1?version=3"
+        );
+        assert_eq!(
+            p(
+                ARTIFACT_DATA_GET,
+                json!({ "artifactId": "A1", "version": 2 })
+            )
+            .unwrap(),
+            "/v1/machine/runs/R1/artifacts/A1/data?version=2"
+        );
+        assert!(p(ARTIFACT_DATA_GET, json!({ "artifactId": "A1" })).is_err());
+        assert!(
+            p(
+                ARTIFACT_DATA_GET,
+                json!({ "artifactId": "a/b", "version": 1 })
+            )
+            .is_err()
         );
         assert_eq!(
             p(CARD_GET, json!({ "messageId": "M1" })).unwrap(),

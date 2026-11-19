@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "build": "bun build.ts",
+    "check": "bun check.ts",
     "dev": "bun serve.ts"
   }
 }

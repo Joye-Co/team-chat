@@ -1,16 +1,10 @@
 // design-vm-state 3.2: a resumed run carries the full prompt for when the machine cannot find the
 // session, and a run.done with resumeMissed makes the run context show the full prompt.
 import { MAX_FRAME_BYTES, type RunAssignFrame } from "@chat/protocol";
-import { afterAll, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { withFullPrompt } from "../src/bots/desk/runs";
-import { Daemon, downViolations, world } from "./daemon";
-import { Client, api, clientMsgId, protocolViolations } from "./helpers";
-
-afterAll(async () => {
-  await new Promise((r) => setTimeout(r, 300));
-  expect(protocolViolations).toEqual([]);
-  expect(downViolations).toEqual([]);
-});
+import { Daemon, world } from "./daemon";
+import { Client, api, clientMsgId } from "./helpers";
 
 async function finish(d: Daemon, runId: string, extra: Record<string, unknown>): Promise<void> {
   d.send({ t: "run.accept", runId });

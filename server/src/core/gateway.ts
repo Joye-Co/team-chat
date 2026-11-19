@@ -16,7 +16,7 @@ import {
 import { getMember, groupsOfMember, isGroupMember, listMembers, toMember, viewGroup } from "./db";
 import { type Env, gatewayStub, roomStub } from "./env";
 import type { WriteOrder } from "./room";
-import { ApiError, schemaReason, toErrorBody, unwrap } from "./errors";
+import { ApiError, issuesText, schemaReason, toErrorBody, unwrap } from "./errors";
 import { logger as baseLogger, type Logger } from "./logger";
 import { type MigrationStep, runMigrations } from "./migrations";
 import { LIMITS, TokenBucket } from "./ratelimit";
@@ -367,8 +367,7 @@ export class MemberGateway extends DurableObject<Env> {
         return { ok: false, rid, error: { code: "too_large", message: "answer exceeds 64 KiB" } };
       }
       const issue = result.error.issues.find((i) => schemaReason({}, i.message)) ?? result.error.issues[0];
-      const where = issue?.path.join(".") || "(root)";
-      const message = `invalid frame: ${where} ${issue?.message ?? ""}`.trim();
+      const message = `invalid frame: ${issuesText(result.error.issues)}`;
       const reason = schemaReason(obj, issue?.message, issue?.path);
       if (reason === "card.limits" && /exceeds 64 KiB/.test(issue?.message ?? "")) {
         return { ok: false, rid, error: { code: "too_large", message: "card exceeds 64 KiB" } };

@@ -44,7 +44,22 @@ export function toErrorBody(err: unknown): ErrorBody {
 
 export function unwrap<T>(r: Result<T>): T {
   if (r.ok) return r.value;
-  throw new ApiError(r.error.code, r.error.message, r.error.reason, undefined, r.error.memberIds);
+  throw new ApiError(r.error.code, r.error.message, r.error.reason, r.error.retryAfterMs, r.error.memberIds);
+}
+
+/** How many problems of one refused frame or card a message lists. */
+export const MAX_LISTED_ISSUES = 5;
+
+/**
+ * `<path> <message>` of every issue of a refused frame or card, so that one answer names all
+ * that has to change: the issues that name a rule first, at most five, and how many more.
+ */
+export function issuesText(issues: readonly { path: readonly PropertyKey[]; message: string }[]): string {
+  const named = issues.filter((i) => issueReason(i.message));
+  const rest = issues.filter((i) => !issueReason(i.message));
+  const lines = [...new Set([...named, ...rest].map((i) => `${i.path.map(String).join(".") || "(root)"} ${i.message}`.trim()))];
+  const more = lines.length - MAX_LISTED_ISSUES;
+  return lines.slice(0, MAX_LISTED_ISSUES).join("; ") + (more > 0 ? `; and ${more} more` : "");
 }
 
 /** The `reason` of a frame that failed its schema: a named card rule, or a deferred secret input. */

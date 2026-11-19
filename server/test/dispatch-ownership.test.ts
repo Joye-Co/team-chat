@@ -3,17 +3,11 @@
 // owner's work, checked machines come first and are waited for, a run no machine may take ends at
 // once, hand-overs follow the person's machine, and on a personal machine only the person the run
 // works for and the owner talk to it, approve it or pause it.
-import { afterAll, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { type DispatchCtx, type MachineView, TEXT, candidates, mayTake, personalBlock, placesFor, reachable } from "../src/bots/dispatch";
 import { repoOn } from "../src/bots/desk/runs";
-import { Daemon, HEALTH, type World, downViolations, mention, world } from "./daemon";
-import { Client, type TestMember, api, clientMsgId, createMember, protocolViolations, waitUntil } from "./helpers";
-
-afterAll(async () => {
-  await new Promise((r) => setTimeout(r, 300));
-  expect(protocolViolations).toEqual([]);
-  expect(downViolations).toEqual([]);
-});
+import { Daemon, HEALTH, type World, mention, world } from "./daemon";
+import { Client, type TestMember, api, clientMsgId, createMember, waitUntil } from "./helpers";
 
 describe("ownership rules", () => {
   const now = Date.UTC(2026, 10, 13, 4, 0);

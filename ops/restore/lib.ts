@@ -100,7 +100,7 @@ export class AdminApi {
 export interface ArchiveSource {
   describe: string;
   list(prefix: string): Promise<string[]>;
-  get(key: string): Promise<Uint8Array>;
+  get(key: string): Promise<Uint8Array<ArrayBuffer>>;
 }
 
 export function httpSource(api: AdminApi): ArchiveSource {
@@ -150,7 +150,7 @@ export function dirSource(dir: string): ArchiveSource {
   };
 }
 
-export function gunzipText(bytes: Uint8Array): string {
+export function gunzipText(bytes: Uint8Array<ArrayBuffer>): string {
   return new TextDecoder().decode(Bun.gunzipSync(bytes));
 }
 
