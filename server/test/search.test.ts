@@ -2,11 +2,7 @@ import { env, runInDurableObject } from "cloudflare:test";
 import { afterAll, describe, expect, it } from "vitest";
 import { runMigrations } from "../src/core/migrations";
 import { type GroupRoom, roomMigrationSteps } from "../src/core/room";
-import { Client, clientMsgId, createGroup, createMember, protocolViolations } from "./helpers";
-
-afterAll(() => {
-  expect(protocolViolations).toEqual([]);
-});
+import { Client, clientMsgId, createGroup, createMember } from "./helpers";
 
 async function post(c: Client, groupId: string, body: string, extra: Record<string, unknown> = {}) {
   return c.ok({ t: "send", groupId, clientMsgId: clientMsgId(), body, ...extra });

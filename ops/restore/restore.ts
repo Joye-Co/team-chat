@@ -193,7 +193,7 @@ export function copyIdMap(fromGroup: string, toGroup: string, ndjsonTexts: strin
   return map;
 }
 
-function remapGzip(text: string, map: Map<string, string>, ndjson: boolean): Uint8Array {
+function remapGzip(text: string, map: Map<string, string>, ndjson: boolean): Uint8Array<ArrayBuffer> {
   const out = ndjson
     ? text
         .split("\n")

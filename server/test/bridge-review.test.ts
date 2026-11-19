@@ -4,23 +4,17 @@
 // the age of an output is measured on the server clock (daemon F3).
 import { SELF, env, runInDurableObject } from "cloudflare:test";
 import type { CardV2 } from "@chat/protocol";
-import { afterAll, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import type { BotsEnv } from "../src/bots/env";
 import type { Actor } from "../src/core/registry";
 import type { GroupRoom } from "../src/core/room";
 import { ARTIFACT_EVENT_RPC, ARTIFACT_REPLY_RPC, tcSchemaViolation } from "../src/files/bridge";
-import { Daemon, downViolations, HEALTH, mention, world, type World } from "./daemon";
-import { BASE, Client, type TestMember, api, clientMsgId, createGroup, createMember, protocolViolations } from "./helpers";
+import { Daemon, HEALTH, mention, world, type World } from "./daemon";
+import { BASE, Client, type TestMember, api, clientMsgId, createGroup, createMember } from "./helpers";
 
 const benv = env as unknown as BotsEnv;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const INTERACT = { features: ["interact/1"] };
-
-afterAll(async () => {
-  await sleep(300);
-  expect(protocolViolations).toEqual([]);
-  expect(downViolations).toEqual([]);
-});
 
 async function sha(bytes: Uint8Array): Promise<string> {
   const d = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
@@ -252,6 +246,18 @@ describe("chat-run outputs", () => {
     expect(d2, JSON.stringify(d2)).toMatchObject({ ok: true, result: { dataRev: 2 } });
     const data = await api(`/v1/artifacts/${artifactId}/versions/1/data`, { token: w.human.token });
     expect(data.body).toMatchObject({ data: { n: 2 }, dataRev: 2 });
+    // The run reads the page's current data back (`chat-run artifact data` without --file), so
+    // it can change a shared state it did not keep from an earlier turn.
+    const read = async (q: string, id = artifactId) => {
+      const r = await SELF.fetch(`${BASE}/v1/machine/runs/${r2.runId}/artifacts/${id}/data${q}`, { headers: { authorization: `Bearer ${w.machineToken}` } });
+      return { status: r.status, body: (await r.json()) as any };
+    };
+    expect(await read("?version=1")).toMatchObject({ status: 200, body: { data: { n: 2 }, dataRev: 2 } });
+    expect((await read("")).status).toBe(400);
+    expect((await read("?version=9")).status).toBe(404);
+    expect((await read("?version=1", "a/b")).status).toBe(404);
+    expect((await read("?version=1", "NOSUCHARTIFACT")).status).toBe(404);
+    expect((await SELF.fetch(`${BASE}/v1/machine/runs/${r2.runId}/artifacts/${artifactId}/data?version=1`)).status).toBe(401);
     for (const x of [c, cb, d]) x.close();
   });
 

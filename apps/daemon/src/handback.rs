@@ -244,6 +244,34 @@ fn tail_lines(text: &str, n: usize) -> String {
         .join("\n")
 }
 
+/// The person in a note: the server gives the member id, not a name.
+fn they(by: &str) -> String {
+    if by.is_empty() {
+        "They".to_string()
+    } else {
+        format!("They (member id {by})")
+    }
+}
+
+/// What the CLI gets when a person resumes it with words after a pause without a take-over:
+/// the words alone would read as a message from nobody, and the CLI does not know it was
+/// stopped. `held`: how long, None when this daemon did not hold it (the words still come from
+/// a person).
+pub fn pause_note(by: &str, held: Option<Duration>, words: &str) -> String {
+    let prefix = crate::product::auto_prefix();
+    let words = cut_chars(words.trim(), MAX_NOTE_CHARS);
+    match held {
+        Some(held) => format!(
+            "{prefix} A person paused you and resumed you now. {} stopped you for {}; nothing \
+ran meanwhile, so check what depends on time (a token, a timer, a server you started) before you \
+go on.\nTheir note: {words}",
+            they(by),
+            held_words(held)
+        ),
+        None => format!("{prefix} A person resumed you.\nTheir note: {words}"),
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn compose(
     by: &str,
@@ -255,13 +283,10 @@ fn compose(
     lines: usize,
     command_chars: usize,
 ) -> String {
-    let who = if by.is_empty() {
-        "A person".to_string()
-    } else {
-        format!("Member {by}")
-    };
     let mut s = format!(
-        "[team-chat] A person held your computer. {who} paused you for {} and ran {} in {}",
+        "{} A person held your computer. {} paused you for {} and ran {} in {}",
+        crate::product::auto_prefix(),
+        they(by),
         held_words(held),
         match ran.len() {
             0 => "no commands".to_string(),
@@ -310,12 +335,7 @@ fn compose(
         }
     ));
     if let Some(w) = words.map(str::trim).filter(|w| !w.is_empty()) {
-        let name = if by.is_empty() {
-            "The person".to_string()
-        } else {
-            format!("Member {by}")
-        };
-        s.push_str(&format!("{name}'s note: {w}\n"));
+        s.push_str(&format!("Their note: {w}\n"));
     }
     s.push_str("Check these changes before you continue; do not redo what the person did.");
     s
@@ -380,8 +400,8 @@ mod tests {
             &ch,
             Some("I fixed .env"),
         );
-        let want = "[team-chat] A person held your computer. Member U1 paused you for 12 min and \
-ran 3 commands in /w/lines/k/work:
+        let want = "[team-chat] A person held your computer. They (member id U1) paused you for \
+12 min and ran 3 commands in /w/lines/k/work:
 1. `npm test` → failed (exit 1)
    c
    d
@@ -391,9 +411,29 @@ ran 3 commands in /w/lines/k/work:
 2. `git commit -am \"fix env\"` → ok
 3. `sleep 900` → stopped after 10 min
 Work folder changes: HEAD a1b2c3 → d4e5f6; changed: .env.example
-Member U1's note: I fixed .env
+Their note: I fixed .env
 Check these changes before you continue; do not redo what the person did.";
         assert_eq!(n, want);
+    }
+
+    #[test]
+    fn words_after_a_plain_pause_say_who_paused_and_for_how_long() {
+        let n = pause_note(
+            "U1",
+            Some(Duration::from_secs(12 * 60 + 5)),
+            " use the staging db ",
+        );
+        assert_eq!(
+            n,
+            "[team-chat] A person paused you and resumed you now. They (member id U1) stopped \
+you for 12 min; nothing ran meanwhile, so check what depends on time (a token, a timer, a server \
+you started) before you go on.\nTheir note: use the staging db"
+        );
+        // Not held by this daemon: the words are still a person's.
+        assert_eq!(
+            pause_note("", None, "go on"),
+            "[team-chat] A person resumed you.\nTheir note: go on"
+        );
     }
 
     #[test]
@@ -429,7 +469,7 @@ Check these changes before you continue; do not redo what the person did.";
         assert!(n.chars().count() <= MAX_NOTE_CHARS, "{}", n.chars().count());
         // Every command is still listed, and the person's words are kept.
         assert!(n.contains("20. `make t19`"));
-        assert!(n.contains("Member U1's note: hi"));
+        assert!(n.contains("Their note: hi"));
         let huge: Vec<Ran> = (0..400)
             .map(|i| ran(&format!("echo {i} {}", "y".repeat(100)), End::Ok, ""))
             .collect();

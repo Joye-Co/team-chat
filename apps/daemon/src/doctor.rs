@@ -2,13 +2,125 @@
 
 use crate::config::Config;
 use std::fmt::Write;
+use std::path::Path;
 
-pub async fn report(cfg: &Config) -> (String, bool) {
+/// What the server said when `doctor` asked it with the machine token.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Server {
+    /// It answered and took the token.
+    Accepted,
+    /// It answered, on a path that does not look at the token.
+    Reachable,
+    /// It answered that the token is not a machine's (HTTP 401 or 403).
+    Refused(u16),
+    /// It answered something else: most likely `server_url` is another site.
+    Answered(u16),
+    Unreachable(String),
+    /// Not asked: there is no token to ask with (a config problem says so).
+    NoToken,
+}
+
+impl Server {
+    fn line(&self, cfg: &Config) -> String {
+        match self {
+            Server::Accepted => "reachable, the machine token is accepted".into(),
+            Server::Reachable => "reachable (the token was not checked)".into(),
+            Server::Refused(s) => format!(
+                "REFUSED the machine token (HTTP {s}): check token_file {} or add this computer again in the app",
+                cfg.token_file.display()
+            ),
+            Server::Answered(s) => format!("answered HTTP {s}: check server_url"),
+            Server::Unreachable(e) => format!("NOT REACHABLE: {e}"),
+            Server::NoToken => "not checked (no token)".into(),
+        }
+    }
+
+    fn ok(&self) -> bool {
+        matches!(self, Server::Accepted | Server::Reachable | Server::NoToken)
+    }
+
+    /// Reads an HTTP answer of the update check. A 404 of our server is JSON
+    /// (`{"error":{"code":"not_found",...}}`): "no release" comes after the token was checked.
+    fn from_answer(status: u16, body: &[u8]) -> Server {
+        match status {
+            200..=299 => Server::Accepted,
+            401 | 403 => Server::Refused(status),
+            404 => {
+                let error = serde_json::from_slice::<serde_json::Value>(body)
+                    .ok()
+                    .map(|v| v["error"].clone());
+                match error {
+                    Some(e) if e["message"] == "no release" => Server::Accepted,
+                    Some(e) if e["code"] == "not_found" => Server::Reachable,
+                    _ => Server::Answered(status),
+                }
+            }
+            s => Server::Answered(s),
+        }
+    }
+}
+
+/// Asks the server over plain HTTP whether it takes the machine token: the request the daemon's
+/// self-update makes. Never the machine link: the server keeps one link per machine, so a
+/// `doctor` on the link would cut off the daemon that is running.
+pub async fn check_server(cfg: &Config) -> Server {
+    let Ok(token) = cfg.read_token() else {
+        return Server::NoToken;
+    };
+    let client = match reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+    {
+        Ok(c) => c,
+        Err(e) => return Server::Unreachable(e.to_string()),
+    };
+    let url = format!(
+        "{}/v1/machine/updates/latest?platform={}",
+        cfg.server_url.trim_end_matches('/'),
+        chat_protocol::updates::PLATFORM_LINUX_X86_64
+    );
+    match client.get(&url).bearer_auth(token).send().await {
+        Ok(res) => {
+            let status = res.status().as_u16();
+            let body = res.bytes().await.unwrap_or_default();
+            Server::from_answer(status, &body)
+        }
+        Err(e) => {
+            // reqwest's own text is only "error sending request": the cause says why.
+            let e = e.without_url();
+            let mut said = e.to_string();
+            let mut cause = std::error::Error::source(&e);
+            while let Some(c) = cause {
+                said = format!("{said}: {c}");
+                cause = c.source();
+            }
+            Server::Unreachable(said)
+        }
+    }
+}
+
+/// The report and whether nothing is wrong. `config_path` is the file `cfg` was read from;
+/// `server` is [`check_server`]'s answer (None: not asked, the line is left out).
+pub async fn report(cfg: &Config, config_path: &Path, server: Option<Server>) -> (String, bool) {
     let mut s = String::new();
-    let problems = cfg.problems();
+    let problems = cfg.problems_at(config_path);
+    let _ = writeln!(s, "daemon:       {}", crate::selfupdate::VERSION);
+    let _ = writeln!(s, "config:       {}", config_path.display());
     let _ = writeln!(s, "server:       {}", cfg.server_url);
+    if let Some(server) = &server {
+        let _ = writeln!(s, "server check: {}", server.line(cfg));
+    }
     let _ = writeln!(s, "token file:   {}", cfg.token_file.display());
-    let _ = writeln!(s, "machine:      {} {:?}", cfg.name, cfg.labels);
+    let _ = writeln!(
+        s,
+        "machine:      {}{}",
+        cfg.name,
+        if cfg.labels.is_empty() {
+            String::new()
+        } else {
+            format!(" (labels: {})", cfg.labels.join(", "))
+        }
+    );
     let _ = writeln!(s, "work root:    {}", cfg.work_root.display());
     let _ = writeln!(s, "max parallel: {}", cfg.max_parallel_runs);
     let git = crate::health::which("git");
@@ -34,7 +146,7 @@ pub async fn report(cfg: &Config) -> (String, bool) {
     // network as they are on macOS and Linux (see ASIDE_WINDOWS_SANDBOX).
     #[cfg(windows)]
     if cfg.runtimes.values().any(|rt| rt.kind == "codex") {
-        let _ = writeln!(s, "codex side chat: {}", CODEX_SIDE_CHAT_ON_WINDOWS);
+        let _ = writeln!(s, "codex:        {}", CODEX_SIDE_CHAT_ON_WINDOWS);
     }
     let h = crate::health::health(cfg, 0);
     let _ = writeln!(
@@ -50,7 +162,7 @@ pub async fn report(cfg: &Config) -> (String, bool) {
     );
     let _ = writeln!(s, "runtimes:");
     let clis = crate::health::discover_clis(cfg).await;
-    let mut ok = problems.is_empty() && git.is_some();
+    let mut missing_clis = 0;
     for c in &clis {
         let _ = writeln!(
             s,
@@ -100,7 +212,7 @@ pub async fn report(cfg: &Config) -> (String, bool) {
 stopped on this machine: update Claude Code to {a}.{b}.{patch} or later"
             );
         }
-        ok &= c.available;
+        missing_clis += usize::from(!c.available);
     }
     if h.disk_free_bytes < cfg.min_free_gb * (1 << 30) {
         let _ = writeln!(
@@ -124,7 +236,34 @@ stopped on this machine: update Claude Code to {a}.{b}.{patch} or later"
     for p in &problems {
         let _ = writeln!(s, "problem: {p}");
     }
-    let _ = writeln!(s, "{}", if ok { "OK" } else { "NOT OK" });
+    // What made it NOT OK, so the last line says where to look above.
+    let count = |n: usize, one: &str, many: &str| match n {
+        0 => None,
+        1 => Some(format!("1 {one}")),
+        n => Some(format!("{n} {many}")),
+    };
+    let wrong: Vec<String> = [
+        count(problems.len(), "problem", "problems"),
+        git.is_none().then(|| "git is missing".to_string()),
+        count(
+            missing_clis,
+            "runtime's CLI not found",
+            "runtimes' CLIs not found",
+        ),
+        server
+            .as_ref()
+            .is_some_and(|sv| !sv.ok())
+            .then(|| "the server check failed".to_string()),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    let ok = wrong.is_empty();
+    if ok {
+        let _ = writeln!(s, "OK");
+    } else {
+        let _ = writeln!(s, "NOT OK: {}", wrong.join(", "));
+    }
     (s, ok)
 }
 
@@ -150,7 +289,7 @@ again as root"
 /// What `doctor` says about a side chat of Codex on Windows.
 #[cfg(windows)]
 pub const CODEX_SIDE_CHAT_ON_WINDOWS: &str =
-    "read-only (no writes); its commands can still reach the network on Windows";
+    "a side chat is read-only (no writes); its commands can still reach the network on Windows";
 
 #[cfg(test)]
 mod tests {
@@ -163,6 +302,55 @@ mod tests {
         .unwrap()
         .vm
         .unwrap()
+    }
+
+    #[test]
+    fn the_server_check_reads_the_answer() {
+        let no_release = br#"{"error":{"code":"not_found","message":"no release"}}"#;
+        assert_eq!(Server::from_answer(200, b"{}"), Server::Accepted);
+        assert_eq!(Server::from_answer(404, no_release), Server::Accepted);
+        assert_eq!(
+            Server::from_answer(
+                404,
+                br#"{"error":{"code":"not_found","message":"no route"}}"#
+            ),
+            Server::Reachable
+        );
+        assert_eq!(Server::from_answer(404, b"<html>"), Server::Answered(404));
+        assert_eq!(Server::from_answer(401, b""), Server::Refused(401));
+        assert_eq!(Server::from_answer(502, b""), Server::Answered(502));
+        assert!(Server::Accepted.ok() && Server::Reachable.ok() && Server::NoToken.ok());
+        assert!(!Server::Refused(401).ok() && !Server::Unreachable("x".into()).ok());
+    }
+
+    #[tokio::test]
+    async fn the_report_starts_with_the_version_and_config_and_ends_with_what_is_wrong() {
+        let cfg = Config::parse(
+            "server_url = \"http://127.0.0.1:1\"\ntoken_file = \"/nonexistent/token\"\nname = \"box\"\nlabels = [\"a\", \"b\"]\n[runtimes.gone]\nkind = \"acp\"\ncommand = \"/nonexistent/agent\"\n",
+        )
+        .unwrap();
+        let at = Path::new("/etc/x/daemon.toml");
+        let (report, ok) = report(&cfg, at, Some(Server::Refused(401))).await;
+        assert!(!ok);
+        let mut lines = report.lines();
+        assert_eq!(
+            lines.next().unwrap(),
+            format!("daemon:       {}", crate::selfupdate::VERSION)
+        );
+        assert_eq!(lines.next().unwrap(), "config:       /etc/x/daemon.toml");
+        assert!(
+            report.contains("machine:      box (labels: a, b)"),
+            "{report}"
+        );
+        assert!(
+            report.contains("server check: REFUSED the machine token (HTTP 401): check token_file"),
+            "{report}"
+        );
+        let last = report.lines().last().unwrap();
+        assert!(last.starts_with("NOT OK: "), "{last}");
+        assert!(last.contains("1 runtime's CLI not found"), "{last}");
+        assert!(last.contains("the server check failed"), "{last}");
+        assert!(last.contains("problem"), "{last}");
     }
 
     #[test]

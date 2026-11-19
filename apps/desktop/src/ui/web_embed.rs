@@ -810,6 +810,8 @@ fn over(top: gpui::Hsla, under: gpui::Hsla) -> gpui::Hsla {
 /// O-4): its rules sit in the `tc-base` cascade layer, so any color or type
 /// a page that a member made sets for itself wins.
 fn base_css(pad: Pixels, fill: bool, cx: &App) -> String {
+    use crate::ui::native::tokens::{radius, space};
+    let px_of = |p: Pixels| f32::from(p).round();
     let k = crate::ui::native::native_colors(cx);
     // The surface the page sits on: the background when it fills a content
     // area, else its card's fill (see `WebEmbed::render`).
@@ -821,7 +823,8 @@ fn base_css(pad: Pixels, fill: bool, cx: &App) -> String {
     let scheme = if theme::is_dark(cx) { "dark" } else { "light" };
     format!(
         ":root{{--tc-pad:{pad}px;--tc-bg:{bg};--tc-fg:{fg};--tc-muted:{muted};--tc-border:{border};\
---tc-fill:{fill};--tc-primary:{fg};color-scheme:{scheme}}}\
+--tc-fill:{fill};--tc-primary:{fg};--tc-danger:{danger};--tc-radius:{radius}px;--tc-gap:{gap}px;\
+--tc-font-mono:{mono};color-scheme:{scheme}}}\
 @layer tc-base{{\
 html{{font:14px/22px -apple-system,BlinkMacSystemFont,'PingFang SC','Helvetica Neue','Segoe UI Variable Text','Segoe UI','Microsoft YaHei UI',sans-serif;\
 color:var(--tc-fg);background:transparent;-webkit-font-smoothing:antialiased}}\
@@ -836,9 +839,15 @@ th,td{{border-bottom:1px solid var(--tc-border);padding:8px 12px;text-align:star
 [data-tc-num]{{text-align:right!important}}\
 th{{font-size:12px;font-weight:500;color:var(--tc-muted)}}\
 hr{{border:0;border-top:1px solid var(--tc-border);margin:16px 0}}\
-code,pre{{font-family:ui-monospace,'SF Mono',Menlo,'Cascadia Mono',Consolas,monospace;font-size:13px}}\
-pre{{background:var(--tc-fill);border:1px solid var(--tc-border);border-radius:8px;padding:12px;overflow:auto}}}}",
-        pad = f32::from(pad).round(),
+code,pre{{font-family:var(--tc-font-mono);font-size:13px}}\
+pre{{background:var(--tc-fill);border:1px solid var(--tc-border);border-radius:8px;padding:12px;overflow:auto}}\
+button[data-tc=primary]{{background:var(--tc-primary);border-color:var(--tc-primary);color:var(--tc-bg)}}\
+button[data-tc=primary]:hover:not(:disabled),button[data-tc=primary]:active:not(:disabled){{background:var(--tc-primary);opacity:.9}}}}",
+        pad = px_of(pad),
+        danger = hex(k.red),
+        radius = px_of(radius::CONTROL),
+        gap = px_of(space::S12),
+        mono = "ui-monospace,'SF Mono',Menlo,'Cascadia Mono',Consolas,monospace",
         bg = hex(k.content),
         fg = hex(k.label),
         muted = hex(k.secondary),

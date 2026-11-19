@@ -95,20 +95,22 @@ function serialize<T>(key: string, fn: () => Promise<T>): Promise<T> {
   return next;
 }
 
-function take(hook: HookRef, op: DeliverArgs["op"]): boolean {
+/** Takes one post of the hook's bucket: `null`, or the milliseconds to wait when it is empty. */
+function take(hook: HookRef, op: DeliverArgs["op"]): number | null {
   let b = buckets.get(hook.id);
   if (!b) {
     // GitHub sends bursts (check suites plus workflow runs per push), so its burst is larger.
     b = op === "github" ? new TokenBucket(LIMITS.write.rate, 60) : new TokenBucket(LIMITS.write.rate, LIMITS.write.burst);
     buckets.set(hook.id, b);
   }
-  return b.take();
+  return b.take() ? null : b.waitMs();
 }
 
 registerGatewayRpc("hooks.deliver", async (gw, raw): Promise<Result<unknown>> => {
   const args = raw as DeliverArgs;
   try {
-    if (!take(args.hook, args.op)) throw new ApiError("rate_limited", "too many posts");
+    const waitMs = take(args.hook, args.op);
+    if (waitMs !== null) throw new ApiError("rate_limited", "too many posts", undefined, waitMs);
     const value = await serialize<unknown>(args.hook.id, () =>
       args.op === "in" ? deliverIn(gw.env, gw.sql, args) : deliverGithub(gw.env, gw.sql, gw.log, args),
     );

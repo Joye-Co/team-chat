@@ -159,7 +159,7 @@ async function patchLocked(
   const dir = await directory(room);
   const { row, ext, card, state } = await loadCard(room, f.messageId, dir);
   if (row.author_id !== a.id) throw new ApiError("forbidden", "only the author can patch a card");
-  if (f.baseRev !== card.rev) throw new ApiError("conflict", "the card has a newer rev", "card.stale_rev");
+  if (f.baseRev !== card.rev) throw new ApiError("conflict", `the card is at rev ${card.rev}, not ${f.baseRev}: read it again and patch that rev`, "card.stale_rev");
   const cause = f.cause ? checkCause(room, f.cause, a.id, row.id) : undefined;
   const next = applyPatch(card, f.ops);
   checkEmbeds(room.sql, next);
@@ -170,8 +170,11 @@ async function patchLocked(
     patchBuckets.set(key, bucket);
     if (patchBuckets.size > 2000) patchBuckets.clear();
   }
-  if (!bucket.take()) throw new ApiError("rate_limited", "too many patches for this card");
-  const nextState = await stateForWrite(room, dir, next, state, row.author_id, row.topic_id, now, row.id);
+  if (!bucket.take()) {
+    const ms = Math.ceil(bucket.waitMs());
+    throw new ApiError("rate_limited", `too many patches for this card: wait ${Math.ceil(ms / 1000)} s and send the same patch again`, undefined, ms);
+  }
+  const nextState = await stateForWrite(room, dir, next, state, row.author_id, row.topic_id, now, row.id, { prevFrom: card.ask?.from });
   const shown = cause ? shownCause(room.sql, cause) : undefined;
   if (shown) nextState.lastCause = shown;
   let ack: CardPatchAck | undefined;

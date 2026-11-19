@@ -1,6 +1,13 @@
 # Design v3
 
-**v3 is the design of TeamChat 1.1.0.** It replaces v2.2. The owner found v2 "太朴素、太草稿了，不像
+> Two later files are binding and win over this one where they differ: the finish spec
+> [design/COMPLETENESS.md](design/COMPLETENESS.md) (pure black and white, one token module, one
+> scale, every state drawn) and the client rules [design/NATIVE.md](design/NATIVE.md), with
+> [design/WINDOWS.md](design/WINDOWS.md) for the Windows differences. NATIVE.md overrides §1–§8 and
+> §12–§13 here, and COMPLETENESS.md §4 replaces the §17 checklist. This file still owns Card v2
+> semantics (§7.10, §7.13–§7.17), member status words (§9), content (§10) and accessibility (§11).
+
+**v3 is the design of the app in 1.1.0.** It replaces v2.2. The owner found v2 "太朴素、太草稿了，不像
 production-ready" and asked for a polished, finished feel, more motion, a rethought left side and a
 right side modeled on Claude Desktop. v3 keeps the v2 rules that worked (96 pt composer, closed
 type scale, hover states on everything, color means something) and changes the rest: an ink-on-paper
@@ -171,8 +178,10 @@ border or a 1 pt top or bottom line in the same color; the result must match the
 
 ### 2.7 gpui-component theme mapping
 
-One JSON theme set (`apps/desktop/assets/theme.json`, `light` and `dark`). App-owned roles (state
-colors, member tints, shadows, `screen*`) live in `theme::Colors`.
+One token module (`apps/desktop/src/ui/native/tokens.rs`; its `Palette` holds the `light` and
+`dark` values), which `apps/desktop/src/theme.rs` loads into gpui-component's theme. App-owned
+roles (state colors, member tints, shadows, `screen*`) are read through `theme::Colors`, a view of
+the same palette.
 
 | Slot(s) | Token |
 | --- | --- |
@@ -356,7 +365,7 @@ and an accessible name; a 1 pt × 16 `line` divider before the rail toggle.
 | Page | State element | Right buttons |
 | --- | --- | --- |
 | Topic | One of: amber tag `需要你审 PR #61` (22 pt, radius 6, `you-bg`, 6 pt `you` dot, `meta` 500 `you-ink`) when the viewer is waited on; `live` 6 pt dot + `Forge 在做 3/5 · 跑一万条消息的压测` `ui` `ink-2` while a member works; `等小王` `ink-3`; `做完了 · 09:55` `ink-3`; nothing when open | 单独问 (`message-circle`, ⌘;), 产出 (`layers`), 电脑 (`monitor`, only while a member's computer is in use for this topic, with a 6 pt `live` dot at the top right), 改动 (`file-diff`, only with a change), divider, rail toggle (`panel-right`) |
-| 首页 | Date `11 月 3 日 周一` `meta` `ink-3` | — (the 正在做 column has its own toggle) |
+| 首页 | Date `11月3日 周一` `meta` `ink-3` | — (the 正在做 column has its own toggle) |
 | 群 | Purpose `ui` `ink-3`, member stack (20 pt, −4 overlap, max 5) + `9 位成员` | 单独问, 产出, `ellipsis`; 群资料 toggle in the pane header |
 | 成员 | Count `13` mono `ink-3`; detail: breadcrumb `成员 /` + name | 单独问, 产出, 电脑, rail toggle |
 | 产出 | Breadcrumb `群 /` + title + kind tag (`网页`) | Version picker (32 pt secondary: `v3` mono 600 + `今天 09:40` + chevron), `分享` secondary, `external-link` (open in its own window), 单独问; 来龙去脉 toggle in the pane header |
@@ -424,7 +433,7 @@ or irreversible actions open a confirm step (§7.10 批准).
 | Body | `body` 14/22, 4 pt under the meta line; paragraph gap 8 |
 | Event line | 20 pt, inset to the text column: 16 pt tile or glyph + `meta` `ink-3` (`Jojo 转给了 Forge`, `Forge 开始用 Mac mini`) + mono time |
 | Decision record | A full-width 40 pt row on `sunken`, radius 10: `check` 13 `ok` + `Joye 选了「改成指数退避，放进同一个 PR」` `ui` + mono time + text action `看问题` |
-| Date divider | Centered `11 月 3 日 周一` `meta` `ink-3` between two 1 pt `line` rules |
+| Date divider | Centered `11月3日 周一` `meta` `ink-3` between two 1 pt `line` rules |
 | File row | 300 wide, radius 10, 1 pt `line`, `lift`, padding 6 12 6 6, gap 12: a 72 × 44 real-content thumbnail (radius 6; a video shows its first frame or the `screen` miniature with a play disc), name `ui` 500, meta mono `0:18 · 4.2 MB` |
 | Reactions | 24 pt pills, radius 12, `sunken`, emoji 14 + count mono; mine 1 pt `ink-3` ring |
 | Hover | `hover` fill on the row + the hover toolbar (`bg`, `pop`, 28 pt buttons: reaction, quote, 单独问 about this, more) |
@@ -456,13 +465,13 @@ Topic rail cards, in this order:
 
 | Card | Content |
 | --- | --- |
-| 成员 | Everyone in the 群: the AI members at work here first, marked `在做` at the right, then those that took part (`参与过`), then the asker (`提出`), then the rest; 16 avatar + name + 岗位. No member is marked 负责: several can work in one 话题 (design-relay §3.6, `Topic.participants`) |
+| 成员 | Everyone in the 群: the member a paused 按顺序做 is stuck at first, marked `卡住了` like its bar, then the AI members at work here, marked `在做` at the right, then those that took part (`参与过`), then the asker (`提出`), then the rest; 16 avatar + name + 岗位. No member is marked 负责: several can work in one 话题 (design-relay §3.6, `Topic.participants`) |
 | 计划 | The plan: ✓ done (`ink-3`, mono duration), ● current (`live`, breathing), ○ todo; segments bar (4 pt, radius 2, gap 4: done `ink-3`, current `live`, todo `line-2`). When done it collapses to `✓ 5 步都做完了 · 41 分钟` with `展开` |
 | 改动 | Title `ui` 500; `#61 +214 −63` mono (`ok-ink` / `bad-ink`) with a 5-cell diffstat; `12 个文件`; checks `✓ 3/3 项检查通过`; status tag (`未合并`, `合并中`, `已合并`). No merge button here: the decision is the pinned card |
 | 产出 | A real-content thumbnail (title + tiny table) 96 tall, radius 8, `line`; name `ui` 500 + `v2 · 09:55` mono; extra rows for recordings (`▶` tile 32 × 22 + name + `0:42`) |
 | 用到的决定 | `check` + decision text `ui` + `Joye 09:31` (16 avatar, mono) |
 | 电脑 | `monitor` 28 tile + `Mac mini` + `Forge 用完了 · 09:52`; right `○ 空闲` or `● 在用` (`live`) + text action `看 Forge 的电脑` |
-| 用时和成本 | `用时 41 分钟 · ¥6.20` mono + right `今天 09:14–09:55` |
+| 用时和花费 | `用时 41 分钟 · ¥6.20` mono + right `今天 09:14–09:55` |
 
 The 按顺序做 bar (design-relay §3.6) sits at the top of a 话题 whose work goes in an order a person
 wrote (`@A → @B → @C`), above the plan cards, on the composer insets: radius 10, a 1 pt `line`
@@ -472,7 +481,7 @@ alone in `ink-3`) joined by `→`; at the right `第 2/3 步` or `都做完了` 
 outline sm 重试 (only while stopped at a step) and 停止 (while it runs or is stopped at a step). A
 second line in `ink-2` says why it stopped (`停在 Scout：卡住了`, `Joye 停止了`) or what the step
 waits for (`等 Scout 手上的做完`). It stays a day after it ended. The composer shows, above the text,
-`按顺序做：Forge → Scout → Forge` for an order on the first line, `想让他们按顺序做？用 → 连起来` when a
+`按顺序做：Forge → Scout → Forge` for an order on the first line, `想让他们按顺序做？用 -> 连起来，比如 @{first} -> @{second}` when a
 message names two or more AI members, and, in red, why the server refused an order.
 
 ### 7.9 Member identity: avatars, status dots and tags
@@ -623,8 +632,8 @@ with `…`. The band says the state once; the body never says it again.
 | 打分 (`rating`) | `评分` | Five 36 pt buttons (radius 8, no border) in a radio group, range `1–5 分` at the right; the chosen value says its label `清楚 · 4 分` |
 | 量表 (`scale`) | `量表` | 0–10 segmented row, ends `0 · 不会` and `10 · 一定会` |
 | 确认 (`confirm`) | `是或否` | Two buttons (`可以` primary, `不行` secondary) that answer at once; no submit |
-| 图片选择 (`imageChoice`) | `图片选择` | 2–4 images with a letter tile (20, `sunken`) + label under each; chosen: 1 pt `ink` border; footer `用这张` primary + `看大图` |
-| 矩阵 (`matrix`) | `矩阵，每行选一个` | Rows = items, columns = options (max 8 × 5), radio cells, `已选 2/4 行` |
+| 图片选择 (`imageChoice`) | `图片选择` | 2–4 images with a label under each; chosen: 1 pt `ink` border; footer `用这张` primary + `看大图` |
+| 矩阵 (`matrix`) | `矩阵，每行选一个`; `矩阵，每行最多选一个` when not every row is required | Rows = items, columns = options (max 8 × 5), radio cells, `已选 2/4 行`; when only some rows are required, those rows carry `必答` |
 | 时间段 (`slots`) | `选一个时间段` | Day columns of 52 pt slot cells (radius 9) with a mono time and `都能来` (`ok` check) or `缺 Alex` / `缺 2 人`; chosen: `sunken` + 1 pt `ink` border |
 | 投票 (`poll`) | `已投 7/13` + `今天 18:00 截止` | 44 pt option rows (radius 9) with the result as an `ink` 10 % fill behind the label, `12 票 · 40%` mono, voter tiles when public; my vote: 1 pt `ink` border + the `你投的` tag; `还没投：…` under; a voted viewer sees the grey band |
 
@@ -733,7 +742,7 @@ step; a diff line or hunk; a box on an evidence screenshot; a diagram node; an e
 | `问这里` | After 300 ms of rest, a gpui-component ghost xsmall button with `↳` at the part's top-right (table row: right after the row's name, 「B 站 [问这里]」, without changing the row height; when the name leaves no room in the first column, at the row end, centered on the row; in a card table it floats over the row end so the number columns stay at the right edge. Chart: in the tooltip; diagram: beside the node). Not shown on answer controls |
 | ⌥-click | Adds the part at once, also on controls (it does not pick the option); while ⌥ is held, parts show the outline |
 | Context menu | `就这里提问`, `单独问这里`, `复制`; on the card header `就这张卡提问` |
-| Keyboard | Tab into a block, arrows move a 2 pt `ink-3` part ring, ⌥↵ adds the part, ⇧⌥↵ the whole block |
+| Keyboard | Tab into a block, arrows move a 2 pt `ink-3` part ring, ↵ or ⌥↵ adds the part, ⇧⌥↵ the whole block |
 | Added | The part flashes `sel` for 600 ms and keeps a quiet `已引用` mark until the message is sent or the chip removed. From 首页, 群 or a 产出, TeamChat opens the 话题 and the toast says `已放进话题的输入框` |
 
 **Composer chips**: a row above the text input (beside the quote chip), wrapping; chip 26 pt,
@@ -904,8 +913,9 @@ row `sel`. **Detail** (max 480): header 48 tile with ring + name `card-title` + 
 card with title, `● 在跑…`, labeled plan segments, an 排队 row), **这周** (three stat cells: 完成的话题
 `6` + `平均 38 分钟`, 产出 `4` + `3 个 PR · 1 个网页`, 成本 `¥132` + `上限 ¥300` + a bar), **最近交付** (ref rows
 with state tags `未合并 · 等你审` `you-ink`, `已合并`), **最近的问题** (`circle-alert` `bad` + text + `卡住了 · 昨天
-23:10` + `重试`). Right pane **工作环境**: 电脑 (live thumbnail + `Mac mini 在用` + disk bar), 需要你批准的事
-(`lock` rows: 合并到 main, 发布到生产, 改生产环境配置, 单次花费超过 ¥50; note `做这些事之前，Forge 会先发卡片等你批准。`;
+23:10` + `重试`). Right pane **工作环境**: 电脑 (live thumbnail + `Mac mini 在用` + disk bar), 要先批准的事
+(`lock` rows: 合并到 main, 发布到生产, 改生产环境配置; note `做这些事之前，Forge 会先发卡片等你批准。`; a muted line
+without a lock under them, `单次花费超过 ¥50 时提醒成员`, because the limit stops nothing;
 `修改` opens the settings form), 能用的工具 (name + scope tag `可以提 PR`, `只读`), 用到的决定. Stats come from
 the client runs cache and `BotRun.usage`.
 
@@ -916,7 +926,7 @@ margins): embedded when the child WKWebView works, else a snapshot with `打开`
 Choices inside a member-made page are forwarded to that member (`artifact.event`); the page shows
 the record `你选了「B 站」· 10:12 · 已发给 Ledger`. Right pane **来龙去脉**: 来自话题 (check + topic + `拾光增长 ·
 做完了 09:40` + chevron; 做的人 / 要求 rows with tiles and tags), 版本 (rows `v3 加了渠道拆分 今天 09:40`, selected
-`sel`; `和 v2 对比`), 页面里的回应, 用到的决定, 被引用. Switching versions never animates; charts draw once
+`sel`), 页面里的回应, 用到的决定, 被引用. Switching versions never animates; charts draw once
 per version.
 
 ### 8.10 Settings → 外观 (new) and the rest
@@ -1106,9 +1116,9 @@ each in light and dark. The app's screenshot self-test has a scene per artboard,
 same team data, so a capture can be compared side by side at 2x.
 
 Sync rules:
-- One token source per side: the HELMET2 block for the artboards; `theme.json` + `theme::Colors`
-  for the app. A value change updates this file, the artboard helmet and `theme.json` in one
-  commit.
+- One token source per side: the HELMET2 block for the artboards;
+  `apps/desktop/src/ui/native/tokens.rs` (loaded by `apps/desktop/src/theme.rs`) for the app. A
+  value change updates this file, the artboard helmet and `tokens.rs` in one commit.
 - Sizes are Rust enums or constants in `ui/` (`TextStyle`, `ControlSize`, `Radius`, `Space`), so an
   off-scale value does not compile. Views never write a color, size or duration literal.
 - Each visual pull request adds before and after captures at 2x in both themes.

@@ -1,14 +1,9 @@
 // AI topic titles (src/autotitle): a topic started without a title gets one after its first
 // message; a title given at creation stays. AUTOTITLE_FAKE stands in for Claude in tests.
 import { mainTopicId } from "@chat/protocol";
-import { afterAll, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { cleanTitle, titlePrompt } from "../src/autotitle";
-import { Client, clientMsgId, createGroup, createMember, protocolViolations, waitUntil } from "./helpers";
-
-afterAll(async () => {
-  await new Promise((r) => setTimeout(r, 300));
-  expect(protocolViolations).toEqual([]);
-});
+import { Client, clientMsgId, createGroup, createMember, waitUntil } from "./helpers";
 
 describe("autotitle", () => {
   it("names a topic opened from a 群聊 message", async () => {

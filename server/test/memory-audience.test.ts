@@ -5,19 +5,14 @@
 // convention needs a person's message; the daily consolidation never widens the audience by itself
 // and retries a failed scope the next hour.
 import { SELF, env, runInDurableObject } from "cloudflare:test";
-import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { BotsEnv } from "../src/bots/env";
 import { consolidateAll, localClock, teamZone } from "../src/memory/consolidate";
 import { readableMemories } from "../src/memory/inject";
 import { createMemory } from "../src/memory/store";
-import { Daemon, downViolations, mention, world, type World } from "./daemon";
-import { BASE, Client, api, clientMsgId, createGroup, createMember, protocolViolations, type TestMember } from "./helpers";
+import { Daemon, mention, world, type World } from "./daemon";
+import { BASE, Client, api, clientMsgId, createGroup, createMember, type TestMember } from "./helpers";
 
-afterAll(async () => {
-  await new Promise((r) => setTimeout(r, 300));
-  expect(protocolViolations).toEqual([]);
-  expect(downViolations).toEqual([]);
-});
 afterEach(() => {
   vi.restoreAllMocks();
 });

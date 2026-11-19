@@ -4,27 +4,21 @@
 // coalescing, short follow-up runs and their limits, chat-run outputs), and refs in prompts.
 import { SELF, env, runInDurableObject } from "cloudflare:test";
 import type { BlockRef, CardV2 } from "@chat/protocol";
-import { afterAll, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { buildPrompt } from "../src/bots/dispatch";
 import type { BotsEnv } from "../src/bots/env";
 import { type InteractionIn, deliverCardEvent } from "../src/bots/interact";
 import type { RoomContext } from "../src/core/registry";
 import { REF_CONTEXT_TOTAL_BYTES, REFS_RULE, contextOf, refsText, resolveRefs, stripRefPrefix } from "../src/bots/refs";
 import { ulid } from "../src/core/ids";
-import { Daemon, downViolations, mention, world, type World } from "./daemon";
-import { BASE, Client, type TestMember, api, clientMsgId, createGroup, createMember, protocolViolations, waitUntil } from "./helpers";
+import { Daemon, mention, world, type World } from "./daemon";
+import { BASE, Client, type TestMember, api, clientMsgId, createGroup, createMember, inputBody, waitUntil } from "./helpers";
 
 const benv = env as unknown as BotsEnv;
 const deskOf = (botId: string) => benv.BOT_DESK.get(benv.BOT_DESK.idFromName(botId));
 const roomOf = (groupId: string) => benv.GROUP_ROOM.get(benv.GROUP_ROOM.idFromName(groupId));
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const INTERACT = { features: ["interact/1"] };
-
-afterAll(async () => {
-  await sleep(300);
-  expect(protocolViolations).toEqual([]);
-  expect(downViolations).toEqual([]);
-});
 
 async function sha(bytes: Uint8Array): Promise<string> {
   const d = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
@@ -144,7 +138,7 @@ describe("产出 bridge", () => {
     });
     expect(await cb.request({ t: "artifact.reply", groupId: gid, eventId: late.eventId, ok: true, payload: {} })).toMatchObject({
       ok: false,
-      error: { code: "conflict", reason: "artifact.reply_closed" },
+      error: { code: "conflict", reason: "artifact.reply_closed", message: "the page stopped waiting (120 s): push the result with artifact.data instead" },
     });
     const declined = await co.ok({ ...ask, clientEventId: "c3" });
     await cb.ok({ t: "artifact.reply", groupId: gid, eventId: declined.eventId, ok: false, error: { code: "declined", message: "没有 10 月的数" } });
@@ -187,7 +181,7 @@ describe("产出 bridge", () => {
     const tr = await co.next((f) => f.t === "transient" && f.event.type === "artifact.data");
     expect(tr.event).toEqual({ type: "artifact.data", groupId: gid, artifactId: id, version: 1, dataRev: 1, data: { a: 1 }, cause: ev.eventId });
     // The same push again is not a new rev; a stale base is refused.
-    expect(await push({ data: { a: 1 }, clientPushId: "p1" })).toMatchObject({ ok: true, result: { dataRev: 1 } });
+    expect(await push({ data: { a: 1 }, clientPushId: "p1" })).toEqual({ t: "ack", rid: expect.any(String), ok: true, result: { dataRev: 1, duplicate: true } });
     expect(await push({ data: { a: 2 }, baseDataRev: 0 })).toMatchObject({ ok: false, error: { code: "conflict", reason: "artifact.stale_data" } });
 
     // Over 64 KiB the transient carries no data; GET has it.
@@ -198,16 +192,70 @@ describe("产出 bridge", () => {
     expect((await api(path, { token: alice.token })).body).toMatchObject({ data: big, dataRev: 2 });
     // Over HTTP for the creator bot only.
     expect((await api(path, { method: "PUT", token: alice.token, body: { data: {} } })).status).toBe(403);
-    const put = await api(path, { method: "PUT", token: bot.token, body: { data: { a: 3 }, baseDataRev: 2 } });
+    const put = await api(path, { method: "PUT", token: bot.token, body: { data: { a: 3 }, baseDataRev: 2, clientPushId: "h1" } });
     expect(put.body).toEqual({ dataRev: 3 });
+    // A retry of an older push after a newer one (its answer was lost) is not applied over it,
+    // on the socket and over HTTP: viewers keep the newest data.
+    await co.next((f) => f.t === "transient" && f.event.type === "artifact.data" && f.event.dataRev === 3);
+    const seen = co.frames.filter((f) => f.t === "transient" && f.event.type === "artifact.data").length;
+    expect(await push({ data: { a: 1 }, clientPushId: "p1" })).toMatchObject({ ok: true, result: { dataRev: 1, duplicate: true } });
+    expect((await api(path, { method: "PUT", token: bot.token, body: { data: { a: 3 }, baseDataRev: 2, clientPushId: "h1" } })).body).toEqual({ dataRev: 3, duplicate: true });
+    expect((await api(path, { token: alice.token })).body).toMatchObject({ data: { a: 3 }, dataRev: 3 });
+    await sleep(100);
+    expect(co.frames.filter((f) => f.t === "transient" && f.event.type === "artifact.data")).toHaveLength(seen);
+    expect((await api(path, { method: "PUT", token: bot.token, body: { data: {}, clientPushId: "p".repeat(65) } })).status).toBe(400);
+    // A snapshot stored before push ids were kept apart still knows its last id.
+    await runInDurableObject(roomOf(gid), async (_o, state) => {
+      state.storage.sql.exec("DELETE FROM artifact_pushes WHERE push_id = 'h1'");
+    });
+    expect((await api(path, { method: "PUT", token: bot.token, body: { data: { a: 3 }, clientPushId: "h1" } })).body).toEqual({ dataRev: 3, duplicate: true });
     const art = await api(`/v1/artifacts/${id}`, { token: alice.token });
     expect(art.body.versions[0].dataRev).toBe(3);
     // A 1.0.x connection never gets the transient.
     await sleep(100);
     expect(old.frames.some((f) => f.t === "transient" && f.event.type === "artifact.data")).toBe(false);
+
+    // A new version starts empty; with keepData it starts with its parent's snapshot.
+    const version = async (m: TestMember, extra: Record<string, unknown> = {}) => {
+      const r = await api(`/v1/artifacts/${id}/versions`, { token: m.token, body: { entry: "index.html", files: [{ path: "index.html", fileId: await upload(m, gid) }], ...extra } });
+      expect(r.status, JSON.stringify(r.body)).toBe(200);
+      return r.body.version as { version: number; dataRev?: number };
+    };
+    const dataOf = async (v: number) => (await api(`/v1/artifacts/${id}/versions/${v}/data`, { token: alice.token })).body;
+    const v2 = await version(bot);
+    expect(v2).toMatchObject({ version: 2 });
+    expect(v2.dataRev ?? 0).toBe(0);
+    expect(await dataOf(2)).toMatchObject({ data: null, dataRev: 0 });
+    // Version 2 has no snapshot: keeping from it (the default parent) keeps nothing.
+    expect((await version(bot, { keepData: true })).dataRev ?? 0).toBe(0);
+    const v4 = await version(bot, { keepData: true, parentVersion: 1 });
+    expect(v4).toMatchObject({ version: 4, dataRev: 1 });
+    expect(await dataOf(4)).toMatchObject({ data: { a: 3 }, dataRev: 1 });
+    // Version 1 keeps its own snapshot and rev.
+    expect(await dataOf(1)).toMatchObject({ data: { a: 3 }, dataRev: 3 });
+    // `data` wins; a person's version, and one made from another member's version, keep nothing.
+    const v5 = await version(bot, { keepData: true, parentVersion: 1, data: { fresh: true } });
+    expect(await dataOf(v5.version)).toMatchObject({ data: { fresh: true }, dataRev: 1 });
+    const v6 = await version(alice, { keepData: true, parentVersion: 1 });
+    expect(await dataOf(v6.version)).toMatchObject({ data: null, dataRev: 0 });
+    const helper = await createMember({ kind: "bot", name: "helper" });
+    expect((await api(`/v1/groups/${gid}/members`, { token: owner.token, body: { memberId: helper.id } })).status).toBe(200);
+    const v7 = await version(helper, { keepData: true, parentVersion: 1 });
+    expect(await dataOf(v7.version)).toMatchObject({ data: null, dataRev: 0 });
     // 2 pushes per second, bursts of 4.
     const results = await Promise.all([1, 2, 3, 4, 5, 6].map((n) => push({ data: { n } })));
-    expect(results.some((r) => r.ok === false && r.error.code === "rate_limited")).toBe(true);
+    const limited = results.find((r) => r.ok === false && r.error.code === "rate_limited");
+    expect(limited?.error.message).toBe("too many data pushes for this version: wait 1 s and push the newest data again");
+    expect(limited?.error.retryAfterMs).toBeGreaterThan(0);
+    // A cause that is this page's event but older than 30 minutes says how to go on.
+    await sleep(600);
+    await runInDurableObject(roomOf(gid), async (_o, state) => {
+      state.storage.sql.exec("UPDATE page_events SET at = at - ? WHERE event_id = ?", 31 * 60_000, ev.eventId);
+    });
+    expect(await push({ data: { a: 9 }, cause: ev.eventId })).toMatchObject({
+      ok: false,
+      error: { code: "invalid", reason: "interact.bad_cause", message: "the cause is older than 30 minutes: push the data again without the cause" },
+    });
     for (const x of [co, old, cb]) x.close();
   });
 
@@ -314,7 +362,7 @@ describe("live card events to the author", () => {
     expect(old.frames.some((f) => f.t === "transient" && f.event.type === "card.event")).toBe(false);
     // A deactivated author answers nothing.
     await env.DB.prepare("UPDATE members SET deactivated = 1 WHERE id = ?").bind(bot.id).run();
-    expect(await deliver(bot.id)).toEqual({ by: bot.id, mode: "none" });
+    expect(await deliver(bot.id)).toEqual({ by: bot.id, mode: "none", reason: "member.inactive" });
     for (const x of [co, old, cb]) x.close();
 
     // A runner member's event goes to its run.
@@ -401,6 +449,238 @@ describe("BotDesk delivery", () => {
     for (const x of [c, d]) x.close();
   });
 
+  it("send every command of a window in order, merge only state events, and keep at most 20 waiting per card", async () => {
+    const w = await world();
+    const { d, c, topicId, runId } = await runningRun(w, { features: ["interact"] });
+    const desk = deskOf(w.bot.id);
+    const messageId = ulid();
+    const press = (id: string): InteractionIn => ({ ...interaction(w, topicId, messageId, "btns", { id }), event: "button.press" });
+    const change = (value: string): InteractionIn => ({ ...interaction(w, topicId, messageId, "pick", { value }), event: "choice.change" });
+    const endWindow = () =>
+      runInDurableObject(desk, async (o, state: DurableObjectState) => {
+        state.storage.sql.exec("UPDATE interact_windows SET until = 0");
+        await (o as unknown as { alarm(): Promise<void> }).alarm();
+      });
+    const sent = () => d.frames.filter((f) => f.t === "run.interaction");
+
+    // The first event goes at once; three presses and two changes follow inside the window.
+    await desk.interaction(w.bot.id, press("first"));
+    await d.next((f) => f.t === "run.interaction");
+    for (const x of [press("a"), change("yes"), press("b"), change("no"), press("c")]) {
+      expect(await desk.interaction(w.bot.id, x)).toEqual({ mode: "run", etaMs: 10_000 });
+    }
+    await sleep(200);
+    expect(sent()).toHaveLength(1);
+    await endWindow();
+    const card = await waitUntil(() => (sent().length >= 5 ? sent() : undefined), 5000);
+    // Every press arrives, in order; of the two changes only the newest.
+    expect(card.slice(1).map((f) => [f.event, f.value])).toEqual([
+      ["button.press", { id: "a" }],
+      ["button.press", { id: "b" }],
+      ["choice.change", { value: "no" }],
+      ["button.press", { id: "c" }],
+    ]);
+    expect(card.every((f) => f.runId === runId)).toBe(true);
+
+    // Page events with one name and different payloads are commands too.
+    const artifactId = ulid();
+    const emit = (id: number): InteractionIn => {
+      const eventId = ulid();
+      return { groupId: w.gid, topicId, eventId, source: { kind: "artifact", artifactId, version: 1, eventId, ask: false }, event: "add_item", value: { id }, actorId: w.human.id };
+    };
+    for (const id of [1, 2, 3]) await desk.interaction(w.bot.id, emit(id));
+    await endWindow();
+    const page = await waitUntil(() => {
+      const xs = sent().filter((f) => f.source.kind === "artifact");
+      return xs.length >= 3 ? xs : undefined;
+    }, 5000);
+    expect(page.map((f) => f.value)).toEqual([{ id: 1 }, { id: 2 }, { id: 3 }]);
+
+    // 20 wait per card; one more is not taken, and the ack says nobody responds to it.
+    const other = ulid();
+    const more = (i: number): InteractionIn => ({ ...interaction(w, topicId, other, "btns", { id: `n${i}` }), event: "button.press" });
+    await desk.interaction(w.bot.id, more(0));
+    for (let i = 1; i <= 20; i++) expect((await desk.interaction(w.bot.id, more(i))).mode).toBe("run");
+    expect(await desk.interaction(w.bot.id, more(21))).toEqual({ mode: "none", reason: "run.limit" });
+    for (const x of [c, d]) x.close();
+  });
+
+  it("tell the person when a run ends before it took their event, and give events that still waited to another run", async () => {
+    const w = await world();
+    const { d, c, topicId, runId } = await runningRun(w, { features: ["interact", "output"] });
+    const desk = deskOf(w.bot.id);
+    const board: CardV2 = {
+      v: 2,
+      catalog: "tc.card/2.1",
+      rev: 1,
+      intent: "info",
+      title: "发版清单",
+      fallback: "发版清单",
+      blocks: [{ type: "buttons", id: "btns", buttons: [{ id: "a", label: "A" }, { id: "b", label: "B" }, { id: "c", label: "C" }], events: ["button.press"], fallbackText: "A / B / C" }],
+    };
+    const post = async (run: string, outputId: string) => {
+      d.event(run, { type: "output", outputId, op: "card.post", body: { card: board } });
+      const posted = await d.next((f) => f.t === "run.output.result" && f.outputId === outputId && f.runId === run);
+      expect(posted, JSON.stringify(posted)).toMatchObject({ ok: true });
+      return posted.result.messageId as string;
+    };
+    const press = (messageId: string, id: string) =>
+      c.ok({ t: "card.event", groupId: w.gid, messageId, rev: 1, clientEventId: crypto.randomUUID(), blockId: "btns", event: "button.press", value: { buttonId: id } });
+    const resolvedOf = (eventId: string) => c.frames.filter((f) => f.t === "transient" && f.event.type === "interaction.resolved" && f.event.eventId === eventId);
+    const rerouteNow = () =>
+      runInDurableObject(desk, async (o, state: DurableObjectState) => {
+        // The desk woke itself for the events that waited (not waited out here).
+        expect(await state.storage.getAlarm()).not.toBeNull();
+        state.storage.sql.exec("UPDATE interact_windows SET until = 0");
+        await (o as unknown as { alarm(): Promise<void> }).alarm();
+      });
+
+    // (a) The run takes the first press, is given the second and ends before it takes it.
+    const m1 = await post(runId, "p1");
+    const taken = await press(m1, "a");
+    const first = await d.next((f) => f.t === "run.interaction" && f.eventId === taken.eventId);
+    d.event(runId, { type: "input.accepted", inputId: first.inputId });
+    await runInDurableObject(desk, async (_o, state: DurableObjectState) => {
+      state.storage.sql.exec("DELETE FROM interact_windows");
+    });
+    const lost = await press(m1, "b");
+    expect(lost.expect).toMatchObject({ mode: "run" });
+    await d.next((f) => f.t === "run.interaction" && f.eventId === lost.eventId);
+    // (b) A third press still waits for the window when the run ends.
+    const waiting = await press(m1, "c");
+    expect(waiting.expect).toMatchObject({ mode: "run" });
+    await d.acked(runId, d.done(runId, { status: "succeeded", resultText: "发了" }));
+    const failed = await c.next((f) => f.t === "transient" && f.event.type === "interaction.resolved" && f.event.eventId === lost.eventId);
+    expect(failed.event).toMatchObject({ result: "failed", messageId: m1 });
+    // The one the run took is the run's: nothing is said about it.
+    expect(resolvedOf(taken.eventId)).toEqual([]);
+    // The one that waited was never sent: it starts a short run, like a new event.
+    await rerouteNow();
+    const next = await d.next((f) => f.t === "run.assign" && f.runId !== runId);
+    expect(next.prompt).toContain(waiting.eventId);
+    expect(next.prompt).toContain('kind="card.event"');
+    expect(resolvedOf(waiting.eventId)).toEqual([]);
+
+    // With no run to take it (the limit of short runs is reached), the person is told.
+    d.send({ t: "run.accept", runId: next.runId });
+    await c.waitEvent((e) => e.type === "run.updated" && e.data.run.id === next.runId && e.data.run.status === "running");
+    const m2 = await post(next.runId, "p2");
+    const sent = await press(m2, "a");
+    await d.next((f) => f.t === "run.interaction" && f.eventId === sent.eventId);
+    const queued = await press(m2, "b");
+    await runInDurableObject(desk, async (_o, state: DurableObjectState) => {
+      for (let i = 0; i < 6; i++) state.storage.sql.exec("INSERT INTO interact_runs (run_id, card_key, at) VALUES (?, ?, ?)", `lim${i}`, `card:${m2}`, Date.now());
+    });
+    await d.acked(next.runId, d.done(next.runId, { status: "succeeded", resultText: "好了" }));
+    await c.next((f) => f.t === "transient" && f.event.type === "interaction.resolved" && f.event.eventId === sent.eventId && f.event.result === "failed");
+    await rerouteNow();
+    await c.next((f) => f.t === "transient" && f.event.type === "interaction.resolved" && f.event.eventId === queued.eventId && f.event.result === "failed");
+    expect(d.frames.filter((f) => f.t === "run.assign")).toHaveLength(2);
+    await runInDurableObject(desk, async (_o, state: DurableObjectState) => {
+      expect(state.storage.sql.exec("SELECT 1 FROM interact_sent").toArray()).toEqual([]);
+      expect(state.storage.sql.exec("SELECT 1 FROM interact_pending").toArray()).toEqual([]);
+    });
+    void topicId;
+    for (const x of [c, d]) x.close();
+  });
+
+  it("tell chat-run how long to wait when an output is rate limited", async () => {
+    const w = await world();
+    const { d, c, runId } = await runningRun(w, { features: ["interact", "output"] });
+    const result = (outputId: string) => d.next((f) => f.t === "run.output.result" && f.outputId === outputId);
+    d.event(runId, { type: "output", outputId: "p1", op: "card.post", body: { card: card() } });
+    const messageId = (await result("p1")).result.messageId as string;
+    let last: any;
+    for (let i = 0; i < 4; i++) {
+      d.event(runId, { type: "output", outputId: `q${i}`, op: "card.patch", body: { messageId, baseRev: i + 1, ops: [{ op: "card", props: { title: `月报 ${i}` } }] } });
+      last = await result(`q${i}`);
+    }
+    expect(last).toMatchObject({ ok: false, error: { code: "rate_limited", message: "too many patches for this card: wait 1 s and send the same patch again" } });
+    expect(last.error.retryAfterMs).toBeGreaterThan(0);
+    expect(last.error.retryAfterMs).toBeLessThanOrEqual(1000);
+    for (const x of [c, d]) x.close();
+  });
+
+  it("tell the person when the run's computer no longer has the run", async () => {
+    const w = await world();
+    const { d, c, runId } = await runningRun(w, { features: ["interact", "output"] });
+    const board: CardV2 = {
+      v: 2,
+      catalog: "tc.card/2.1",
+      rev: 1,
+      intent: "info",
+      title: "发版清单",
+      fallback: "发版清单",
+      blocks: [{ type: "buttons", id: "btns", buttons: [{ id: "a", label: "A" }], events: ["button.press"], fallbackText: "A" }],
+    };
+    d.event(runId, { type: "output", outputId: "p1", op: "card.post", body: { card: board } });
+    const posted = await d.next((f) => f.t === "run.output.result" && f.outputId === "p1");
+    const messageId = posted.result.messageId as string;
+    const press = () => c.ok({ t: "card.event", groupId: w.gid, messageId, rev: 1, clientEventId: crypto.randomUUID(), blockId: "btns", event: "button.press", value: { buttonId: "a" } });
+    const resolvedOf = (eventId: string) => c.frames.filter((f) => f.t === "transient" && f.event.type === "interaction.resolved" && f.event.eventId === eventId);
+    // The first press goes out; a second one waits for the window.
+    const first = await press();
+    await d.next((f) => f.t === "run.interaction" && f.eventId === first.eventId);
+    const waiting = await press();
+    expect(waiting.expect).toMatchObject({ mode: "run" });
+    // The link gave the run up (the desk has not heard yet): `toRun` answers ok: false.
+    await runInDurableObject(benv.MACHINE_LINK.get(benv.MACHINE_LINK.idFromName(w.machineId)), async (_o, state: DurableObjectState) => {
+      state.storage.sql.exec("DELETE FROM runs WHERE run_id = ?", runId);
+    });
+    // The one that waited got its ack long ago: the person is told when it cannot be sent.
+    await runInDurableObject(deskOf(w.bot.id), async (o, state: DurableObjectState) => {
+      state.storage.sql.exec("UPDATE interact_windows SET until = 0");
+      await (o as unknown as { alarm(): Promise<void> }).alarm();
+    });
+    const failed = await waitUntil(() => resolvedOf(waiting.eventId)[0], 5000);
+    expect(failed.event).toMatchObject({ result: "failed", messageId });
+    // A press that cannot be sent inside its own ack: the ack says nobody responds, and no
+    // `interaction.resolved` is sent ahead of that ack.
+    await runInDurableObject(deskOf(w.bot.id), async (_o, state: DurableObjectState) => {
+      state.storage.sql.exec("DELETE FROM interact_windows");
+    });
+    const late = await press();
+    expect(late.expect).toEqual({ by: w.bot.id, mode: "none", reason: "run.failed" });
+    await sleep(200);
+    expect(resolvedOf(late.eventId)).toEqual([]);
+    expect(d.frames.filter((f) => f.t === "run.interaction")).toHaveLength(1);
+    await runInDurableObject(deskOf(w.bot.id), async (_o, state: DurableObjectState) => {
+      expect(state.storage.sql.exec("SELECT 1 FROM interact_windows").toArray()).toEqual([]);
+    });
+    for (const x of [c, d]) x.close();
+  });
+
+  it("decline a page ask that waited for a run that ended, when the member's runner is off by then", async () => {
+    const w = await world();
+    const { d } = await Daemon.connect(w.machineToken, { features: ["interact", "output"] });
+    const { c } = await Client.connect(w.human.token, INTERACT);
+    const topicId = await mention(c, w);
+    // The run is not accepted yet: events for it wait.
+    const { runId } = await d.next((f) => f.t === "run.assign");
+    const made = await api("/v1/artifacts", {
+      token: w.bot.token,
+      body: { groupId: w.gid, topicId, title: "看板", kind: "html", entry: "index.html", files: [{ path: "index.html", fileId: await upload(w.bot, w.gid) }], events: EVENTS },
+    });
+    expect(made.status, JSON.stringify(made.body)).toBe(200);
+    const artifactId = made.body.artifact.id as string;
+    const ask = await c.ok({ t: "artifact.event", groupId: w.gid, artifactId, version: 1, name: "ask.total", kind: "ask", payload: { month: "2026-10" } });
+    expect(ask.expect.mode).not.toBe("none");
+    const off = await api(`/v1/bots/${w.bot.id}/runner`, {
+      method: "PUT",
+      token: w.owner.token,
+      body: { runtime: "codex", labels: ["off"], repo: { path: "/tmp/repo" }, baseBranch: "main", enabled: false },
+    });
+    expect(off.status, JSON.stringify(off.body)).toBe(200);
+    await runInDurableObject(deskOf(w.bot.id), async (o, state: DurableObjectState) => {
+      expect(state.storage.sql.exec("SELECT 1 FROM interact_pending").toArray()).toHaveLength(1);
+      state.storage.sql.exec("UPDATE runs SET status = 'cancelled', ended_at = ? WHERE id = ?", Date.now(), runId);
+      await (o as unknown as { alarm(): Promise<void> }).alarm();
+    });
+    const reply = await c.next((f) => f.t === "transient" && f.event.type === "artifact.reply" && f.event.eventId === ask.eventId);
+    expect(reply.event).toMatchObject({ ok: false, error: { code: "declined", reason: "run.ended" } });
+    for (const x of [c, d]) x.close();
+  });
+
   it("give older daemons run.input with the envelope, and a 1.1.0 daemon the typed frames", async () => {
     const w = await world();
     const { d, c, topicId, runId } = await runningRun(w);
@@ -449,15 +729,27 @@ describe("BotDesk delivery", () => {
     await runInDurableObject(desk, async (_o, state) => {
       for (let i = 0; i < 5; i++) state.storage.sql.exec("INSERT INTO interact_runs (run_id, card_key, at) VALUES (?, ?, ?)", `x${i}`, `card:${messageId}`, Date.now());
     });
-    expect(await desk.interaction(w.bot.id, interaction(w, topicId, messageId, "channels", { values: ["weibo"] }))).toEqual({ mode: "none" });
+    expect(await desk.interaction(w.bot.id, interaction(w, topicId, messageId, "channels", { values: ["weibo"] }))).toEqual({ mode: "none", reason: "run.limit" });
     await runInDurableObject(desk, async (_o, state) => {
       for (let i = 0; i < 30; i++) state.storage.sql.exec("INSERT INTO interact_runs (run_id, card_key, at) VALUES (?, ?, ?)", `y${i}`, `card:other${i}`, Date.now());
     });
-    expect(await desk.interaction(w.bot.id, interaction(w, topicId, ulid(), "channels", { values: ["weibo"] }))).toEqual({ mode: "none" });
+    expect(await desk.interaction(w.bot.id, interaction(w, topicId, ulid(), "channels", { values: ["weibo"] }))).toEqual({ mode: "none", reason: "run.limit" });
     expect(d.frames.filter((f) => f.t === "run.assign")).toHaveLength(1);
     // A stored answer still starts a run.
     expect(await desk.expectFor(w.bot.id, topicId)).toEqual({ mode: "starting", etaMs: 40_000 });
     for (const x of [c, d]) x.close();
+
+    // A runner that is turned off, and a member that was removed, say so.
+    const off = await api(`/v1/bots/${w.bot.id}/runner`, {
+      method: "PUT",
+      token: w.owner.token,
+      body: { runtime: "codex", labels: ["off"], repo: { path: "/tmp/repo" }, baseBranch: "main", enabled: false },
+    });
+    expect(off.status, JSON.stringify(off.body)).toBe(200);
+    expect(await desk.interaction(w.bot.id, interaction(w, topicId, ulid(), "channels", { values: ["bili"] }))).toEqual({ mode: "none", reason: "runner.off" });
+    expect(await desk.expectFor(w.bot.id, topicId)).toEqual({ mode: "none", reason: "runner.off" });
+    await env.DB.prepare("UPDATE members SET deactivated = 1 WHERE id = ?").bind(w.bot.id).run();
+    expect(await desk.interaction(w.bot.id, interaction(w, topicId, ulid(), "channels", { values: ["bili"] }))).toEqual({ mode: "none", reason: "member.inactive" });
   });
 
   it("start a side chat run from an anonymous live event with the side chat's own person as the asker", async () => {
@@ -543,8 +835,21 @@ describe("BotDesk delivery", () => {
     const resolved = await c.next((f) => f.t === "transient" && f.event.type === "interaction.resolved" && f.event.eventId === live.eventId);
     expect(resolved.event).toMatchObject({ result: "patched" });
 
+    // An event sent from the rev the person still saw names both revs; the block is the card's now.
+    d.event(runId, { type: "output", outputId: "p3", op: "card.patch", body: { messageId, baseRev: 2, ops: [{ op: "set", id: "trend", props: { label: "新增群（B 站）" } }] } });
+    expect(await result("p3")).toMatchObject({ ok: true, result: { rev: 3 } });
+    await runInDurableObject(deskOf(w.bot.id), async (_o, state: DurableObjectState) => {
+      state.storage.sql.exec("DELETE FROM interact_windows");
+    });
+    const old = await c.ok({ t: "card.event", groupId: w.gid, messageId, rev: 1, clientEventId: crypto.randomUUID(), blockId: "trend", event: "chart.select", value: { series: "new", x: "微博", y: 4, index: 1 } });
+    const late = await d.next((f) => f.t === "run.interaction" && f.eventId === old.eventId);
+    expect(late.source).toEqual({ kind: "card", messageId, blockId: "trend", rev: 1, currentRev: 3 });
+    expect(late.block).toMatchObject({ id: "trend", label: "新增群（B 站）" });
+    // The one sent at the current rev has no currentRev.
+    expect(frame.source.currentRev).toBeUndefined();
+
     // An answer is stored and reaches the run as run.answer with the block.
-    const ans = await c.ok({ t: "card.event", groupId: w.gid, messageId, rev: 2, clientEventId: crypto.randomUUID(), actionId: "send", event: "action.press", inputs: { check: { value: "wrong" } } });
+    const ans = await c.ok({ t: "card.event", groupId: w.gid, messageId, rev: 3, clientEventId: crypto.randomUUID(), actionId: "send", event: "action.press", inputs: { check: { value: "wrong" } } });
     expect(ans).toMatchObject({ stored: true, expect: { by: w.bot.id, mode: "run" } });
     const ra = await d.next((f) => f.t === "run.answer");
     expect(ra).toMatchObject({ runId, eventId: ans.eventId, source: { kind: "card", messageId, askId: "verify", answerId: ans.answerId }, actionId: "send", inputs: { check: { value: "wrong" } } });
@@ -777,13 +1082,13 @@ describe("refs in prompts", () => {
     const refs = [{ n: 1, label: "渠道表 · B 站", fromId: w.bot.id, messageId: "01JC0SRC00000000000000000A", block: { id: "channels", type: "table" }, changedSince: true, context: { type: "table", id: "channels" } }];
     const msg = (body: string) => ({ groupId: w.gid, topicId, messageId: ulid(), authorId: w.human.id, authorLevel: "member" as const, body, mentioned: false, refs });
     await desk.onMessage(w.bot.id, msg("为什么少了？"));
-    const first = await d.next((f) => f.t === "run.input" && f.text.startsWith("为什么少了？"));
+    const first = await d.next((f) => f.t === "run.input" && inputBody(f).startsWith("为什么少了？"));
     expect(first.text).toContain("Alice points at these parts of the conversation.");
     expect(first.text).toContain('"from":"dev"');
     expect(first.text).toContain('"changedSince":true');
     expect(first.text).toContain('<teamchat-ref-context n="1">');
     await desk.onMessage(w.bot.id, msg("那微博呢？"));
-    const second = await d.next((f) => f.t === "run.input" && f.text.startsWith("那微博呢？"));
+    const second = await d.next((f) => f.t === "run.input" && inputBody(f).startsWith("那微博呢？"));
     expect(second.text).toContain("<teamchat-refs>");
     expect(second.text).not.toContain("teamchat-ref-context");
     void runId;

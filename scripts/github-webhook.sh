@@ -2,26 +2,33 @@
 # Adds a group's GitHub hook (POST /v1/hooks, kind github) as a webhook on a GitHub repository,
 # then checks that GitHub's ping delivery succeeded. Run it only after the repo owner said yes.
 #
-#   scripts/github-webhook.sh                         # this repo, production hook file
+#   scripts/github-webhook.sh                         # the production hook file and the repository it names
 #   scripts/github-webhook.sh --repo <owner/name> --hook-file <file>
 #   scripts/github-webhook.sh --body-out <file>       # only write the request body (mode 600), no GitHub call
 #
-# The hook file is JSON with `url` and `secret` (made by POST /v1/hooks, kind github; see
-# docs/integrations.md). The secret goes from that file into a temp file (mode 600) that
-# `gh api --input` reads, and the temp file is deleted. The script never prints the secret.
+# The hook file is JSON with the `url` and `secret` of the hook (made by POST /v1/hooks, kind
+# github; see docs/integrations.md) and `repo`, the <owner/name> you write next to them; the
+# default is ~/.config/team-chat/production/github-hook.json. The webhook goes on --repo, else
+# on the hook file's `repo`; with neither the script stops. The secret goes from that file into
+# a temp file (mode 600) that `gh api --input` reads, and the temp file is deleted. The script
+# never prints the secret.
 set -euo pipefail
+# shellcheck source=scripts/lib.sh
+. "$(dirname "$0")/lib.sh"
 
-REPO="Joye-Co/team-chat"
+REPO=""
 HOOK_FILE="$HOME/.config/team-chat/production/github-hook.json"
 BODY_OUT=""
 EVENTS='["pull_request","pull_request_review","check_suite","workflow_run"]'
 
+# A usage error ends with status 2.
+value() { [ $# -ge 2 ] && [ -n "$2" ] || { echo "error: $1 needs a value" >&2; exit 2; }; printf '%s' "$2"; }
 while [ $# -gt 0 ]; do
   case "$1" in
-    --repo) REPO="$2"; shift 2 ;;
-    --hook-file) HOOK_FILE="$2"; shift 2 ;;
-    --body-out) BODY_OUT="$2"; shift 2 ;;
-    -h|--help) sed -n '2,12p' "$0"; exit 0 ;;
+    --repo) REPO="$(value "$@")"; shift 2 ;;
+    --hook-file) HOOK_FILE="$(value "$@")"; shift 2 ;;
+    --body-out) BODY_OUT="$(value "$@")"; shift 2 ;;
+    -h|--help) usage; exit 0 ;;
     *) echo "error: unknown argument: $1" >&2; exit 2 ;;
   esac
 done
@@ -52,6 +59,12 @@ fi
 
 command -v gh >/dev/null || { echo "error: gh is required" >&2; exit 1; }
 case "$URL" in https://*) ;; *) echo "error: GitHub needs an https hook url" >&2; exit 1 ;; esac
+if [ -z "$REPO" ]; then
+  REPO=$(jq -r '.repo | strings' "$HOOK_FILE")
+  [ -n "$REPO" ] || { echo "error: --repo <owner/name> is needed: $HOOK_FILE names no repo" >&2; exit 2; }
+fi
+[[ "$REPO" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]] || { echo "error: the repository must be <owner/name>, not '$REPO'" >&2; exit 2; }
+echo "adding a webhook on $REPO for the hook of $HOOK_FILE"
 
 existing=$(gh api "repos/$REPO/hooks" --paginate --jq ".[] | select(.config.url == \"$URL\") | .id" | head -n 1)
 if [ -n "$existing" ]; then
