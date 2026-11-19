@@ -90,6 +90,9 @@ concepts! {
     Todo = "circle.dashed";
     Circle = "circle";
     Stopped = "nosign";
+    /// The paused state (`secondary`): the filled bars, which stay readable
+    /// at the 12 of a badge where the outlined media `pause` thins out.
+    Paused = "pause.fill";
     Hourglass = "hourglass";
     // Machines (§6).
     /// A team computer.
@@ -180,6 +183,10 @@ concepts! {
     Info = "info.circle";
     Help = "questionmark.circle";
     Return = "return";
+    /// Wrap long lines (the code viewer's toggle).
+    Wrap = "arrow.turn.down.left";
+    /// Hand something to a 话题 (发到话题): a bare tool, unlike `Send` on its circle.
+    SendTo = "paperplane";
     ReplyIndent = "arrow.turn.down.right";
     Reply = "arrowshape.turn.up.left";
     ArrowUp = "arrow.up";
@@ -189,6 +196,12 @@ concepts! {
     Terminal = "terminal";
     Retry = "arrow.counterclockwise";
     Refresh = "arrow.clockwise";
+    /// Skip back 15 seconds (the audio viewer).
+    Back15 = "gobackward.15";
+    /// Skip forward 15 seconds (the audio viewer).
+    Forward15 = "goforward.15";
+    /// Pick one at random (the look grid's last cell).
+    Random = "dice";
     Undo = "arrow.uturn.backward";
     Link = "link";
     Code = "chevron.left.forwardslash.chevron.right";
@@ -224,6 +237,10 @@ concepts! {
     Memory = "memorychip";
     Disk = "internaldrive";
     Network = "network";
+    /// A web page (产出 of that kind).
+    Globe = "globe";
+    /// A PDF (产出 of that kind).
+    PdfFile = "list.bullet.rectangle.portrait";
     /// An API key.
     Key = "key";
     /// A machine's base image and environment.
@@ -506,6 +523,7 @@ lucide! {
     RotateCcw => Retry,
     RotateCw => Refresh,
     RefreshCw => Refresh,
+    Dices => Random,
     Undo2 => Undo,
     Link => Link,
     Code => Code,

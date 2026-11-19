@@ -60,6 +60,11 @@ pub mod spot {
     pub const SECTION: Pixels = height::ROW;
     /// The inset of the rows from the panel edge (list p 4).
     pub const INSET: Pixels = space::S4;
+    /// The pad inside a row, before its leading slot.
+    pub const ROW_PAD: Pixels = space::S8;
+    /// The field's left pad: `INSET` + `ROW_PAD`, so the search symbol
+    /// sits in the rows' slot column and the text starts at their titles.
+    pub const FIELD_PAD: Pixels = space::S12;
     /// The panel's distance from the window top (Spotlight sits in the
     /// upper third).
     pub const TOP: Pixels = px(120.);
@@ -153,8 +158,8 @@ impl RenderOnce for SpotlightField {
             .flex_none()
             .w_full()
             .h(spot::FIELD)
-            .pl(px(16.))
-            .pr(px(12.))
+            .pl(spot::FIELD_PAD)
+            .pr(spot::FIELD_PAD)
             .flex()
             .items_center()
             .gap(space::S8)
@@ -185,11 +190,7 @@ impl RenderOnce for SpotlightField {
 
 /// The hairline between the field and the results.
 pub fn spotlight_divider(cx: &App) -> gpui::Div {
-    div()
-        .flex_none()
-        .mx(spot::INSET)
-        .h(px(1.))
-        .bg(native_colors(cx).separator)
+    div().flex_none().h(px(1.)).bg(native_colors(cx).separator)
 }
 
 /// A section header in the results: Section style (11 pt semibold),
@@ -232,7 +233,7 @@ pub fn spotlight_row(
         .flex_none()
         .h(spot::ROW)
         .mx(spot::INSET)
-        .px(px(8.))
+        .px(spot::ROW_PAD)
         .rounded(spot::ROW_RADIUS)
         .flex()
         .items_center()

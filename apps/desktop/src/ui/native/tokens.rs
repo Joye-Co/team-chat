@@ -192,6 +192,10 @@ pub struct NativeColors {
     pub sidebar: Hsla,
     /// The group box fill (§2.8): `muted` in light, a raised step in dark.
     pub group: Hsla,
+    /// The fill of a small part that sits on a group box (the 28 icon box,
+    /// a status badge, a letter avatar): the foreground at 8 %. `muted` is
+    /// the group's own fill in light, so a muted part there has no shape.
+    pub on_group: Hsla,
     /// `foreground`.
     pub label: Hsla,
     /// `muted-foreground`.
@@ -261,6 +265,11 @@ pub struct NativeColors {
     pub knob_on: Hsla,
     /// The active segmented trigger: `background` (dark: `input` on `muted`).
     pub segment: Hsla,
+    /// The segmented track. Light: the foreground at 6 %, a tint that reads
+    /// as `muted` on the white window and still steps over a group box
+    /// (whose fill is `muted` itself). Dark: `muted`, a step over the
+    /// window, a sheet and a group box already.
+    pub segment_track: Hsla,
     pub amber: Hsla,
     pub blue: Hsla,
     pub red: Hsla,
@@ -301,6 +310,7 @@ impl NativeColors {
             } else {
                 p.muted
             },
+            on_group: p.foreground.opacity(0.08),
             label: p.foreground,
             secondary: p.muted_foreground,
             tertiary: p.muted_foreground,
@@ -337,6 +347,12 @@ impl NativeColors {
             knob: if p.dark { p.foreground } else { p.background },
             knob_on: p.primary_foreground,
             segment: if p.dark { p.input } else { p.background },
+            // Dark: the border tint, so the track steps up from a card and a group fill alike.
+            segment_track: if p.dark {
+                p.border
+            } else {
+                p.foreground.opacity(0.06)
+            },
             amber: p.warning,
             blue: p.info,
             red: p.destructive,
@@ -649,6 +665,8 @@ pub mod text {
 pub mod icon {
     use gpui::{Pixels, px};
     pub const SM: Pixels = px(12.);
+    /// The mark that hangs before a line of card text: a proof's result, a fold's chevron.
+    pub const MARK: Pixels = px(14.);
     pub const MD: Pixels = px(16.);
     pub const LG: Pixels = px(24.);
     /// The app icon at the top of a welcome sheet (已更新到 …).
@@ -751,6 +769,10 @@ pub mod shadow {
 pub mod size {
     use super::{avatar, height};
     use gpui::{Pixels, px};
+    /// The change badge's column on a 记忆更新 line: 可能过时 with its mark.
+    pub const MEMORY_BADGE_COLUMN: Pixels = px(88.);
+    /// The same column on a day whose badges are all two characters (新增, 修改, 停用).
+    pub const MEMORY_BADGE_COLUMN_COMPACT: Pixels = px(44.);
     pub const BUTTON_SM: Pixels = height::SM;
     pub const BUTTON_CARD: Pixels = height::SM;
     pub const BUTTON_CARD_PAD: Pixels = super::space::S12;
@@ -996,6 +1018,10 @@ pub mod metrics {
     pub const SIDEBAR_WIDTH: Pixels = px(248.);
     pub const SIDEBAR_ROW: Pixels = height::ROW;
     pub const SIDEBAR_ROW_INSET: Pixels = space::S8;
+    /// The opaque band under the 下面还有 pill: one row plus the 4 below the pill.
+    pub const SIDEBAR_WAITING_BAND: Pixels = px(36.);
+    /// The soft top edge of that band: short enough to leave the text of the row above it clean.
+    pub const SIDEBAR_WAITING_FADE: Pixels = space::S4;
     pub const SIDEBAR_ROW_RADIUS: Pixels = radius::CONTROL;
     pub const SIDEBAR_SLOT: Pixels = px(16.);
     pub const SIDEBAR_SYMBOL: Pixels = px(16.);
@@ -1041,6 +1067,8 @@ pub mod metrics {
     pub const FIELD_RADIUS: Pixels = radius::CONTROL;
     pub const FIELD_PAD: Pixels = space::S12;
     pub const FIELD_NAME_WIDTH: Pixels = px(220.);
+    /// A number field in a card: the figures and their unit read together (§2.8).
+    pub const FIELD_NUMBER_WIDTH: Pixels = px(112.);
     pub const FIELD_CODE_WIDTH: Pixels = px(140.);
     /// A number with its − and + (同时做几件事).
     pub const NUMBER_FIELD: Pixels = px(120.);
@@ -1062,6 +1090,8 @@ pub mod metrics {
     /// A disabled primary button before its form is complete: primary at
     /// 30 %, light, never a mid gray (§2.20).
     pub const PRIMARY_WAITING_OPACITY: f32 = 0.3;
+    /// A disabled control (§1.8): 50 % opacity.
+    pub const DISABLED_OPACITY: f32 = 0.5;
 
     // Progress (D12)
     pub const BAR: Pixels = height::PROGRESS;
@@ -1080,6 +1110,39 @@ pub mod metrics {
     // Inspector and lists (§2.5, §2.6)
     pub const INSPECTOR_ROW: Pixels = height::ROW;
     pub const INSPECTOR_PAD: Pixels = space::S16;
+    /// The side inset of a filled group in the 详情 pane (D21).
+    pub const INSPECTOR_GROUP_INSET: Pixels = px(14.);
+    /// A row of a DescriptionList (§2.5) and the column of its label.
+    pub const DESC_ROW: Pixels = px(36.);
+    pub const DESC_LABEL: Pixels = px(112.);
+    /// The tallest a menu of names grows before it scrolls.
+    pub const MENU_LIST_MAX: Pixels = px(264.);
+    /// A row of a list in a grouped inspector section (the members of a 群
+    /// or a 话题): the compact row, rows touching (§2.6).
+    pub const INSPECTOR_LIST_ROW: Pixels = height::ROW;
+    /// The strip at the top of a code block that holds its pinned actions
+    /// (问这里, copy); the code starts under it (K-05).
+    pub const CODE_BLOCK_STRIP: Pixels = height::ROW;
+    /// The height of the actions in that strip.
+    pub const CODE_BLOCK_ACTIONS: Pixels = px(24.);
+    /// How far a button at a fold's end stands in from that strip's right edge: its edge
+    /// meets the edge of the copy glyph, which is centered in its own button.
+    pub const CODE_BLOCK_END_INSET: Pixels = px(5.);
+    /// Under the last line of a code block.
+    pub const CODE_BLOCK_PAD_BOTTOM: Pixels = space::S16;
+    /// Above and under the line of a one-line code block: it has no strip, its actions
+    /// sit on the line.
+    pub const CODE_BLOCK_ONE_LINE_PAD: Pixels = space::S12;
+    /// The actions of a one-line block, centered on its 46 height.
+    pub const CODE_BLOCK_ONE_LINE_ACTIONS_TOP: Pixels = px(11.);
+    /// How far the actions stand in from a code block's top and right edges.
+    pub const CODE_BLOCK_ACTIONS_INSET: Pixels = space::S8;
+    /// The end of a one-line block's line: scrolled to its end, the code clears the widest
+    /// actions (问这里, a long language name and copy).
+    pub const CODE_BLOCK_ONE_LINE_END: Pixels = px(200.);
+    /// The narrowest link under the login form: 换一个邮箱 with its padding, so the two
+    /// links of the code step are one width and sit even on the window's axis.
+    pub const LOGIN_LINK_MIN: Pixels = px(94.);
     /// A code block of a message longer than `CODE_FOLD_OVER` lines shows its
     /// first `CODE_FOLD_LINES` lines and a 展开 button (the gap between the two
     /// keeps a fold from hiding only a few lines).
@@ -1105,6 +1168,11 @@ pub mod metrics {
     pub const SHEET_WIDE: Pixels = px(560.);
     pub const SHEET_RADIUS: Pixels = radius::SHEET;
     pub const SHEET_PAD: Pixels = space::S24;
+    /// The least a long sheet body shows before it scrolls (the add and
+    /// edit AI member sheets); a taller window shows more of it.
+    pub const SHEET_BODY_MAX: Pixels = px(468.);
+    /// What such a sheet spends around its body: title, explanation, footer.
+    pub const SHEET_BODY_CHROME: Pixels = px(176.);
     pub const SHEET_BUTTON_EDGE: Pixels = space::S24;
     pub const SHEET_BUTTON_GAP: Pixels = space::S8;
     /// A Mac dialog button is never narrower than this, so 「好」 is not a square.
@@ -1119,7 +1187,6 @@ pub mod metrics {
     pub const MENU_SYMBOL: Pixels = px(16.);
     pub const MENU_ROW_PAD: Pixels = space::S8;
     pub const POPOVER_RADIUS: Pixels = radius::CONTROL;
-    pub const POPOVER_ARROW: Pixels = px(10.);
 }
 
 /// Card v2 sizes (DESIGN.md §7.10) on the scales; `theme::card_v2`.
@@ -1156,6 +1223,30 @@ pub mod card_v2 {
     pub const CHART: Pixels = px(100.);
     pub const THUMB: Pixels = px(84.);
     pub const LIVE_BAR: Pixels = px(2.);
+    /// Metrics that share one row; a longer run starts another row.
+    pub const METRICS_PER_ROW: usize = 4;
+    /// Table rows shown before the 展开 row, as the v1 table.
+    pub const TABLE_FOLD_ROWS: usize = 10;
+    /// The least a text column of a table keeps: the first (names) and the others.
+    pub const TABLE_COL_FIRST: Pixels = px(96.);
+    pub const TABLE_COL_MIN: Pixels = px(72.);
+    /// Diff lines shown before the 展开 row.
+    pub const DIFF_FOLD_LINES: usize = 24;
+    /// An image block: at most this wide and tall at its own ratio; the box of an image
+    /// whose size is not known yet.
+    pub const IMAGE_MAX_W: Pixels = px(480.);
+    pub const IMAGE_MAX_H: Pixels = px(360.);
+    pub const IMAGE_BOX: (Pixels, Pixels) = (px(320.), px(200.));
+    /// The play disc of a recording tile.
+    pub const PLAY_DISC: Pixels = px(28.);
+    /// Room between two x labels of a chart, and the narrowest bar that keeps its value
+    /// label.
+    pub const CHART_LABEL_GAP: Pixels = px(8.);
+    pub const CHART_BAR_LABEL: Pixels = px(28.);
+    /// The legend swatch of a chart series.
+    pub const CHART_SWATCH: Pixels = px(16.);
+    /// The line height of a card's 12 pt meta text.
+    pub const META_LINE: Pixels = px(18.);
 
     pub const YOU_FILL: f32 = 0.10;
     pub const YOU_EDGE: f32 = 0.24;
@@ -1235,6 +1326,29 @@ pub mod card_v21 {
     pub const CHART_PICK_FILL: f32 = 0.06;
     pub const CHART_HOVER_FILL: f32 = 0.035;
     pub const REMOVE_OUT: Duration = Duration::from_millis(240);
+    /// Bar rows of a pickable bar chart shown before the 展开 row.
+    pub const BAR_ROWS_FOLD: usize = 12;
+    /// How long an answer may sit with its author before the record says so, and before it
+    /// offers 提醒一下: longer than a live event's waits, a queued run is normal.
+    /// How long after an answer 撤回 is offered: the server's own window
+    /// (`RETRACT_WINDOW_MS`, server/src/cards2/events.ts).
+    pub const RETRACT_WINDOW: Duration = Duration::from_secs(600);
+    pub const SOFT_ANSWER_LIVE: Duration = Duration::from_secs(30);
+    pub const HARD_ANSWER_LIVE: Duration = Duration::from_secs(180);
+    pub const SOFT_ANSWER_RUN: Duration = Duration::from_secs(90);
+    pub const HARD_ANSWER_RUN: Duration = Duration::from_secs(480);
+    pub const SOFT_ANSWER_STARTING: Duration = Duration::from_secs(180);
+    pub const HARD_ANSWER_STARTING: Duration = Duration::from_secs(720);
+}
+
+/// The 设置登录邮箱 sheet: how long 重新发送 rests after a code went out again.
+pub mod email_sheet {
+    use std::time::Duration;
+
+    /// Seconds until 重新发送 comes back.
+    pub const RESEND_WAIT_SECS: u32 = 30;
+    /// How often the wait counts down.
+    pub const RESEND_TICK: Duration = Duration::from_secs(1);
 }
 
 /// The images of a message (files::gallery): one picture keeps its ratio, more sit in a
@@ -1262,6 +1376,34 @@ pub mod gallery {
     pub const BADGE_H: Pixels = px(18.);
     /// The composer's thumbnails of images not sent yet.
     pub const DRAFT_THUMB: Pixels = px(64.);
+    /// A round icon button over a picture (the draft thumbnail's remove): its side, its
+    /// glyph, and black at these opacities at rest, under the pointer and pressed.
+    pub const OVER_BUTTON: Pixels = px(20.);
+    pub const OVER_GLYPH: Pixels = px(10.);
+    pub const OVER_SCRIM: f32 = 0.55;
+    pub const OVER_SCRIM_HOVER: f32 = 0.75;
+    pub const OVER_SCRIM_ACTIVE: f32 = 0.85;
+}
+
+/// The page strip of an inline PDF card: whole pages on a band, 12 above and below.
+pub mod pdf_strip {
+    use gpui::{Pixels, px};
+    pub const HEIGHT: Pixels = px(140.);
+    /// The box a page is fitted into (the band less its 12 + 12).
+    pub const PAGE_W: f32 = 120.;
+    pub const PAGE_H: f32 = 116.;
+    /// The strip's width inside a card's embed frame.
+    pub const EMBED_W: f32 = 607.;
+}
+
+/// A tile of the 产出 icon view: the picture well over the name.
+pub mod artifact_tile {
+    use gpui::{Pixels, px};
+    /// The picture well.
+    pub const WELL_H: Pixels = px(132.);
+    /// The narrowest a page snapshot is drawn: a taller page keeps this width and
+    /// is cut at the bottom, so its first screen reads.
+    pub const PAGE_MIN_W: Pixels = px(96.);
 }
 
 /// The image viewer (files::lightbox): every picture of a 话题 on a dark screen over the
@@ -1274,12 +1416,19 @@ pub mod lightbox {
     pub const BACKDROP: f32 = 1.0;
     /// The top bar and the filmstrip float on black at this opacity.
     pub const BAR_SCRIM: f32 = 0.35;
-    pub const BAR_H: Pixels = px(52.);
+    /// The app's header band (§2.2), so the bar's content and the window buttons share
+    /// one centre line.
+    pub const BAR_H: Pixels = super::height::TOOLBAR;
     /// Room kept around the fitted picture.
     pub const PAD: Pixels = px(24.);
     /// The round previous / next buttons at the sides.
     pub const NAV: Pixels = px(40.);
     pub const NAV_INSET: Pixels = px(16.);
+    /// White over the dark screen: the round buttons at rest, and any screen button under
+    /// the pointer and pressed.
+    pub const NAV_REST: f32 = 0.10;
+    pub const NAV_HOVER: f32 = 0.18;
+    pub const NAV_PRESSED: f32 = 0.24;
     /// Filmstrip thumbnails.
     pub const THUMB: Pixels = px(44.);
     pub const THUMB_GAP: Pixels = px(6.);
@@ -1334,12 +1483,10 @@ pub mod monitor {
     pub const HEADER_PAD_BOTTOM: Pixels = px(20.);
     /// Room under the last section of a page.
     pub const BODY_PAD_BOTTOM: Pixels = px(28.);
-    /// A 要注意 tile: its tone's color at this opacity under the symbol.
-    pub const ATTENTION_TINT: f32 = 0.10;
-    pub const ATTENTION_TINT_DARK: f32 = 0.14;
-    /// A sidebar group label: this tall, this far below the rows above (Admin artboard: 18 + 16 + 6).
-    pub const NAV_GROUP_HEIGHT: Pixels = px(24.);
-    pub const NAV_GROUP_TOP: Pixels = space::S12;
+    /// A sidebar group label: this tall, this far below the rows above. Sized so the whole
+    /// nav of an owner (one computer open) fits the window: no row is cut by the footer.
+    pub const NAV_GROUP_HEIGHT: Pixels = px(20.);
+    pub const NAV_GROUP_TOP: Pixels = space::S8;
     /// Room under the sidebar's last row, above the account footer.
     pub const NAV_END_PAD: Pixels = space::S8;
     /// The machine tile of the switcher.
@@ -1351,29 +1498,40 @@ pub mod monitor {
     pub const CAPACITY_BAR: Pixels = space::S8;
     /// The legend swatches and the state dots.
     pub const SWATCH: Pixels = space::S8;
-    /// The memory bar of a member row.
-    pub const MEMBER_BAR: Pixels = space::S6;
+    /// The memory bar of a member row (the one Progress, this wide).
     pub const MEMBER_BAR_WIDTH: Pixels = px(96.);
+    /// The x-axis labels of 每天的花费: one footnote line.
+    pub const CHART_AXIS: Pixels = space::S16;
     /// Table columns of 按成员.
     pub const COL_COUNT: Pixels = px(80.);
     pub const COL_CPU: Pixels = px(96.);
     pub const COL_MEM: Pixels = px(200.);
     pub const COL_TOKENS: Pixels = px(120.);
+    /// 用量's budget column: the track, the warning icon's slot and the figures, each at one
+    /// x in every row. The figures' slot holds "103% / $1,000".
+    pub const COL_BUDGET: Pixels = px(248.);
+    pub const COL_BUDGET_LABEL: Pixels = px(92.);
     pub const COL_DONE: Pixels = px(104.);
     pub const COL_SPEND: Pixels = px(152.);
     /// 成员's table: narrow columns so a name of about 8 characters and its 岗位 fit beside the
     /// inspector at the default width; cells pad 8 a side.
-    pub const TEAM_COL_LEVEL: Pixels = px(80.);
-    pub const TEAM_COL_TOPICS: Pixels = px(68.);
-    pub const TEAM_COL_SPEND: Pixels = px(136.);
-    pub const TEAM_COL_RECENT: Pixels = px(88.);
+    pub const TEAM_COL_LEVEL: Pixels = px(76.);
+    pub const TEAM_COL_TOPICS: Pixels = px(82.);
+    pub const TEAM_COL_SPEND: Pixels = px(180.);
+    /// The budget after an amount (`/ $100`): the slot's least width, so every amount ends at
+    /// one x and a longer budget pushes its amount instead of covering it.
+    pub const TEAM_SPEND_BUDGET: Pixels = px(40.);
+    /// Fits the longest last-seen time (`23 小时前`) beside the ⋯ column.
+    pub const TEAM_COL_RECENT: Pixels = px(74.);
     pub const TEAM_CELL_PAD: Pixels = space::S8;
+    /// The count after a bar in the member inspector (`999 个话题`), right-aligned.
+    pub const TEAM_USE_COUNT: Pixels = px(64.);
     /// 机器 cards: the narrowest a card gets, and the width of 添加电脑's line.
     pub const FLEET_CARD_MIN: Pixels = px(320.);
     pub const FLEET_ADD_TEXT: Pixels = px(320.);
     /// The member inspector beside the 成员 table (inside the page, not a
     /// right pane of the main window).
-    pub const MEMBER_INSPECTOR: Pixels = px(320.);
+    pub const MEMBER_INSPECTOR: Pixels = px(304.);
     /// The 要注意 card's share of the row next to 容量.
     pub const ATTENTION_SHARE: f32 = 0.41;
 }
@@ -1518,6 +1676,17 @@ mod tests {
         for k in [NativeColors::light(), NativeColors::dark()] {
             assert_eq!(k.destructive_fill, c(DESTRUCTIVE_FILL));
             assert!(contrast(gpui::white(), k.destructive_fill) >= 4.5);
+        }
+    }
+
+    #[test]
+    fn a_part_on_a_group_shows_in_both_modes() {
+        // The icon box and the status badge of a settings row: at least 8
+        // levels off the group fill they sit on.
+        for k in [NativeColors::light(), NativeColors::dark()] {
+            let on = gpui::Rgba::from(k.group.blend(k.on_group));
+            let group = gpui::Rgba::from(k.group);
+            assert!((on.r - group.r).abs() * 255. >= 8.);
         }
     }
 

@@ -94,6 +94,37 @@ pub const MAX_LIVE: usize = 2;
 /// Cached embeds (with or without a native view) kept per app.
 const MAX_CACHED: usize = 24;
 
+/// What a page that fills its area sits on.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Canvas {
+    /// The app background, in the app's theme (a 产出 page's content area).
+    #[default]
+    Content,
+    /// A sheet's fill, in the app's theme, so the sheet's header and body are one tone.
+    Sheet,
+    /// A white page in the light scheme in both themes, as a browser shows a file
+    /// that was written for the default page: an attached HTML file sets its text
+    /// colors but no background, and they must stay readable.
+    Paper,
+}
+
+impl Canvas {
+    fn colors(self, cx: &App) -> crate::ui::native::NativeColors {
+        match self {
+            Canvas::Paper => crate::ui::native::NativeColors::light(),
+            _ => crate::ui::native::native_colors(cx),
+        }
+    }
+
+    fn surface(self, cx: &App) -> gpui::Hsla {
+        let n = self.colors(cx);
+        match self {
+            Canvas::Sheet => n.sheet,
+            _ => n.content,
+        }
+    }
+}
+
 /// A live 产出 page in the layout. See the module docs.
 #[derive(IntoElement)]
 pub struct WebEmbed {
@@ -102,9 +133,15 @@ pub struct WebEmbed {
     height: Pixels,
     /// Fill the parent's height instead of [`WebEmbed::height`].
     fill: bool,
+    /// The side and bottom inset of the failure Alert ([`WebEmbed::failed_inset`]).
+    failed_inset: Option<Pixels>,
+    canvas: Canvas,
     /// Draw the card frame (1 px border on the card fill) around the page.
     framed: bool,
     radius: Pixels,
+    /// The bottom-left and bottom-right radius of the fill, when the page ends at
+    /// the rounded corners of a sheet ([`WebEmbed::rounded_bottom`]).
+    bottom: (Pixels, Pixels),
     pass_scroll: bool,
     autoplay: bool,
     /// The page's side and top padding in the host base stylesheet (`--tc-pad`).
@@ -123,8 +160,11 @@ impl WebEmbed {
             spec,
             height: px(320.),
             fill: false,
+            failed_inset: None,
+            canvas: Canvas::Content,
             framed: false,
             radius: radius::LG,
+            bottom: (px(0.), px(0.)),
             pass_scroll: false,
             autoplay: false,
             pad: crate::ui::native::tokens::space::S24,
@@ -148,6 +188,13 @@ impl WebEmbed {
         self
     }
 
+    /// A card whose content edge is `inset` and that shows nothing under a page that
+    /// failed: the Alert keeps to that edge and the card ends `inset` under it.
+    pub fn failed_inset(mut self, inset: Pixels) -> Self {
+        self.failed_inset = Some(inset);
+        self
+    }
+
     /// Routes page events to the 产出 page host with this embed (bridge requests, loads).
     pub fn on_host(
         mut self,
@@ -167,9 +214,23 @@ impl WebEmbed {
         self
     }
 
+    /// Rounds the fill's bottom corners (left, right) on top of [`WebEmbed::rounded`]:
+    /// for a page whose bottom edge is a sheet's, so its square fill does not show
+    /// past the sheet's corners.
+    pub fn rounded_bottom(mut self, left: Pixels, right: Pixels) -> Self {
+        self.bottom = (left, right);
+        self
+    }
+
     /// The page fills its parent (a page's content area) instead of a fixed height.
     pub fn fill(mut self) -> Self {
         self.fill = true;
+        self
+    }
+
+    /// What a page that fills its area sits on (the app background by default).
+    pub fn canvas(mut self, canvas: Canvas) -> Self {
+        self.canvas = canvas;
         self
     }
 
@@ -218,6 +279,7 @@ pub struct WebEmbedState {
     pad: Pixels,
     /// The page fills a content area (on the background), not a card.
     fill: bool,
+    canvas: Canvas,
     remember: bool,
     on_event: Option<EventHandler>,
     on_host: Option<HostHandler>,
@@ -231,6 +293,9 @@ pub struct WebEmbedState {
     hit_covered: bool,
     /// An [`occluder`] covered the page in this frame.
     cover_covered: bool,
+    /// A float band (the sticky date pill) cut the top of the page in this frame: the
+    /// snapshot shows in the strip beside the band, so the page reads as continuous.
+    band_cut: bool,
     check_pending: bool,
     focused: bool,
     /// The frame color the inline page's cut edge fades into, as last given to the page.
@@ -238,6 +303,10 @@ pub struct WebEmbedState {
     /// Where an inline page ends on a whole block (its own height when it fits): the
     /// frame shrinks to it, so no blank band sits under the cover.
     end: Option<Pixels>,
+    /// The read of `end` for the loaded document came back (with an end or without).
+    end_read: bool,
+    /// The newest reading of the end: an older one still waiting stops.
+    end_reading: u64,
     /// The host base stylesheet given to the page, by its token values.
     base: Option<String>,
     #[cfg(any(target_os = "macos", windows))]
@@ -252,14 +321,38 @@ thread_local! {
     static LIVE: RefCell<Vec<gpui::WeakEntity<WebEmbedState>>> = const { RefCell::new(Vec::new()) };
 }
 
+/// What runs when an embedded page is gone for good ([`on_page_gone`]).
+type PageGone = Rc<dyn Fn(gpui::WeakEntity<WebEmbedState>, &mut App)>;
+
+struct PageGoneHook(PageGone);
+
+impl gpui::Global for PageGoneHook {}
+
+/// `f` runs when an embedded page is gone for good: its state left the cache (the
+/// window closed, or it was the oldest of too many), or it now shows another 产出. A page
+/// that only gave up its native view while off screen is not gone. The 产出 page host
+/// drops what it kept for the page.
+pub fn on_page_gone(f: impl Fn(gpui::WeakEntity<WebEmbedState>, &mut App) + 'static, cx: &mut App) {
+    cx.set_global(PageGoneHook(Rc::new(f)));
+}
+
+/// Tells the host, after the current update, that `page` is gone for good.
+fn page_gone(page: gpui::WeakEntity<WebEmbedState>, cx: &mut App) {
+    let Some(hook) = cx.try_global::<PageGoneHook>().map(|h| h.0.clone()) else {
+        return;
+    };
+    cx.defer(move |cx| hook(page, cx));
+}
+
 impl WebEmbedState {
     fn new(spec: WebEmbedSpec, cx: &mut Context<Self>) -> Self {
         let me = cx.weak_entity();
         LIVE.with(|l| {
             let mut l = l.borrow_mut();
             l.retain(|w| w.upgrade().is_some());
-            l.push(me);
+            l.push(me.clone());
         });
+        cx.on_release(move |_, cx| page_gone(me, cx)).detach();
         Self {
             spec,
             pass_scroll: false,
@@ -267,6 +360,7 @@ impl WebEmbedState {
             radius: px(0.),
             pad: crate::ui::native::tokens::space::S24,
             fill: false,
+            canvas: Canvas::Content,
             remember: true,
             on_event: None,
             on_host: None,
@@ -276,10 +370,13 @@ impl WebEmbedState {
             snapshot: None,
             hit_covered: false,
             cover_covered: false,
+            band_cut: false,
             check_pending: false,
             focused: false,
             fade: None,
             end: None,
+            end_read: false,
+            end_reading: 0,
             base: None,
             #[cfg(any(target_os = "macos", windows))]
             native: None,
@@ -308,13 +405,20 @@ impl WebEmbedState {
     }
 
     /// Gives the page of `version` a data snapshot (the 产出 page host). False when no
-    /// such page shows.
-    pub fn push_data(&self, version: u32, snap: Snapshot) -> bool {
+    /// such page shows. The page redraws with the data, so its picture for overlays is
+    /// taken again and an inline page says again where it ends: the frame follows a page
+    /// that got longer or shorter.
+    pub fn push_data(&mut self, version: u32, snap: Snapshot, cx: &mut Context<Self>) -> bool {
         #[cfg(any(target_os = "macos", windows))]
         if let Some(n) = &self.native {
-            return n.push_data(version, snap);
+            let pushed = n.push_data(version, snap);
+            if pushed && self.phase == Phase::Ready {
+                self.snapshot_later(cx, 120);
+                self.measure_end_later(cx, 150);
+            }
+            return pushed;
         }
-        let _ = (version, snap);
+        let _ = (version, snap, cx);
         false
     }
 
@@ -356,6 +460,34 @@ impl WebEmbedState {
         }
     }
 
+    /// Self-tests: the page's load fails now, as [`ArtifactEvent::LoadFailed`] reports it.
+    pub fn fail_for_self_test(&mut self, cx: &mut Context<Self>) {
+        let version = self.version();
+        self.on_native(
+            ArtifactEvent::LoadFailed {
+                version,
+                reason: "self-test".into(),
+            },
+            cx,
+        );
+    }
+
+    /// 重试 of a page that did not open: drops the view that failed (or that could not be
+    /// made) and loads the page again in a new one on the next frame.
+    pub fn retry(&mut self, cx: &mut Context<Self>) {
+        #[cfg(any(target_os = "macos", windows))]
+        {
+            self.native = None;
+        }
+        self._events = None;
+        self.phase = Phase::Loading;
+        self.fade = None;
+        self.base = None;
+        self.end = None;
+        self.end_read = false;
+        cx.notify();
+    }
+
     pub fn phase(&self) -> &Phase {
         &self.phase
     }
@@ -367,6 +499,12 @@ impl WebEmbedState {
 
     pub fn has_snapshot(&self) -> bool {
         self.snapshot.is_some()
+    }
+
+    /// An inline page is loaded but has not said yet where it ends (self-tests wait
+    /// for it, so a capture never shows the declared height in one theme only).
+    pub fn end_pending(&self) -> bool {
+        self.pass_scroll && self.phase == Phase::Ready && !self.end_read
     }
 
     pub fn focused(&self) -> bool {
@@ -433,17 +571,25 @@ impl WebEmbedState {
         false
     }
 
-    fn sync(&mut self, embed: &WebEmbed) {
+    fn sync(&mut self, embed: &WebEmbed, cx: &mut Context<Self>) {
         self.pass_scroll = embed.pass_scroll;
         self.autoplay = embed.autoplay;
         self.radius = embed.radius;
         self.pad = embed.pad;
         self.fill = embed.fill;
+        self.canvas = embed.canvas;
         self.remember = embed.remember;
         self.on_event = embed.on_event.clone();
         self.on_host = embed.on_host.clone();
         self.spec.viewer = embed.spec.viewer.clone();
-        self.spec.ref_menu = embed.spec.ref_menu.clone();
+        if self.spec.ref_menu != embed.spec.ref_menu {
+            self.spec.ref_menu = embed.spec.ref_menu.clone();
+            // The menu follows the theme in the page that is loaded, not only in the next.
+            #[cfg(any(target_os = "macos", windows))]
+            if let (Some(n), Some(menu)) = (&self.native, &self.spec.ref_menu) {
+                n.set_ref_menu(menu.clone());
+            }
+        }
         let same = self.spec.artifact_id == embed.spec.artifact_id
             && self.spec.version.version == embed.spec.version.version;
         #[cfg(any(target_os = "macos", windows))]
@@ -463,6 +609,10 @@ impl WebEmbedState {
             return;
         }
         let new_id = self.spec.artifact_id != embed.spec.artifact_id;
+        if new_id {
+            // The page of the 产出 shown until now is gone for good.
+            page_gone(cx.weak_entity(), cx);
+        }
         self.spec = embed.spec.clone();
         self.snapshot = None;
         self.phase = Phase::Loading;
@@ -488,6 +638,7 @@ impl WebEmbedState {
                 // A new document: it has no fade and no base stylesheet yet.
                 self.fade = None;
                 self.end = None;
+                self.end_read = false;
                 self.base = None;
                 self.apply_base(cx);
                 // Let the page draw, then keep a picture for overlays.
@@ -573,7 +724,7 @@ impl WebEmbedState {
         if self.phase != Phase::Ready {
             return;
         }
-        let css = base_css(self.pad, self.fill, cx);
+        let css = base_css(self.pad, self.fill, self.canvas, false, cx);
         if self.base.as_deref() == Some(css.as_str()) {
             return;
         }
@@ -587,42 +738,63 @@ impl WebEmbedState {
     /// Reads, after `delay_ms`, where an inline page ends on a whole block
     /// (`window.__tcEnd`, kept by the cover script; a heading is never the
     /// last block: it goes with the block it heads, §2.21) and shrinks the frame to it.
-    fn measure_end_later(&self, cx: &mut Context<Self>, delay_ms: u64) {
+    /// The page keeps settling after it loads (its styles, its fonts), so the end counts as
+    /// read once two readings agree or the readings run out.
+    fn measure_end_later(&mut self, cx: &mut Context<Self>, delay_ms: u64) {
         if !self.pass_scroll {
             return;
         }
+        self.end_reading += 1;
+        let reading = self.end_reading;
         #[cfg(any(target_os = "macos", windows))]
         cx.spawn(async move |this, cx| {
             cx.background_executor()
                 .timer(std::time::Duration::from_millis(delay_ms))
                 .await;
-            let (tx, rx) = futures::channel::oneshot::channel();
-            let started = this
-                .update(cx, |s, _| match &s.native {
-                    Some(n) => {
-                        n.evaluate_text("String(window.__tcEnd||'')", move |v| {
-                            let _ = tx.send(v);
-                        });
-                        true
-                    }
-                    None => false,
-                })
-                .unwrap_or(false);
-            if !started {
-                return;
-            }
-            let end = rx
-                .await
-                .ok()
-                .flatten()
-                .and_then(|v| v.parse::<f32>().ok())
-                .filter(|v| *v >= MIN_INLINE_END);
-            if let Some(end) = end {
+            let mut last = None;
+            for _ in 0..END_READS {
+                let (tx, rx) = futures::channel::oneshot::channel();
+                let started = this
+                    .update(cx, |s, _| match &s.native {
+                        Some(n) if s.end_reading == reading => {
+                            n.evaluate_text("String(window.__tcEnd||'')", move |v| {
+                                let _ = tx.send(v);
+                            });
+                            true
+                        }
+                        _ => false,
+                    })
+                    .unwrap_or(false);
+                if !started {
+                    return;
+                }
+                let end = rx
+                    .await
+                    .ok()
+                    .flatten()
+                    .and_then(|v| v.parse::<f32>().ok())
+                    .filter(|v| *v >= MIN_INLINE_END);
+                let settled = end.is_some() && end == last;
                 let _ = this.update(cx, |s, cx| {
-                    s.end = Some(px(end.ceil()));
-                    cx.notify();
+                    if let Some(end) = end.filter(|_| s.end_reading == reading) {
+                        s.end = Some(px(end.ceil()));
+                        cx.notify();
+                    }
                 });
+                if settled {
+                    break;
+                }
+                last = end;
+                cx.background_executor()
+                    .timer(std::time::Duration::from_millis(END_READ_GAP_MS))
+                    .await;
             }
+            let _ = this.update(cx, |s, cx| {
+                if s.end_reading == reading {
+                    s.end_read = true;
+                    cx.notify();
+                }
+            });
         })
         .detach();
         #[cfg(not(any(target_os = "macos", windows)))]
@@ -639,9 +811,13 @@ impl WebEmbedState {
                     .await;
             }
             let (tx, rx) = futures::channel::oneshot::channel();
+            let (top_tx, top_rx) = futures::channel::oneshot::channel();
             let started = this
                 .update(cx, |s, _| match &s.native {
                     Some(n) if n.is_shown() => {
+                        n.evaluate_text("String(window.scrollY)", move |y| {
+                            let _ = top_tx.send(y);
+                        });
                         n.snapshot_png(move |png| {
                             let _ = tx.send(png);
                         });
@@ -654,6 +830,14 @@ impl WebEmbedState {
                 return;
             }
             if let Ok(Some(png)) = rx.await {
+                // A 产出's thumbnail is the top of its page: a scrolled view is only the
+                // backdrop. When the page does not say, the picture counts as the top.
+                let scrolled = top_rx
+                    .await
+                    .ok()
+                    .flatten()
+                    .and_then(|y| y.parse::<f32>().ok())
+                    .is_some_and(|y| y > 0.);
                 // Diagnosis of the 产出 thumbnail: which view's picture is the last one.
                 if std::env::var_os("TC_PREVIEW_LOG").is_some() && png.len() > 24 {
                     let dim =
@@ -671,7 +855,7 @@ impl WebEmbedState {
                 }
                 let image = Arc::new(gpui::Image::from_bytes(gpui::ImageFormat::Png, png));
                 let _ = this.update(cx, |s, cx| {
-                    if s.remember {
+                    if s.remember && !scrolled {
                         remember_preview(s.artifact_id(), s.version(), image.clone());
                     }
                     s.snapshot = Some(image);
@@ -739,22 +923,45 @@ impl WebEmbedState {
     ) {
         self.last_bounds = Some(bounds);
         self.parked = false;
+        let uncut = visible;
         // A float band over the top of the region (the sticky date pill) stays
         // above the page: the page shows only below it (§2.17, A4).
+        let whole = visible;
         let visible = below_bands(window, visible, cx);
+        let band_cut = visible != whole;
+        if band_cut != self.band_cut {
+            self.band_cut = band_cut;
+            cx.notify();
+        }
         self.cover_covered = covers_overlap(window, visible, cx);
         #[cfg(any(target_os = "macos", windows))]
         {
             self.attach(window, cx);
-            let covered = self.covered();
+            // A page that failed shows the Alert in its place: its blank view hides.
+            let covered = self.covered() || matches!(self.phase, Phase::Failed(_));
             if let Some(n) = &self.native {
                 n.set_dark(theme::is_dark(cx));
                 n.set_frame(rect(bounds), rect(visible), window.scale_factor() as f64);
                 n.set_hidden(covered);
+                // The band's float gives way to a page that shows under its
+                // place (`clip_band`).
+                if !covered && uncut.size.height > px(0.) {
+                    let id = window.window_handle().window_id();
+                    let frame = cx.default_global::<Covers>().windows.entry(id).or_default();
+                    if frame.pages.len() < 64 {
+                        frame.pages.push(uncut);
+                    }
+                }
             }
         }
+        let look = (self.fade.clone(), self.base.clone());
         self.apply_fade(cx);
         self.apply_base(cx);
+        // A new look (the theme) can move where the page ends.
+        if self.end_read && look != (self.fade.clone(), self.base.clone()) {
+            self.end_read = false;
+            self.measure_end_later(cx, 150);
+        }
         // Right after this frame shows, test whether an overlay that blocks the mouse lies
         // over the page (its hitbox is not the top one at a sample point).
         if !self.check_pending {
@@ -770,7 +977,7 @@ impl WebEmbedState {
                         s.hit_covered = covered;
                         #[cfg(any(target_os = "macos", windows))]
                         if let Some(n) = &s.native {
-                            n.set_hidden(s.covered());
+                            n.set_hidden(s.covered() || matches!(s.phase, Phase::Failed(_)));
                         }
                         cx.notify();
                     }
@@ -809,29 +1016,40 @@ fn over(top: gpui::Hsla, under: gpui::Hsla) -> gpui::Hsla {
 /// [`WebEmbedState::apply_base`]). It only supplies defaults (owner decision
 /// O-4): its rules sit in the `tc-base` cascade layer, so any color or type
 /// a page that a member made sets for itself wins.
-fn base_css(pad: Pixels, fill: bool, cx: &App) -> String {
-    use crate::ui::native::tokens::{radius, space};
+///
+/// Besides text, tables and code it draws the plain controls a page uses (button, text
+/// input, select, textarea, checkbox, radio, progress) like the app's own: one height,
+/// one radius, the 3 px focus ring, 50 % when disabled, and `button[data-tc=primary]`
+/// filled. `opaque` is the 产出 window, which has no app surface behind the page: the
+/// page background is `--tc-bg` there, and transparent where the app draws it.
+fn base_css(pad: Pixels, fill: bool, canvas: Canvas, opaque: bool, cx: &App) -> String {
+    use crate::ui::native::tokens::{height, metrics, radius, space, text};
     let px_of = |p: Pixels| f32::from(p).round();
-    let k = crate::ui::native::native_colors(cx);
-    // The surface the page sits on: the background when it fills a content
-    // area, else its card's fill (see `WebEmbed::render`).
+    let k = canvas.colors(cx);
+    // The surface the page sits on: its canvas when it fills an area, else its
+    // card's fill (see `WebEmbed::render`).
     let surface = if fill {
-        k.content
+        canvas.surface(cx)
     } else {
         theme::colors(cx).raised
     };
-    let scheme = if theme::is_dark(cx) { "dark" } else { "light" };
+    let scheme = if theme::is_dark(cx) && canvas != Canvas::Paper {
+        "dark"
+    } else {
+        "light"
+    };
     format!(
         ":root{{--tc-pad:{pad}px;--tc-bg:{bg};--tc-fg:{fg};--tc-muted:{muted};--tc-border:{border};\
 --tc-fill:{fill};--tc-primary:{fg};--tc-danger:{danger};--tc-radius:{radius}px;--tc-gap:{gap}px;\
 --tc-font-mono:{mono};color-scheme:{scheme}}}\
 @layer tc-base{{\
 html{{font:14px/22px -apple-system,BlinkMacSystemFont,'PingFang SC','Helvetica Neue','Segoe UI Variable Text','Segoe UI','Microsoft YaHei UI',sans-serif;\
-color:var(--tc-fg);background:transparent;-webkit-font-smoothing:antialiased}}\
+color:var(--tc-fg);background:{page};-webkit-font-smoothing:antialiased}}\
 body{{margin:0;padding:var(--tc-pad)}}\
 h1{{font-size:24px;line-height:32px;font-weight:600;margin:0 0 8px}}\
 h2{{font-size:18px;line-height:28px;font-weight:600;margin:24px 0 8px}}\
 h3{{font-size:16px;line-height:24px;font-weight:600;margin:16px 0 8px}}\
+body>:first-child{{margin-top:0}}\
 p{{margin:0 0 12px}}small{{color:var(--tc-muted)}}\
 a{{color:inherit;text-underline-offset:2px}}\
 table{{border-collapse:collapse;width:100%;margin:8px 0 16px;font-variant-numeric:tabular-nums}}\
@@ -841,14 +1059,73 @@ th{{font-size:12px;font-weight:500;color:var(--tc-muted)}}\
 hr{{border:0;border-top:1px solid var(--tc-border);margin:16px 0}}\
 code,pre{{font-family:var(--tc-font-mono);font-size:13px}}\
 pre{{background:var(--tc-fill);border:1px solid var(--tc-border);border-radius:8px;padding:12px;overflow:auto}}\
+button,input,select,textarea{{font:inherit;color:inherit;margin:0;box-sizing:border-box}}\
+button,input[type=button],input[type=submit],input[type=reset]{{height:{ctl}px;padding:0 {ctl_pad}px;\
+border:0;border-radius:var(--tc-radius);background:{push};font-size:{ui}px;\
+line-height:{ui_line}px;font-weight:500;white-space:nowrap;cursor:default}}\
+:is(button,input[type=button],input[type=submit],input[type=reset]):hover:not(:disabled){{background:{push_hover}}}\
+:is(button,input[type=button],input[type=submit],input[type=reset]):active:not(:disabled){{background:{push_pressed}}}\
 button[data-tc=primary]{{background:var(--tc-primary);border-color:var(--tc-primary);color:var(--tc-bg)}}\
-button[data-tc=primary]:hover:not(:disabled),button[data-tc=primary]:active:not(:disabled){{background:var(--tc-primary);opacity:.9}}}}",
+button[data-tc=primary]:hover:not(:disabled),button[data-tc=primary]:active:not(:disabled){{background:var(--tc-primary);opacity:.9}}\
+input:not([type]),input:is([type=text],[type=search],[type=email],[type=url],[type=tel],[type=number],[type=password],[type=date],[type=time],[type=datetime-local]),select,textarea{{\
+height:{ctl}px;padding:0 {ctl_pad}px;border:1px solid {edge};border-radius:var(--tc-radius);background:{control};\
+font-size:{ui}px;line-height:{ui_line}px;outline:0}}\
+label>br+:is(input:not([type]),input:is([type=text],[type=search],[type=email],[type=url],[type=tel],[type=number],[type=password],[type=date],[type=time],[type=datetime-local]),select),\
+p>input:only-child:is(:not([type]),[type=text],[type=search],[type=email],[type=url],[type=tel],[type=number],[type=password]){{display:block;width:100%}}\
+label>br+:is(input:not([type]),input:is([type=text],[type=search],[type=email],[type=url],[type=tel],[type=number],[type=password],[type=date],[type=time],[type=datetime-local]),select,textarea){{margin-top:{s8}px}}\
+p:has(>button):not(:has(>:not(button))){{display:flex;flex-wrap:wrap;align-items:center;gap:{s8}px}}\
+textarea{{height:auto;min-height:{area}px;padding:{s6}px {ctl_pad}px;line-height:22px;resize:vertical;display:block;width:100%}}\
+select{{appearance:none;-webkit-appearance:none;padding-right:{s32}px;background-repeat:no-repeat;background-position:right {s8}px center;\
+background-image:url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16' fill='none' stroke='{chevron}' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 6l4 4 4-4'/%3E%3C/svg%3E\")}}\
+::placeholder{{color:var(--tc-muted);opacity:1}}\
+input:is([type=checkbox],[type=radio]){{accent-color:var(--tc-primary);width:{mark}px;height:{mark}px;margin:0 {s8}px 0 0;vertical-align:-1px}}\
+input[type=range]{{accent-color:var(--tc-primary)}}\
+progress{{appearance:none;-webkit-appearance:none;display:block;width:100%;height:{bar}px;border:0;border-radius:{bar_r}px;background:var(--tc-fill);background:color-mix(in srgb,var(--tc-primary) 20%,transparent);overflow:hidden}}\
+progress::-webkit-progress-bar{{background:transparent}}\
+progress::-webkit-progress-value{{background:var(--tc-primary)}}\
+progress::-moz-progress-bar{{background:var(--tc-primary)}}\
+:is(button,input,select,textarea):focus-visible{{outline:0;border-color:{focus_edge};box-shadow:0 0 0 {ring}px {focus}}}\
+input:is([type=checkbox],[type=radio]):focus-visible{{outline:{ring}px solid {focus};outline-offset:1px;box-shadow:none}}\
+:is(button,input,select,textarea):disabled{{opacity:{disabled}}}\
+fieldset{{border:0;padding:0;margin:0 0 12px}}\
+legend{{padding:0;margin-bottom:4px;font-size:14px;line-height:20px;color:var(--tc-fg)}}\
+label{{line-height:{ui_line}px}}\
+label:has(>input:is([type=checkbox],[type=radio]))+label{{margin-left:var(--tc-gap)}}}}",
         pad = px_of(pad),
+        page = if opaque {
+            "var(--tc-bg)"
+        } else {
+            "transparent"
+        },
         danger = hex(k.red),
         radius = px_of(radius::CONTROL),
         gap = px_of(space::S12),
         mono = "ui-monospace,'SF Mono',Menlo,'Cascadia Mono',Consolas,monospace",
-        bg = hex(k.content),
+        ctl = px_of(height::SM),
+        ctl_pad = px_of(space::S12),
+        ui = px_of(text::UI.0),
+        ui_line = px_of(text::UI.1),
+        area = px_of(crate::ui::native::tokens::size::COMPOSER_MIN),
+        s6 = px_of(space::S6),
+        s8 = px_of(space::S8),
+        s32 = px_of(space::S32),
+        mark = px_of(crate::ui::native::tokens::icon::MD),
+        bar = px_of(height::PROGRESS),
+        bar_r = px_of(metrics::BAR_RADIUS),
+        ring = px_of(metrics::FOCUS_RING),
+        disabled = metrics::DISABLED_OPACITY,
+        // Opaque on the page's surface, like the lines: a control on a card or in the
+        // pane reads as a raised control in both themes.
+        edge = hex(over(k.quaternary, surface)),
+        control = hex(over(k.control, surface)),
+        // A page's button is the app's outline button: the borderless tint (D11).
+        push = hex(over(k.push, surface)),
+        push_hover = hex(over(k.push_hover, surface)),
+        push_pressed = hex(over(k.push_pressed, surface)),
+        focus = hex(k.focus),
+        focus_edge = hex(over(k.focus, surface)),
+        chevron = hex(k.secondary).replace('#', "%23"),
+        bg = hex(if fill { surface } else { k.content }),
         fg = hex(k.label),
         muted = hex(k.secondary),
         // Opaque on the page's own surface (the card fill inline): a line
@@ -872,6 +1149,20 @@ for(var i=0;i<n;i++){var any=false,all=true;body.forEach(function(r){var c=r.cel
 if(any&&all){rows.forEach(function(r){if(r.cells[i])r.cells[i].setAttribute('data-tc-num','');});}}});};\
 tcNum();if(!window.__tcNumObs&&window.MutationObserver&&document.body){var p=0;window.__tcNumObs=new MutationObserver(function(){if(p)return;p=1;setTimeout(function(){p=0;tcNum();},50);});\
 window.__tcNumObs.observe(document.body,{childList:true,subtree:true,characterData:true});}";
+
+/// The base stylesheet for a page in its own 产出 window, as the script that applies it:
+/// the same defaults and `--tc-*` variables an embedded page gets, on the app background
+/// (the window has no app surface behind the page). Run it after every load and when the
+/// theme changes; it replaces the one before.
+pub(crate) fn window_base_script(cx: &App) -> String {
+    base_script(&base_css(
+        crate::ui::native::tokens::space::S24,
+        true,
+        Canvas::Content,
+        true,
+        cx,
+    ))
+}
 
 /// The script that puts the base stylesheet first in a page's `<head>` (or replaces it).
 fn base_script(css: &str) -> String {
@@ -919,9 +1210,9 @@ var hs=document.body?document.body.querySelectorAll('h1,h2,h3,h4,h5,h6,figcaptio
 for(var j=0;j<hs.length;j++){{var q=hs[j].getBoundingClientRect();if(q.height>0&&q.bottom<=cut&&q.bottom>lb){{lb=q.bottom;lh=q;}}}}\
 if(lh){{var after=false;for(var i=0;i<all.length;i++){{var el=all[i];if(el===d||/^(H[1-6]|FIGCAPTION)$/.test(el.tagName.toUpperCase()))continue;\
 var r=el.getBoundingClientRect();if(r.height>0&&r.width>0&&r.top>=lb-1&&r.bottom<=cut&&atomic(el,r)){{after=true;break;}}}}if(!after)cut=lh.top;}}\
-if(cut<h*0.35)cut=h;\
-if(cut<h){{var lz=-1;for(var i=0;i<all.length;i++){{var el=all[i];if(el===d)continue;var r=el.getBoundingClientRect();\
-if(r.height>0&&r.width>0&&r.bottom<=cut&&r.bottom>lz)lz=r.bottom;}}if(lz>0&&lz+16<cut)cut=lz+16;}}\
+var tall=cut<h*0.35;if(tall)cut=h;\
+var lz=-1;for(var i=0;i<all.length;i++){{var el=all[i];if(el===d)continue;var r=el.getBoundingClientRect();\
+if(r.height>0&&r.width>0&&r.bottom<=cut&&r.bottom>lz)lz=r.bottom;}}if(!tall&&lz>0&&lz+16<cut)cut=cut<h?lz+16:Math.ceil(lz+16);\
 window.__tcEnd=Math.floor(cut);d.style.height=Math.max(0,Math.ceil(h-cut))+'px';d.style.opacity='1';}};\
 window.addEventListener('scroll',u,{{passive:true}});window.addEventListener('resize',u);\
 try{{var o=new ResizeObserver(u);o.observe(document.documentElement);\
@@ -1099,23 +1390,58 @@ fn rect(b: Bounds<Pixels>) -> artifact_view::Rect {
 
 /// The shortest an inline page's frame gets when it ends early.
 const MIN_INLINE_END: f32 = 120.;
+/// How many times an inline page's end is read before the last reading stands.
+const END_READS: usize = 12;
+/// The time between two readings of an inline page's end.
+const END_READ_GAP_MS: u64 = 200;
 
 impl RenderOnce for WebEmbed {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let state = cached_state(&self, window, cx);
-        state.update(cx, |s, _| s.sync(&self));
+        state.update(cx, |s, cx| s.sync(&self, cx));
         let k = theme::colors(cx);
         let s = state.read(cx);
+        let failed = matches!(s.phase, Phase::Failed(_));
         // An inline page ends on its last whole block (or its own end).
         let height = match s.end {
             Some(end) if self.pass_scroll => end.min(self.height),
             _ => self.height,
         };
-        let backdrop = match (&s.phase, s.covered(), &s.snapshot) {
+        // The snapshot also shows while a band cuts the page's top: the native view is
+        // clipped across its whole width below the band, and the picture fills the strip
+        // beside the band (§2.17: the pill is on top, with no full-width fill).
+        let backdrop = match (&s.phase, s.covered() || s.band_cut, &s.snapshot) {
             (_, true, Some(image)) | (Phase::Loading, _, Some(image)) => {
                 img(image.clone()).size_full().into_any_element()
             }
-            (Phase::Failed(_), _, _) => message(ca::LOAD_FAILED, k.text_3).into_any_element(),
+            // §2.15: the Alert in place of the page, with 重试; never a lone line in a well.
+            (Phase::Failed(_), _, _) => {
+                let again = state.downgrade();
+                let edge = crate::ui::native::tokens::space::S12;
+                div()
+                    .pt(edge)
+                    .px(self.failed_inset.unwrap_or(edge))
+                    .pb(self.failed_inset.unwrap_or(edge))
+                    .child(
+                        crate::ui::native::Alert::new(crate::ui::Sym::Failed, ca::LOAD_FAILED)
+                            .tone(crate::ui::native::AlertTone::Destructive)
+                            .when(!self.fill, |a| a.on_card())
+                            .description(ca::LOAD_FAILED_LINE)
+                            .action(
+                                crate::ui::native::push_button(
+                                    SharedString::from(format!("{}-retry", self.id)),
+                                    ca::LOAD_RETRY,
+                                    crate::ui::native::PushStyle::Outline,
+                                    crate::ui::native::PushSize::Small,
+                                    cx,
+                                )
+                                .on_click(move |_, _, cx| {
+                                    let _ = again.update(cx, |s, cx| s.retry(cx));
+                                }),
+                            ),
+                    )
+                    .into_any_element()
+            }
             (Phase::Loading, _, _) => message(ca::OPENING, k.text_3).into_any_element(),
             _ => div().into_any_element(),
         };
@@ -1125,12 +1451,20 @@ impl RenderOnce for WebEmbed {
             .relative()
             .w_full()
             .when(self.fill, |d| d.flex_1().h_full().min_h(px(0.)))
-            .when(!self.fill, |d| d.h(height).flex_none())
+            // A page that did not open: the frame hugs the Alert.
+            .when(!self.fill && failed, |d| d.flex_none())
+            .when(!self.fill && !failed, |d| d.h(height).flex_none())
             .rounded(self.radius)
+            .when(self.bottom.0 > px(0.), |d| d.rounded_bl(self.bottom.0))
+            .when(self.bottom.1 > px(0.), |d| d.rounded_br(self.bottom.1))
             .overflow_hidden()
             // A page that fills a content area sits on the app background; inline it
             // sits on its card's fill. `framed` adds the card's 1 px line (§1.7).
-            .bg(if self.fill { n.content } else { k.raised })
+            .bg(if self.fill {
+                self.canvas.surface(cx)
+            } else {
+                k.raised
+            })
             .when(self.framed, |d| {
                 d.border_1().border_color(n.separator).bg(n.sheet)
             })
@@ -1255,6 +1589,11 @@ struct CoverFrame {
     rects: Vec<Bounds<Pixels>>,
     /// Floating bands (the sticky date pill) the page is cut below.
     bands: Vec<Bounds<Pixels>>,
+    /// Where the native pages of this frame show, before any band cut.
+    pages: Vec<Bounds<Pixels>>,
+    /// A native page showed under the band's place in the last frame
+    /// (`page_under_band`).
+    under_band: bool,
     /// Frames of this window so far (the embed cache's clock).
     count: u64,
 }
@@ -1269,6 +1608,7 @@ fn begin_frame(window: &Window, cx: &mut App) {
         frame.painting = false;
         frame.rects.clear();
         frame.bands.clear();
+        frame.pages.clear();
         frame.count += 1;
     }
 }
@@ -1288,6 +1628,15 @@ struct EmbedCache {
 }
 
 impl gpui::Global for EmbedCache {}
+
+/// Whether the embed `id` shows a page that did not open (in any window).
+pub fn page_failed(id: &ElementId, cx: &App) -> bool {
+    cx.try_global::<EmbedCache>().is_some_and(|c| {
+        c.entries.iter().any(|((_, embed), entry)| {
+            embed == id && matches!(entry.state.read(cx).phase, Phase::Failed(_))
+        })
+    })
+}
 
 /// The state of one embed, kept across frames in which a virtualized list does not
 /// render it.
@@ -1432,20 +1781,123 @@ pub fn occluder() -> impl IntoElement {
         .top_0()
         .left_0()
         .size_full()
-        .child(Occluder { band: false })
+        .child(Occluder)
 }
 
 /// Wrap a small float that sits at the top of a scrolling region (the sticky date
 /// pill, §2.17) with this, as `occluder()`: an embedded page that reaches under it is
 /// cut below its bottom edge for as long as it is drawn, so the float stays on top of
 /// the native page (A4). The page keeps showing under the rest of the region.
-pub fn clip_band() -> impl IntoElement {
+///
+/// The cut runs across the page's whole width, so a page that fills the row under the
+/// float would show a blank strip beside it. The caller keeps this element at the
+/// float's place in every frame and draws the float only while [`page_under_band`] is
+/// false (`drawn`): the page is then cut at the region's own edge, like every other row.
+pub fn clip_band(drawn: bool) -> impl IntoElement {
     div()
         .absolute()
         .top_0()
         .left_0()
         .size_full()
-        .child(Occluder { band: true })
+        .child(Band { drawn })
+}
+
+/// A native page showed under the place of this window's [`clip_band`] in the last frame.
+pub fn page_under_band(window: &Window, cx: &App) -> bool {
+    let id = window.window_handle().window_id();
+    cx.try_global::<Covers>()
+        .and_then(|c| c.windows.get(&id))
+        .is_some_and(|f| f.under_band)
+}
+
+/// The place of a float band: registers the band while its float is drawn, and says after
+/// every frame whether a native page showed under it.
+struct Band {
+    drawn: bool,
+}
+
+impl IntoElement for Band {
+    type Element = Self;
+    fn into_element(self) -> Self {
+        self
+    }
+}
+
+impl Element for Band {
+    type RequestLayoutState = ();
+    type PrepaintState = Bounds<Pixels>;
+
+    fn id(&self) -> Option<ElementId> {
+        None
+    }
+
+    fn source_location(&self) -> Option<&'static std::panic::Location<'static>> {
+        None
+    }
+
+    fn request_layout(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> (LayoutId, ()) {
+        let mut style = Style::default();
+        style.size.width = relative(1.).into();
+        style.size.height = relative(1.).into();
+        (window.request_layout(style, [], cx), ())
+    }
+
+    fn prepaint(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        bounds: Bounds<Pixels>,
+        _: &mut (),
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Bounds<Pixels> {
+        let visible = bounds.intersect(&window.content_mask().bounds);
+        if LIVE.with(|l| l.borrow().is_empty()) {
+            return visible;
+        }
+        begin_frame(window, cx);
+        if self.drawn {
+            let id = window.window_handle().window_id();
+            let frame = cx.default_global::<Covers>().windows.entry(id).or_default();
+            if frame.bands.len() >= 64 {
+                frame.bands.remove(0);
+            }
+            frame.bands.push(visible);
+        }
+        visible
+    }
+
+    fn paint(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        _: Bounds<Pixels>,
+        _: &mut (),
+        place: &mut Bounds<Pixels>,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        let live = !LIVE.with(|l| l.borrow().is_empty());
+        if live {
+            // The pages of this frame are dropped before the next one, also
+            // when no page paints in it.
+            mark_painting(window, cx);
+        }
+        let id = window.window_handle().window_id();
+        let frame = cx.default_global::<Covers>().windows.entry(id).or_default();
+        let under = live && frame.pages.iter().any(|p| p.intersects(place));
+        if under != frame.under_band {
+            frame.under_band = under;
+            // The float shows or hides in the next frame.
+            window.on_next_frame(|window, _| window.refresh());
+        }
+    }
 }
 
 /// `visible` cut below every band of this frame that reaches into it.
@@ -1467,10 +1919,7 @@ fn below_bands(window: &Window, visible: Bounds<Pixels>, cx: &App) -> Bounds<Pix
     out
 }
 
-struct Occluder {
-    /// A band to cut the page below, not a cover that hides it.
-    band: bool,
-}
+struct Occluder;
 
 impl IntoElement for Occluder {
     type Element = Self;
@@ -1520,11 +1969,7 @@ impl Element for Occluder {
         let visible = bounds.intersect(&window.content_mask().bounds);
         let id = window.window_handle().window_id();
         let frame = cx.default_global::<Covers>().windows.entry(id).or_default();
-        let list = if self.band {
-            &mut frame.bands
-        } else {
-            &mut frame.rects
-        };
+        let list = &mut frame.rects;
         if list.len() >= 64 {
             list.remove(0);
         }
@@ -1589,22 +2034,237 @@ thread_local! {
 }
 
 fn remember_preview(artifact_id: &str, version: u32, image: Arc<gpui::Image>) {
+    preview_disk::save(artifact_id, version, &image);
     PREVIEWS.with(|p| {
         p.borrow_mut()
             .insert((artifact_id.to_string(), version), image)
     });
 }
 
-/// The rendered page of one version of `artifact_id` as last seen, if it was on screen
-/// this session.
+/// The rendered page of one version of `artifact_id` as last seen: on screen this
+/// session, else the picture kept on disk from an earlier one, so the 产出 list shows
+/// a page's thumbnail after a restart too.
 pub fn page_preview(artifact_id: &str, version: u32) -> Option<Arc<gpui::Image>> {
-    PREVIEWS.with(|p| p.borrow().get(&(artifact_id.to_string(), version)).cloned())
+    let key = (artifact_id.to_string(), version);
+    if let Some(image) = PREVIEWS.with(|p| p.borrow().get(&key).cloned()) {
+        return Some(image);
+    }
+    let image = preview_disk::load(artifact_id, version)?;
+    PREVIEWS.with(|p| p.borrow_mut().insert(key, image.clone()));
+    Some(image)
+}
+
+/// The page previews kept between launches: one small PNG per 产出 version under the
+/// cache folder (`<cache>/team-chat/page-previews`), written when a page was
+/// snapshotted and read back by [`page_preview`]. A cache: the newest
+/// [`preview_disk::KEEP`] stay. Self-tests and scenes neither read nor write it.
+mod preview_disk {
+    use std::{cell::RefCell, collections::HashSet, path::PathBuf, sync::Arc};
+
+    /// The width a preview is kept at (a tile is at most about 320 pt wide, at 2x).
+    pub const MAX_WIDTH: u32 = 640;
+    /// How many previews stay on disk.
+    pub const KEEP: usize = 400;
+
+    thread_local! {
+        /// Versions with no file, so a tile without a preview asks the disk once.
+        static MISSING: RefCell<HashSet<(String, u32)>> = RefCell::new(HashSet::new());
+    }
+
+    fn enabled() -> bool {
+        crate::views::settings::prefs::saving()
+    }
+
+    fn dir() -> PathBuf {
+        crate::paths::cache_base()
+            .join("team-chat")
+            .join("page-previews")
+    }
+
+    /// `<id>-v<version>.png`, the id kept to letters, digits, `-` and `_`.
+    pub fn file_name(artifact_id: &str, version: u32) -> String {
+        let id: String = artifact_id
+            .chars()
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                    c
+                } else {
+                    '_'
+                }
+            })
+            .collect();
+        format!("{id}-v{version}.png")
+    }
+
+    /// `png` scaled down to at most [`MAX_WIDTH`] wide, as PNG bytes. `None` when it
+    /// does not decode.
+    pub fn small_png(png: &[u8]) -> Option<Vec<u8>> {
+        let image = image::load_from_memory_with_format(png, image::ImageFormat::Png).ok()?;
+        let image = if image.width() > MAX_WIDTH {
+            let height = (u64::from(image.height()) * u64::from(MAX_WIDTH)
+                / u64::from(image.width()))
+            .max(1) as u32;
+            image.resize_exact(MAX_WIDTH, height, image::imageops::FilterType::Triangle)
+        } else {
+            image
+        };
+        let mut out = std::io::Cursor::new(Vec::new());
+        image.write_to(&mut out, image::ImageFormat::Png).ok()?;
+        Some(out.into_inner())
+    }
+
+    /// The files of `names_by_age` (newest first) past the first `keep`.
+    pub fn to_drop(names_by_age: Vec<String>, keep: usize) -> Vec<String> {
+        names_by_age.into_iter().skip(keep).collect()
+    }
+
+    /// Writes the preview in the background (scaled down), then trims the folder.
+    pub fn save(artifact_id: &str, version: u32, image: &Arc<gpui::Image>) {
+        if !enabled() || image.format() != gpui::ImageFormat::Png {
+            return;
+        }
+        MISSING.with(|m| m.borrow_mut().remove(&(artifact_id.to_string(), version)));
+        let (image, name) = (image.clone(), file_name(artifact_id, version));
+        std::thread::spawn(move || {
+            let Some(png) = small_png(image.bytes()) else {
+                return;
+            };
+            let dir = dir();
+            if std::fs::create_dir_all(&dir).is_err()
+                || std::fs::write(dir.join(&name), png).is_err()
+            {
+                return;
+            }
+            let mut files: Vec<(std::time::SystemTime, String)> = std::fs::read_dir(&dir)
+                .into_iter()
+                .flatten()
+                .flatten()
+                .filter_map(|e| {
+                    let at = e.metadata().ok()?.modified().ok()?;
+                    Some((at, e.file_name().to_string_lossy().into_owned()))
+                })
+                .collect();
+            files.sort_by_key(|(at, _)| std::cmp::Reverse(*at));
+            for old in to_drop(files.into_iter().map(|(_, n)| n).collect(), KEEP) {
+                let _ = std::fs::remove_file(dir.join(old));
+            }
+        });
+    }
+
+    /// The preview kept for this version, if any.
+    pub fn load(artifact_id: &str, version: u32) -> Option<Arc<gpui::Image>> {
+        if !enabled() {
+            return None;
+        }
+        let key = (artifact_id.to_string(), version);
+        if MISSING.with(|m| m.borrow().contains(&key)) {
+            return None;
+        }
+        match std::fs::read(dir().join(file_name(artifact_id, version))) {
+            Ok(png) => Some(Arc::new(gpui::Image::from_bytes(
+                gpui::ImageFormat::Png,
+                png,
+            ))),
+            Err(_) => {
+                MISSING.with(|m| m.borrow_mut().insert(key));
+                None
+            }
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn a_preview_file_is_named_by_its_version_with_a_safe_id() {
+            assert_eq!(file_name("art-01HX_z", 3), "art-01HX_z-v3.png");
+            assert_eq!(file_name("../etc/passwd", 1), "___etc_passwd-v1.png");
+            assert_ne!(file_name("a", 1), file_name("a", 2));
+        }
+
+        #[test]
+        fn a_wide_snapshot_is_kept_small_and_a_small_one_as_it_is() {
+            let png = |w: u32, h: u32| {
+                let mut out = std::io::Cursor::new(Vec::new());
+                image::DynamicImage::ImageRgba8(image::RgbaImage::new(w, h))
+                    .write_to(&mut out, image::ImageFormat::Png)
+                    .unwrap();
+                out.into_inner()
+            };
+            let size = |bytes: &[u8]| {
+                let i = image::load_from_memory(bytes).unwrap();
+                (i.width(), i.height())
+            };
+            assert_eq!(size(&small_png(&png(2560, 1600)).unwrap()), (640, 400));
+            assert_eq!(size(&small_png(&png(320, 200)).unwrap()), (320, 200));
+            assert_eq!(small_png(b"not a png"), None);
+        }
+
+        #[test]
+        fn the_oldest_previews_past_the_limit_are_dropped() {
+            let names: Vec<String> = (0..5).map(|i| format!("{i}.png")).collect();
+            assert_eq!(to_drop(names.clone(), 3), ["3.png", "4.png"]);
+            assert!(to_drop(names, 10).is_empty());
+        }
+    }
 }
 // --- end v12/fx-cards ---
 
 #[cfg(test)]
 mod tests {
     use super::virtual_key;
+    use super::{Canvas, base_css, window_base_script};
+    use crate::ui::native::tokens::space;
+
+    #[gpui::test]
+    fn the_base_stylesheet_draws_controls_and_fills_only_the_window(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| {
+            gpui_component::init(cx);
+            crate::theme::set_mode(gpui_component::ThemeMode::Light, cx);
+            let embedded = base_css(space::S16, true, Canvas::Content, false, cx);
+            // Everything a page may rely on is a variable with a value.
+            for var in [
+                "--tc-pad:16px",
+                "--tc-bg:",
+                "--tc-fg:",
+                "--tc-muted:",
+                "--tc-border:",
+                "--tc-fill:",
+                "--tc-primary:",
+                "--tc-danger:",
+                "--tc-radius:8px",
+                "--tc-gap:12px",
+                "--tc-font-mono:ui-monospace",
+            ] {
+                assert!(embedded.contains(var), "{var}");
+            }
+            // The defaults sit in the layer, so any rule of the page wins.
+            let (vars, layer) = embedded.split_once("@layer tc-base{").unwrap();
+            assert!(vars.starts_with(":root{") && !vars.contains("button"));
+            for rule in [
+                "height:28px",
+                "button[data-tc=primary]{background:var(--tc-primary)",
+                "accent-color:var(--tc-primary)",
+                ":focus-visible{outline:0",
+                "0 0 0 3px",
+                ":disabled{opacity:0.5}",
+                "progress::-webkit-progress-value{background:var(--tc-primary)}",
+                "background:color-mix(in srgb,var(--tc-primary) 20%,transparent)",
+                "progress::-webkit-progress-bar{background:transparent}",
+            ] {
+                assert!(layer.contains(rule), "{rule}");
+            }
+            // Embedded, the app draws the surface behind the page; the 产出 window has
+            // none, so its page fills itself with the app background.
+            assert!(embedded.contains("background:transparent;-webkit-font-smoothing"));
+            let window = window_base_script(cx);
+            assert!(window.contains("background:var(--tc-bg);-webkit-font-smoothing"));
+            assert!(window.contains("--tc-pad:24px") && window.contains("__tc_base"));
+            // The same variables and rules in both.
+            assert!(window.contains("--tc-radius:8px") && window.contains("height:28px"));
+        });
+    }
 
     #[test]
     fn shortcut_keys_have_their_windows_key_codes() {

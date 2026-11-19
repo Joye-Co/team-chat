@@ -888,11 +888,15 @@ pub fn store_and_push(artifact_id: &str, version: u32, snap: Snapshot, cx: &mut 
     }
     h.snapshots.insert(key, snap.clone());
     super::window::push_to_window(artifact_id, version, &snap, cx);
-    for e in web_embed::all(cx) {
-        let s = e.read(cx);
-        if s.artifact_id() == artifact_id && s.version() == version {
-            s.push_data(version, snap.clone());
-        }
+    let pages: Vec<_> = web_embed::all(cx)
+        .into_iter()
+        .filter(|e| {
+            let s = e.read(cx);
+            s.artifact_id() == artifact_id && s.version() == version
+        })
+        .collect();
+    for e in pages {
+        e.update(cx, |s, cx| s.push_data(version, snap.clone(), cx));
     }
 }
 
@@ -902,7 +906,7 @@ fn push_to(page: &PageRef, version: u32, snap: Snapshot, cx: &mut App) {
             super::window::push_to_window(id, version, &snap, cx);
         }
         PageRef::Embed(e) => {
-            let _ = e.read_with(cx, |s, _| s.push_data(version, snap));
+            let _ = e.update(cx, |s, cx| s.push_data(version, snap, cx));
         }
     }
 }

@@ -38,6 +38,8 @@ pub struct Badge {
     lead: Option<AnyElement>,
     dense: bool,
     max_w: Option<gpui::Pixels>,
+    on_group: bool,
+    on_fill: bool,
 }
 
 impl Badge {
@@ -48,7 +50,24 @@ impl Badge {
             lead: None,
             dense: false,
             max_w: None,
+            on_group: false,
+            on_fill: false,
         }
+    }
+
+    /// A secondary badge inside a group box: `muted` is the group's own
+    /// fill in light, so the pill takes the on-group tint instead.
+    pub fn on_group(mut self) -> Self {
+        self.on_group = true;
+        self
+    }
+
+    /// A secondary badge on a filled surface (the sidebar, a hovered row):
+    /// its fill is the foreground at 8 % (`push`), one step over the fill
+    /// under it in both modes. Still no border (v18).
+    pub fn on_fill(mut self, on_fill: bool) -> Self {
+        self.on_fill = on_fill;
+        self
     }
 
     pub fn variant(mut self, variant: BadgeVariant) -> Self {
@@ -100,6 +119,15 @@ impl RenderOnce for Badge {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let k = native_colors(cx);
         let (fill, edge, text) = badge_colors(self.variant, &k);
+        let fill = if self.variant != BadgeVariant::Secondary {
+            fill
+        } else if self.on_group {
+            k.on_group
+        } else if self.on_fill {
+            k.push
+        } else {
+            fill
+        };
         div()
             .flex_none()
             .h(height::BADGE)
@@ -177,7 +205,7 @@ impl BadgeState {
             BadgeState::Abnormal => Sym::Problem,
             BadgeState::Queued | BadgeState::Quiet => Sym::Waiting,
             BadgeState::Deactivated => Sym::Stopped,
-            BadgeState::Paused => Sym::Pause,
+            BadgeState::Paused => Sym::Paused,
             _ => return None,
         })
     }
@@ -249,6 +277,8 @@ pub struct StatusBadge {
     label: SharedString,
     dense: bool,
     max_w: Option<gpui::Pixels>,
+    on_group: bool,
+    on_fill: bool,
 }
 
 impl StatusBadge {
@@ -258,7 +288,15 @@ impl StatusBadge {
             label: label.into(),
             dense: false,
             max_w: None,
+            on_group: false,
+            on_fill: false,
         }
+    }
+
+    /// The badge of a row inside a group box (see [`Badge::on_group`]).
+    pub fn on_group(mut self) -> Self {
+        self.on_group = true;
+        self
     }
 
     pub fn dense(mut self) -> Self {
@@ -270,6 +308,13 @@ impl StatusBadge {
         self.max_w = Some(w);
         self
     }
+
+    /// The badge sits on a filled surface (an inspector `group` box): see
+    /// [`Badge::on_fill`].
+    pub fn on_fill(mut self, on_fill: bool) -> Self {
+        self.on_fill = on_fill;
+        self
+    }
 }
 
 impl RenderOnce for StatusBadge {
@@ -277,7 +322,7 @@ impl RenderOnce for StatusBadge {
         let k = native_colors(cx);
         // A muted fill, no border (owner decision, v18: lines only where
         // they separate something).
-        let mut b = Badge::new(self.label).secondary();
+        let mut b = Badge::new(self.label).secondary().on_fill(self.on_fill);
         if let Some(mark) = state_mark(self.state, &k) {
             b = b.lead(mark);
         }
@@ -286,6 +331,9 @@ impl RenderOnce for StatusBadge {
         }
         if let Some(w) = self.max_w {
             b = b.max_w(w);
+        }
+        if self.on_group {
+            b = b.on_group();
         }
         b
     }
@@ -298,6 +346,7 @@ pub struct CountPill {
     text: SharedString,
     show: bool,
     tone: Option<Hsla>,
+    on_fill: bool,
 }
 
 impl CountPill {
@@ -306,7 +355,16 @@ impl CountPill {
             text: cap(count).into(),
             show: count > 0,
             tone: None,
+            on_fill: false,
         }
+    }
+
+    /// The pill sits on a `muted` fill (an unselected segment on the
+    /// segmented track): it takes the push tint, which shows on any fill in
+    /// both modes, as [`Badge::on_fill`] does.
+    pub fn on_fill(mut self, on_fill: bool) -> Self {
+        self.on_fill = on_fill;
+        self
     }
 
     /// A pill with its own text (`@3`).
@@ -315,6 +373,7 @@ impl CountPill {
             text: text.into(),
             show: true,
             tone: None,
+            on_fill: false,
         }
     }
 
@@ -346,7 +405,7 @@ impl RenderOnce for CountPill {
             .min_w(height::COUNT)
             .px(space::S6)
             .rounded_full()
-            .bg(k.fill)
+            .bg(if self.on_fill { k.push } else { k.fill })
             .flex()
             .items_center()
             .justify_center()

@@ -679,12 +679,8 @@ pub(super) fn attention_panel(items: Vec<model::Attention>, cx: &App) -> gpui::D
                         .flex_none()
                         .size(height::DEFAULT)
                         .rounded(radius::CONTROL)
-                        // The tone's color, faint, under the symbol in that color (Admin artboard).
-                        .bg(c.opacity(if k.is_dark() {
-                            t::ATTENTION_TINT_DARK
-                        } else {
-                            t::ATTENTION_TINT
-                        }))
+                        // The neutral icon box; the state color stays on the symbol (§1.3).
+                        .bg(k.fill)
                         .flex()
                         .items_center()
                         .justify_center()
@@ -836,22 +832,9 @@ fn members(
                     .child(
                         cell(Some(t::COL_MEM), false)
                             .gap(space::S8)
-                            .child(
-                                div()
-                                    .flex_none()
-                                    .w(t::MEMBER_BAR_WIDTH)
-                                    .h(t::MEMBER_BAR)
-                                    .rounded_full()
-                                    .bg(k.fill)
-                                    .overflow_hidden()
-                                    .child(
-                                        div()
-                                            .h_full()
-                                            .rounded_full()
-                                            .bg(k.label)
-                                            .w(relative(model::share(r.mem_bytes, max_mem))),
-                                    ),
-                            )
+                            .child(div().flex_none().w(t::MEMBER_BAR_WIDTH).child(
+                                crate::ui::native::progress(model::share(r.mem_bytes, max_mem), cx),
+                            ))
                             .child(
                                 div()
                                     .flex_1()

@@ -271,7 +271,6 @@ impl RenderOnce for SidebarSection {
             .flex_none()
             .h(metrics::SIDEBAR_SECTION)
             .mx(metrics::SIDEBAR_ROW_INSET)
-            .pt(px(8.))
             .child(row)
             .when_some(self.on_toggle, |d, f| {
                 d.on_click(move |e, w, cx| f(e, w, cx))
@@ -347,6 +346,8 @@ pub struct SidebarRow {
     disclosure: Option<bool>,
     /// A collapsed tail (`空闲 · 3`): the row at 70 % opacity.
     dim: bool,
+    /// A page that is listed but cannot open yet: the title in the muted color.
+    quiet: bool,
     // --- end v13/ux-pages ---
     /// The one right column (T1-08).
     right: RightColumn,
@@ -374,6 +375,7 @@ impl SidebarRow {
             trailing_el: None,
             disclosure: None,
             dim: false,
+            quiet: false,
             right: RightColumn::None,
             media: None,
             menu: None,
@@ -418,6 +420,13 @@ impl SidebarRow {
     /// The row opens to child rows; `open` says whether it is open now.
     pub fn disclosure(mut self, open: bool) -> Self {
         self.disclosure = Some(open);
+        self
+    }
+
+    /// A page that is listed but cannot open yet: the title in the one muted color (D1),
+    /// never a second opacity on top of it.
+    pub fn quiet(mut self, quiet: bool) -> Self {
+        self.quiet = quiet;
         self
     }
 
@@ -495,7 +504,13 @@ impl RenderOnce for SidebarRow {
             .map(|i| !i)
             .unwrap_or_else(|| emphasized(window));
         let (sel_symbol, sel_text) = k.selected_ink(active);
-        let text = if self.selected { sel_text } else { k.label };
+        let text = if self.selected {
+            sel_text
+        } else if self.quiet {
+            k.secondary
+        } else {
+            k.label
+        };
         // One media kind per group (§2.1): a row of a group drops media of
         // another kind and keeps an empty slot; state colors leave the
         // media column.
@@ -567,7 +582,10 @@ impl RenderOnce for SidebarRow {
             ),
         };
         let (count, trailing_el) = match (self.disclosure, trailing_el, count) {
-            (Some(_), None, Some(n)) => (None, Some(count_capsule(n, cx).into_any_element())),
+            (Some(_), None, Some(n)) => (
+                None,
+                Some(count_capsule(n, self.selected).into_any_element()),
+            ),
             (_, el, n) => (n, el),
         };
         let right: Option<AnyElement> = match (self.disclosure, trailing_el) {
@@ -693,7 +711,7 @@ impl RenderOnce for SidebarRow {
                         .child(div().size(px(6.)).rounded_full().bg(color)),
                 )
             })
-            .when_some(count, |d, n| d.child(count_capsule(n, cx)))
+            .when_some(count, |d, n| d.child(count_capsule(n, self.selected)))
             .children(right)
             .when_some(self.on_click, |d, f| {
                 d.on_click(move |e, w, cx| f(e, w, cx))
@@ -915,10 +933,13 @@ impl RenderOnce for SidebarGroup {
     }
 }
 
-/// The sidebar count: the count pill (20, `muted` fill, tabular figures).
-fn count_capsule(n: u32, _cx: &App) -> gpui::Div {
+/// The sidebar count: the count pill (20, `muted` fill, tabular figures). On a selected
+/// row, whose fill is `muted` too, it takes the tint that shows on a fill.
+fn count_capsule(n: u32, selected: bool) -> gpui::Div {
     // COMPLETENESS.md §1.8: the one count pill.
-    div().flex_none().child(super::badge::CountPill::new(n))
+    div()
+        .flex_none()
+        .child(super::badge::CountPill::new(n).on_fill(selected))
 }
 
 /// The hover group of a sidebar row (its disclosure chevron).

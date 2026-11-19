@@ -7,6 +7,18 @@
 //! Rules (docs/PRODUCT.md): Simplified Chinese; product nouns are only 成员, 群,
 //! 话题 and 产出; developer words only in [`dev`]. The product name is never
 //! typed here: use `{product}` and fill it with `env!("PRODUCT_NAME")`.
+//!
+//! One wording per concept (the tests at the end hold the ones a test can check):
+//! - Person: the app says 你 to the reader (「有人 @你 时提醒你」). Only the name of an
+//!   option the reader picks says 我 (「只有 @我」「有人 @我」). Inside a sentence a
+//!   mention has a space on both sides: 「{n} 条 @你 的消息」.
+//! - An AI member is 它, a person is 对方 or the name. Never TA, 他 or 她.
+//! - A failure's title says what did not happen and to what: 「没能 + 动作 + 对象」
+//!   (「没能改电脑的设置」), never a bare 「没有改成」. The reason and the next step go in
+//!   the body. The server that cannot be reached is 「连不上服务器」.
+//! - Quotation marks are 「」, also around the name of a system app or folder.
+//! - Dates have no spaces: 「11月3日」「2026年11月3日」. Weekday names come from
+//!   [`weekday`].
 
 pub mod artifacts;
 pub mod cards;
@@ -80,7 +92,26 @@ pub const fn per_system(mac: &'static str, other: &'static str) -> &'static str 
     }
 }
 
+/// The name of a weekday, 周一 to 周日: the catalog has one weekday table
+/// (`common::WEEKDAY_1` … `WEEKDAY_7`) and every view reads it here.
+pub fn weekday(day: chrono::Weekday) -> &'static str {
+    const NAMES: [&str; 7] = [
+        common::WEEKDAY_1,
+        common::WEEKDAY_2,
+        common::WEEKDAY_3,
+        common::WEEKDAY_4,
+        common::WEEKDAY_5,
+        common::WEEKDAY_6,
+        common::WEEKDAY_7,
+    ];
+    NAMES[day.num_days_from_monday() as usize]
+}
+
 /// Declares catalog entries: `copy! { KEY = "text", ... }`.
+///
+/// An entry no view reads is deleted, not kept: the test
+/// `every_entry_is_read_by_the_app` fails on one. (`allow(dead_code)` stays because
+/// some entries are read only on one system.)
 #[macro_export]
 macro_rules! copy {
     ($($name:ident = $text:expr),* $(,)?) => {
@@ -359,7 +390,7 @@ pub fn ltr(line: String) -> String {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use std::collections::HashSet;
 
@@ -480,7 +511,7 @@ mod tests {
     /// Developer words from docs/PRODUCT.md: the bullet that starts with
     /// "Developer words appear only". "model names" stands for a list of model
     /// and CLI names, so those are added here.
-    fn developer_words() -> (Vec<String>, Vec<String>) {
+    pub(crate) fn developer_words() -> (Vec<String>, Vec<String>) {
         let product = include_str!("../../../../docs/PRODUCT.md");
         let start = product
             .find("Developer words appear only")
@@ -518,7 +549,7 @@ mod tests {
 
     /// Developer words found in `text`: whole ASCII words (case-insensitive,
     /// plural "s" too) and Chinese forms anywhere.
-    fn found_words(text: &str, ascii: &[String], cjk: &[String]) -> Vec<String> {
+    pub(crate) fn found_words(text: &str, ascii: &[String], cjk: &[String]) -> Vec<String> {
         let lower = text.to_lowercase();
         let words: HashSet<&str> = lower
             .split(|c: char| !c.is_ascii_alphanumeric())
@@ -630,6 +661,12 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn the_weekday_table_starts_on_monday() {
+        assert_eq!(weekday(chrono::Weekday::Mon), "周一");
+        assert_eq!(weekday(chrono::Weekday::Sun), "周日");
     }
 
     #[test]
