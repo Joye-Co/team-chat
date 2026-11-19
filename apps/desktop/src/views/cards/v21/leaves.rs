@@ -53,9 +53,12 @@ pub fn is_required(b: &CardV2Block) -> bool {
         | CardV2Block::Rating { required, .. }
         | CardV2Block::Scale { required, .. }
         | CardV2Block::ImageChoice { required, .. }
-        | CardV2Block::Matrix { required, .. }
         | CardV2Block::Slots { required, .. }
         | CardV2Block::Poll { required, .. } => required.unwrap_or(true),
+        // The rule `form21` holds the submit button to: a matrix asks only for its required rows.
+        CardV2Block::Matrix { required, rows, .. } => {
+            required.unwrap_or(false) || rows.iter().any(|r| r.required.unwrap_or(false))
+        }
         CardV2Block::Input { required, .. } => required.unwrap_or(false),
         CardV2Block::Confirm { .. } | CardV2Block::Compare { .. } => true,
         _ => false,
@@ -2859,6 +2862,14 @@ mod leaf_tests {
         )));
         assert!(!matrix_all_required(&matrix(None, &[Some(true), None])));
         assert!(!matrix_all_required(&matrix(None, &[None, None])));
+    }
+
+    #[test]
+    fn a_matrix_is_required_only_when_the_submit_button_waits_for_it() {
+        assert!(is_required(&matrix(Some(true), &[None, None])));
+        assert!(is_required(&matrix(None, &[Some(true), None])));
+        assert!(!is_required(&matrix(None, &[None, None])));
+        assert!(!is_required(&matrix(Some(false), &[Some(false), None])));
     }
 
     fn folder(is_page: bool) -> FolderState {
