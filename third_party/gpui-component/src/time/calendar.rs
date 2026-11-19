@@ -29,6 +29,11 @@ fn month_name(month: i32) -> SharedString {
     .into()
 }
 
+/// Whether the current language writes a date year first (`2026 年 11 月`).
+fn year_first() -> bool {
+    rust_i18n::locale().starts_with("zh")
+}
+
 fn uses_compact_text(kind: CalendarItemKind) -> bool {
     kind == CalendarItemKind::Month
 }
@@ -81,12 +86,20 @@ impl RenderOnce for Calendar {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let size = self.size;
         let month_count = self.number_of_months.max(1) as f32;
+        let year_first = year_first();
         BaseCalendar::new(self.id, &self.state)
             .number_of_months(self.number_of_months)
             .first_day_of_week(self.first_day_of_week)
-            .label(|kind, value| match kind {
+            .year_first(year_first)
+            .label(move |kind, value| match kind {
                 CalendarItemKind::Previous => "‹".into(),
                 CalendarItemKind::Next => "›".into(),
+                CalendarItemKind::MonthToggle if year_first => {
+                    t!("Calendar.month_toggle", month = value).to_string().into()
+                }
+                CalendarItemKind::YearToggle if year_first => {
+                    t!("Calendar.year_toggle", year = value).to_string().into()
+                }
                 CalendarItemKind::MonthToggle | CalendarItemKind::Month => month_name(value),
                 CalendarItemKind::Weekday => match value {
                     0 => t!("Calendar.week.0"),
@@ -167,8 +180,11 @@ impl RenderOnce for Calendar {
                     },
                 )
                 .when(state.is_muted(), |this| {
-                    this.text_color(cx.theme().muted_foreground)
-                        .when(state.is_disabled(), |this| this.opacity(0.5))
+                    // A weekday header is marked disabled only so it takes no click.
+                    this.text_color(cx.theme().muted_foreground).when(
+                        state.is_disabled() && state.kind() != CalendarItemKind::Weekday,
+                        |this| this.opacity(0.5),
+                    )
                 })
                 .when(state.is_in_range(), |this| {
                     this.bg(cx.theme().accent)
@@ -192,6 +208,15 @@ impl RenderOnce for Calendar {
                 .when(state.is_today() && !state.is_active(), |this| {
                     this.bg(cx.theme().accent)
                         .text_color(cx.theme().accent_foreground)
+                })
+                // Inside the cell: the days touch, so a ring outside it would
+                // run under the next day.
+                .when(state.is_focused(), |this| {
+                    this.border_2().border_color(if state.is_active() {
+                        cx.theme().primary_foreground
+                    } else {
+                        cx.theme().ring
+                    })
                 })
                 .into_any_element()
             })

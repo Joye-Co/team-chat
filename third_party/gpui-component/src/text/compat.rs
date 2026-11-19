@@ -168,6 +168,29 @@ impl TextView {
         self.inner = self.inner.code_block_actions(f);
         self
     }
+    /// Renders a layer as wide as every fenced code block, pinned while it scrolls.
+    pub fn code_block_backdrop<F, E>(mut self, f: F) -> Self
+    where
+        F: Fn(&CodeBlock, &mut Window, &mut App) -> E + Send + Sync + 'static,
+        E: IntoElement,
+    {
+        self.inner = self.inner.code_block_backdrop(f);
+        self
+    }
+    /// Highlights fenced code blocks with the caller's own highlighter (byte
+    /// ranges of [`CodeBlock::code`]). Pass the same `Arc` on every frame: a
+    /// block keeps its highlights only while the highlighter is the same one.
+    pub fn code_block_highlighter(
+        mut self,
+        highlighter: std::sync::Arc<
+            dyn Fn(&CodeBlock) -> Vec<(std::ops::Range<usize>, gpui::HighlightStyle)>
+                + Send
+                + Sync,
+        >,
+    ) -> Self {
+        self.inner = self.inner.shared_code_block_highlighter(highlighter);
+        self
+    }
     /// Renders an element in the corner of every table.
     pub fn table_actions<F, E>(mut self, f: F) -> Self
     where
@@ -395,6 +418,10 @@ pub(super) fn resolve_component_style(
             StyleRefinement::default().text_size(text_size)
         })
         .with_code_block(code_block)
+        .with_code_block_one_line(
+            legacy.code_block_one_line.clone(),
+            legacy.code_block_one_line_actions_top,
+        )
         .with_table(table)
         .with_table_head(table_head)
         .with_table_cell(table_cell)
