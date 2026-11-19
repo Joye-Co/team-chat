@@ -411,6 +411,7 @@ fn tile(
                         message_id: message_id.clone(),
                         file: file_open.clone(),
                         provider: p_open.clone(),
+                        set: None,
                     },
                     window,
                     cx,

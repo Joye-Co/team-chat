@@ -3,7 +3,8 @@
 //! One place configures gpui-component's `TextView` for chat: selectable
 //! text, a copy button on every code block, and links that open in the
 //! browser only for safe schemes, `@name` as a mention pill, and code fences
-//! read the way Slack reads them. Views call [`message_body`]; they never
+//! read the way Slack reads them, and Chinese `**结论：**正文` in bold (see
+//! [`source::fix_cjk_strong`]). Views call [`message_body`]; they never
 //! build a `TextView` for message text themselves.
 
 mod source;
@@ -29,7 +30,8 @@ pub use source::{MdBlock, mark_query, top_level_blocks};
 // --- end inc-refs ---
 pub use source::normalize_fences;
 use source::{
-    AFTER_MARK, EDITED_SCHEME, MENTION_ME_SCHEME, MENTION_SCHEME, append_edited_mark, link_mentions,
+    AFTER_MARK, EDITED_SCHEME, MENTION_ME_SCHEME, MENTION_SCHEME, append_edited_mark,
+    fix_cjk_strong, link_mentions,
 };
 
 use crate::{copy::timeline as t, theme};
@@ -123,7 +125,7 @@ pub fn message_body_refs(
     refs: Option<&crate::views::refs::markdown::RefsBody>,
 ) -> (TextView, bool) {
     let text: SharedString = text.into();
-    let source = link_mentions(&normalize_fences(&text), mentions);
+    let source = link_mentions(&fix_cjk_strong(&normalize_fences(&text)), mentions);
     let marked = edited
         .then(|| append_edited_mark(&source, t::EDITED))
         .flatten();

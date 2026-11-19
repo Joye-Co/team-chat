@@ -1,0 +1,24 @@
+{
+  "v": 2,
+  "rev": 1,
+  "intent": "ask",
+  "title": "迁移数据库：按这个计划做可以吗？",
+  "fallback": "迁移计划：1 备份生产库 2 在预发演练 3 周六凌晨切换 4 观察一天。可以吗？",
+  "ask": { "from": ["requester"], "promise": "你确认之前，我不会动生产库。" },
+  "blocks": [
+    {
+      "type": "plan",
+      "id": "steps",
+      "items": [
+        { "text": "备份生产库", "state": "pending" },
+        { "text": "在预发演练一遍", "state": "pending" },
+        { "text": "周六凌晨切换", "state": "pending" },
+        { "text": "观察一天", "state": "pending" }
+      ]
+    }
+  ],
+  "actions": [
+    { "id": "go", "label": "按计划做", "style": "primary" },
+    { "id": "change", "label": "要改", "kind": "reject" }
+  ]
+}

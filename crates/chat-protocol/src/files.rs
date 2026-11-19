@@ -665,6 +665,14 @@ pub struct AddArtifactVersionRequest {
         skip_serializing_if = "Option::is_none"
     )]
     pub parent_version: Option<u32>,
+    /// `Some(true)`: without `data`, the version starts with the data snapshot of its parent
+    /// version when the same bot member made both. `None`: it starts empty.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub keep_data: Option<bool>,
 }
 
 impl AddArtifactVersionRequest {
@@ -719,6 +727,14 @@ pub struct MachineCreateArtifactRequest {
         skip_serializing_if = "Option::is_none"
     )]
     pub data: Option<Value>,
+    /// 1.1: the author's preview card text and figures (`chat-run artifact create --summary
+    /// --metrics`).
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub preview: Option<ArtifactPreview>,
 }
 
 impl MachineCreateArtifactRequest {
@@ -726,6 +742,7 @@ impl MachineCreateArtifactRequest {
         check_chars("title", &self.title, 1, MAX_TITLE_CHARS)?;
         check_version_input(&self.entry, &self.files, self.note.as_deref())?;
         check_events(self.events.as_deref())?;
+        check_preview(self.preview.as_ref())?;
         check_version_extras(self.media.as_ref(), self.data.as_ref())
     }
 }
@@ -873,6 +890,13 @@ impl ArtifactDataFrame {
 #[serde(rename_all = "camelCase")]
 pub struct ArtifactDataAck {
     pub data_rev: u64,
+    /// A `clientPushId` the server took before; `data_rev` is the rev that push made.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub duplicate: Option<bool>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -1085,12 +1109,22 @@ pub struct PutArtifactDataRequest {
         skip_serializing_if = "Option::is_none"
     )]
     pub cause: Option<String>,
+    /// As `artifact.data.clientPushId`: a retry with the same id is not applied again.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub client_push_id: Option<String>,
 }
 
 impl PutArtifactDataRequest {
     pub fn validate(&self) -> Validation {
         if json_bytes(&self.data) > MAX_ARTIFACT_DATA_BYTES {
             return fail("data", "data exceeds 256 KiB");
+        }
+        if let Some(c) = &self.client_push_id {
+            check_chars("clientPushId", c, 1, 64)?;
         }
         self.cause
             .as_deref()

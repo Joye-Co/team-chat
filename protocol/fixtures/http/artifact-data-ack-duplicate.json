@@ -1,0 +1,9 @@
+{
+  "kind": "ArtifactDataAck",
+  "valid": true,
+  "description": "a push id the server took before, with the rev it made",
+  "value": {
+    "dataRev": 2,
+    "duplicate": true
+  }
+}

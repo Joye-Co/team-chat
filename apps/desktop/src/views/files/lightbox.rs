@@ -15,6 +15,9 @@
 //! - Esc, Space or a click on the screen around the picture closes it; the focus goes back
 //!   where it was.
 //!
+//! A card's pictures (its image blocks and the screenshots of its 证据) open the same viewer
+//! with a [`Set`]: it goes through that card's pictures instead of the 话题's.
+//!
 //! [`open`] draws it in the main window ([`crate::app::RootView`]); a window without one
 //! opens the picture with the default app, as before.
 
@@ -57,6 +60,18 @@ pub struct Opening {
     pub message_id: String,
     pub file: FileAttachment,
     pub provider: Arc<dyn ChatProvider>,
+    /// The pictures to go through when they are not files of the 话题's messages (a
+    /// card's images); `None` goes through the 话题's pictures.
+    pub set: Option<Set>,
+}
+
+/// Pictures of one message that are not among the 话题's files (a card's image blocks
+/// and 证据 screenshots), in the order the message shows them.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Set {
+    pub files: Vec<FileAttachment>,
+    pub author_id: String,
+    pub created_at: Millis,
 }
 
 /// Opens the viewer at `opening` in this window, or, in a window without the main view,
@@ -138,6 +153,8 @@ pub struct Lightbox {
     /// The last press began on the screen around the picture (a click there closes).
     pressed_outside: bool,
     stage: Stage,
+    /// The pictures came with the opening (a card's): a change in the 话题 keeps them.
+    fixed: bool,
     strip: ScrollHandle,
     focus: FocusHandle,
     return_focus: Option<FocusHandle>,
@@ -180,7 +197,20 @@ impl Lightbox {
         cx: &mut Context<Self>,
     ) -> Self {
         let provider = services.provider.clone();
-        let mut items = items_of(&provider, &opening.group_id, &opening.topic_id);
+        let fixed = opening.set.is_some();
+        let mut items = match &opening.set {
+            Some(set) => set
+                .files
+                .iter()
+                .map(|file| Item {
+                    file: file.clone(),
+                    message_id: opening.message_id.clone(),
+                    author_id: set.author_id.clone(),
+                    created_at: set.created_at,
+                })
+                .collect(),
+            None => items_of(&provider, &opening.group_id, &opening.topic_id),
+        };
         let at = |items: &[Item]| {
             items.iter().position(|i| {
                 i.message_id == opening.message_id && i.file.file_id == opening.file.file_id
@@ -231,6 +261,7 @@ impl Lightbox {
             drag: None,
             pressed_outside: false,
             stage: Stage::default(),
+            fixed,
             strip: ScrollHandle::new(),
             focus,
             return_focus,
@@ -244,6 +275,9 @@ impl Lightbox {
 
     /// The pictures changed (a new one, one deleted): keep the one shown.
     fn refresh(&mut self, cx: &mut Context<Self>) {
+        if self.fixed {
+            return;
+        }
         let items = items_of(&self.provider, &self.group_id, &self.topic_id);
         if items.is_empty() || items == self.items {
             return;
@@ -1026,6 +1060,60 @@ fn separator(color: gpui::Hsla) -> gpui::Div {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A card's pictures (a [`Set`]) are what the viewer goes through, by the card's
+    /// author, starting at the one clicked; a change in the 话题 does not swap in its files.
+    #[gpui::test]
+    fn a_card_set_is_what_the_viewer_goes_through(cx: &mut gpui::TestAppContext) {
+        use gpui::AppContext as _;
+        cx.update(gpui_component::init);
+        let provider: Arc<dyn ChatProvider> = crate::fake::FakeProvider::new();
+        let file = |id: &str| FileAttachment {
+            file_id: id.into(),
+            name: format!("{id}.png"),
+            size: 10,
+            mime: "image/png".into(),
+            width: Some(1440),
+            height: Some(900),
+            sha256: format!("{id}-sha"),
+        };
+        let opening = Opening {
+            group_id: "g-dev".into(),
+            topic_id: "t-api".into(),
+            message_id: "m-card".into(),
+            file: file("b"),
+            provider: provider.clone(),
+            set: Some(Set {
+                files: vec![file("a"), file("b"), file("c")],
+                author_id: "u-forge".into(),
+                created_at: 42,
+            }),
+        };
+        let window = cx
+            .update(|cx| {
+                let services = Services::new(provider, cx);
+                cx.open_window(Default::default(), move |window, cx| {
+                    cx.new(|cx| Lightbox::new(&services, opening, window, cx))
+                })
+            })
+            .expect("the viewer opens");
+        window
+            .update(cx, |viewer, _, cx| {
+                assert_eq!(viewer.items.len(), 3);
+                assert_eq!(viewer.index, 1, "it starts at the picture clicked");
+                assert!(
+                    viewer
+                        .items
+                        .iter()
+                        .all(|i| i.author_id == "u-forge" && i.created_at == 42)
+                );
+                viewer.refresh(cx);
+                assert_eq!(viewer.items.len(), 3, "the card's pictures stay");
+                viewer.step(1, cx);
+                assert_eq!(viewer.current().file.file_id, "c");
+            })
+            .expect("the viewer is there");
+    }
 
     #[test]
     fn fitting_never_enlarges() {

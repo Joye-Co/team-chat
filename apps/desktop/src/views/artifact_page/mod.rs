@@ -1,8 +1,9 @@
 //! 产出 in the main window (Artifact.dc.html): one 产出 with its page live
 //! in a frame (a child web view from `crates/artifact-view`, [`WebEmbed`]),
 //! the version picker, and the 来龙去脉 side column (来自话题, 做的人,
-//! 版本, 页面里的回应, 用到的决定, 被引用). Without a page on disk it shows
-//! a card with 打开 (the native 产出 window). Also the list of every 产出,
+//! 版本, 页面里的回应, 用到的决定, 被引用). A Markdown 产出 reads on the
+//! page itself (`views::media::in_place`); any other file shows a card with
+//! 打开 (the native 产出 window). Also the list of every 产出,
 //! and the 产出 pane beside a 话题 (`pane`).
 //!
 //! Bridge capabilities follow the author (R10, `views/artifacts/host.rs`): every
@@ -635,8 +636,21 @@ impl ArtifactPage {
         let height = window.viewport_size().height
             - crate::ui::native::metrics::TOOLBAR_ROW
             - crate::ui::native::window_chrome::height(window);
-        let body = match folder {
-            Some(Ok(folder)) if folder.is_page => embed(
+        // A Markdown document reads on the page itself, in the one measure.
+        let reader = match &folder {
+            Some(Ok(f)) => crate::views::media::in_place::markdown(
+                "artifact-page",
+                f,
+                &detail.summary.title,
+                crate::ui::native::tokens::layout::IN_THREAD,
+                page::m::GUTTER,
+                cx,
+            ),
+            _ => None,
+        };
+        let body = match (folder, reader) {
+            (_, Some(doc)) => doc,
+            (Some(Ok(folder)), None) if folder.is_page => embed(
                 &self.services,
                 "artifact-page",
                 detail,
@@ -647,7 +661,7 @@ impl ArtifactPage {
             )
             .fill()
             .into_any_element(),
-            Some(Ok(_)) | Some(Err(_)) => {
+            (Some(_), None) => {
                 let provider = self.services.provider.clone();
                 let id = detail.summary.id.clone();
                 div()
@@ -689,7 +703,7 @@ impl ArtifactPage {
                     )
                     .into_any_element()
             }
-            None => div().size_full().into_any_element(),
+            (None, None) => div().size_full().into_any_element(),
         };
         div()
             .flex_1()

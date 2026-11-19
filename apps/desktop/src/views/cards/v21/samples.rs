@@ -144,6 +144,7 @@ fn acked(
                     by: author.into(),
                     mode,
                     eta_ms: Some(2000),
+                    reason: None,
                 },
             },
             at: 0,

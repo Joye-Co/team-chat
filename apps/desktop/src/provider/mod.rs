@@ -2727,6 +2727,13 @@ impl ChatProvider for CoreProvider {
             .image(&a.client, file_id, move || this.emit(vec![change]))
     }
 
+    fn card_image_file(&self, file_id: &str) -> Option<crate::data::FileAttachment> {
+        self.shared
+            .cards
+            .image_file(file_id)
+            .map(|f| convert::file_ref(&f))
+    }
+
     // --- desk track (1.1.0 首页): provider/desk.rs ---
 
     fn asks_for_me(&self) -> Vec<crate::data::v2::AskItem> {

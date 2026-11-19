@@ -7,7 +7,8 @@
 //!   background ([`store::analyze`]: frames, peaks, pages, parsed text) and keeps the
 //!   result for every view.
 //! - [`inline`] draws the height-limited preview in the 话题 timeline; [`full`] draws the
-//!   complete view in the 产出 viewer window ([`viewer`]) and the 产出 pane.
+//!   complete view in the 产出 viewer window ([`viewer`]); [`in_place`] reads a Markdown
+//!   产出 in the 产出 pane and on the 产出 page.
 //! - [`states`] are the upload and preview-generation rows.
 //!
 //! Everything renders on this machine: HTML through the isolated [`WebEmbed`]
@@ -17,6 +18,7 @@
 //! [`WebEmbed`]: crate::ui::web_embed::WebEmbed
 
 pub mod full;
+pub mod in_place;
 pub mod inline;
 pub mod native;
 pub mod parts;

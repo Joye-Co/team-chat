@@ -24,6 +24,7 @@ import { addSuperviseFixtures } from "./fixtures-supervise.ts";
 import { addAlertsFixtures } from "./fixtures-alerts.ts";
 import { addPersonalAiFixtures } from "./fixtures-personal-ai.ts";
 import { addHideDeleteFixtures } from "./fixtures-hide-delete.ts";
+import { addExampleFixtures } from "./fixtures-examples.ts";
 import { run, type Tree } from "./generated.ts";
 
 type Fixture = {
@@ -369,6 +370,7 @@ addInteractFixtures({ ok, bad, T0, ID, base, message });
 addSettingsFixtures({ ok, bad, T0, ID, base });
 addGapFixtures({ ok, bad, T0, ID, base, message });
 addFilesFixtures({ ok, bad, T0, ID, base, message });
+addExampleFixtures({ ok, ID });
 addMemberFixtures({ ok, bad, T0, ID, base, message });
 addMemoryFixtures({ ok, bad, T0, ID });
 addPushFixtures({ ok, bad, T0, ID });

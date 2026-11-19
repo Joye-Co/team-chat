@@ -2419,6 +2419,11 @@ pub trait ChatProvider: Send + Sync + 'static {
     fn card_image(&self, _group_id: &str, _topic_id: &str, _file_id: &str) -> Option<PathBuf> {
         None
     }
+    /// The file of a card image once [`Self::card_image`] has its local copy, for the
+    /// image viewer (name, size, size in pixels). `None` before.
+    fn card_image_file(&self, _file_id: &str) -> Option<FileAttachment> {
+        None
+    }
 
     // --- v2 screens (1.1.0; all have defaults, see `data::v2`) ---
 
