@@ -35,13 +35,14 @@ skip_build=0
 for arg in "$@"; do
   case "$arg" in
     --skip-build) skip_build=1 ;;
-    -h | --help) sed -n '2,29p' "$0"; exit 0 ;;
+    -h | --help) usage; exit 0 ;;
     *) die "unknown argument: $arg" ;;
   esac
 done
 
 need jq curl
 cargo_env
+[ "$skip_build" = 1 ] || warn_low_disk
 
 is_windows() { case "$(uname -s)" in MINGW* | MSYS* | CYGWIN*) return 0 ;; *) return 1 ;; esac; }
 # native <path>: the path as programs of this system take it.

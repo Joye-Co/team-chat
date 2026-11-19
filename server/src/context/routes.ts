@@ -4,6 +4,7 @@
 // docs/plans/usable/design-visibility.zh.md 3.3).
 import {
   type Artifact,
+  type ArtifactDataResponse,
   type ArtifactResponse,
   type ContextHit,
   type ContextMessage,
@@ -27,6 +28,7 @@ import { machineRun } from "../bots/routes";
 import { memberInfo } from "../bots/room";
 import { deskStub } from "../bots/env";
 import { runIndex } from "../bots/store";
+import { ARTIFACT_GET_DATA_RPC } from "../files/bridge";
 import { fileKey } from "../files/routes";
 import { serveObject } from "../files/store";
 import { newestFirst, ROOM_SEARCH_RPC } from "../search/frame";
@@ -124,9 +126,10 @@ async function readGroup(env: Env, rd: Reader, url: URL): Promise<string> {
 /**
  * The first readable group whose room answers `name`: the run's own group first, then the other
  * groups it may read in parallel; `not_found` when none does. Ids of topics and cards work across
- * the groups a run may read.
+ * the groups a run may read. `what` names what was looked for in the refusal (an id the run may
+ * not read reads like an unknown one).
  */
-async function findIn<T>(env: Env, rd: Reader, name: string, args: unknown): Promise<{ gid: string; value: T }> {
+async function findIn<T>(env: Env, rd: Reader, name: string, args: unknown, what: string): Promise<{ gid: string; value: T }> {
   const own = await roomStub(env, rd.run.group_id).rpc(rd.run.group_id, name, rd.actor, args);
   if (own.ok) return { gid: rd.run.group_id, value: own.value as T };
   if (own.error.code !== "not_found") unwrap(own);
@@ -143,7 +146,7 @@ async function findIn<T>(env: Env, rd: Reader, name: string, args: unknown): Pro
     }),
   );
   const hit = found.find((x) => x !== null);
-  if (!hit) throw new ApiError("not_found", "not found");
+  if (!hit) throw new ApiError("not_found", `no ${what} in the groups this run may read`);
   return hit;
 }
 
@@ -161,7 +164,7 @@ async function readTopic(env: Env, rd: Reader, url: URL, opts: { topicOptional?:
   if (gid !== run.group_id) {
     if (!named) {
       if (opts.topicOptional) return { gid };
-      throw new ApiError("invalid", "topic is required with another group");
+      throw new ApiError("invalid", "another group needs a topic id (--topic): find one with chat-run search --query <text> --in <groupId> or chat-run artifact list --in <groupId>");
     }
     await readRoom(env, rd, gid, "bots.topicExists", { topicId: t });
     return { gid, topicId: t };
@@ -171,7 +174,7 @@ async function readTopic(env: Env, rd: Reader, url: URL, opts: { topicOptional?:
     await readRoom(env, rd, gid, "bots.topicExists", { topicId: t });
     return { gid, topicId: t };
   }
-  return { gid: (await findIn(env, rd, "bots.topicExists", { topicId: t })).gid, topicId: t };
+  return { gid: (await findIn(env, rd, "bots.topicExists", { topicId: t }, `topic ${t}`)).gid, topicId: t };
 }
 
 /** Entry files `artifact get` gives as text. */
@@ -358,6 +361,24 @@ export function registerContextRoutes(): void {
     },
   });
 
+  // `chat-run artifact data` without `--file`: the current data of a 产出 version and its rev,
+  // so a run can change a shared page's state without remembering it from an earlier turn.
+  registerRoute({
+    method: "GET",
+    path: "/v1/machine/runs/:id/artifacts/:artifactId/data",
+    auth: "none",
+    async handler({ request, env, params, url }) {
+      const rd = await reader(request, env, params.id);
+      if (!ID_RE.test(params.artifactId)) throw new ApiError("invalid", "artifactId must be an id");
+      const version = intParam(url, "version", 1, 1_000_000_000, undefined);
+      if (version === undefined) throw new ApiError("invalid", "version is required");
+      // Page data is the state of a page the run's member works on: its own group only.
+      const ix = await env.DB.prepare("SELECT group_id FROM artifacts WHERE id = ?").bind(params.artifactId).first<{ group_id: string }>();
+      if (ix && ix.group_id !== rd.run.group_id) throw new ApiError("forbidden", "page data is read in the run's own group");
+      return (await readRoom(env, rd, rd.run.group_id, ARTIFACT_GET_DATA_RPC, { artifactId: params.artifactId, version })) as ArtifactDataResponse;
+    },
+  });
+
   registerRoute({
     method: "GET",
     path: "/v1/machine/runs/:id/cards/:messageId",
@@ -365,7 +386,7 @@ export function registerContextRoutes(): void {
     async handler({ request, env, params }) {
       const rd = await reader(request, env, params.id);
       if (!ID_RE.test(params.messageId)) throw new ApiError("invalid", "messageId must be an id");
-      const { gid, value: res } = await findIn<CardRead>(env, rd, "context.card", { messageId: params.messageId });
+      const { gid, value: res } = await findIn<CardRead>(env, rd, "context.card", { messageId: params.messageId }, `card with message id ${params.messageId}`);
       await noteRead(env, rd, [gid]);
       const state = (res.row.ext.cardState ?? {}) as {
         ask?: { status: string; from?: string[] };

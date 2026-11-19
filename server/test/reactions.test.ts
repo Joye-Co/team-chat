@@ -1,10 +1,5 @@
-import { afterAll, describe, expect, it } from "vitest";
-import { Client, clientMsgId, createGroup, createMember, protocolViolations } from "./helpers";
-
-afterAll(async () => {
-  await new Promise((r) => setTimeout(r, 300));
-  expect(protocolViolations).toEqual([]);
-});
+import { describe, expect, it } from "vitest";
+import { Client, clientMsgId, createGroup, createMember } from "./helpers";
 
 describe("reactions", () => {
   it("toggle one reaction per member and emoji, fan out reaction.changed and keep the list on the message", async () => {

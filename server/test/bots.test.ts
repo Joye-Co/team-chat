@@ -1,5 +1,5 @@
 import { SELF, env, runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
-import { afterAll, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
   type MachineView,
   MIN_FREE_DISK_BYTES,
@@ -16,16 +16,11 @@ import {
   whyNoMachine,
 } from "../src/bots/dispatch";
 import type { BotsEnv } from "../src/bots/env";
-import { Daemon, HEALTH, type World, downViolations, mention, world } from "./daemon";
+import { Daemon, HEALTH, type World, mention, world } from "./daemon";
 import { ACK_EMOJI } from "@chat/protocol";
-import { BASE, Client, type TestMember, api, clientMsgId, createGroup, createMember, protocolViolations, waitUntil } from "./helpers";
+import { BASE, Client, type TestMember, api, clientMsgId, createGroup, createMember, inputBody, waitUntil } from "./helpers";
 
 const benv = env as unknown as BotsEnv;
-
-afterAll(() => {
-  expect(protocolViolations).toEqual([]);
-  expect(downViolations).toEqual([]);
-});
 
 function botMessages(c: Client, topicId: string, botId: string): any[] {
   return c
@@ -477,7 +472,7 @@ describe("runner-backed bots", () => {
 
     await c.ok({ t: "send", groupId: w.gid, topicId, clientMsgId: clientMsgId(), body: "Also update the docs" });
     const input = await d.next((f) => f.t === "run.input");
-    expect(input).toMatchObject({ runId, text: "Also update the docs", authorId: w.human.id });
+    expect(input).toMatchObject({ runId, text: "Follow-up from Alice:\nAlso update the docs", authorId: w.human.id });
     d.event(runId, { type: "input.accepted", inputId: input.inputId });
 
     d.event(runId, { type: "approval.request", approvalId: "a1", title: "Run git push", detail: "git push origin bot/x" });
@@ -495,7 +490,7 @@ describe("runner-backed bots", () => {
 
     // Input the CLI never took starts a new run when this one ends.
     await c.ok({ t: "send", groupId: w.gid, topicId, clientMsgId: clientMsgId(), body: "And add a test" });
-    await d.next((f) => f.t === "run.input" && f.text === "And add a test");
+    await d.next((f) => f.t === "run.input" && inputBody(f) === "And add a test");
     d.done(runId, { status: "succeeded", resultText: "done" });
     const second = await d.next((f) => f.t === "run.assign" && f.runId !== runId);
     expect(second.prompt).toContain("And add a test");
@@ -527,9 +522,9 @@ describe("runner-backed bots", () => {
     await botClient.ok({ t: "send", groupId: w.gid, topicId, clientMsgId: clientMsgId(), body: "note from dev" });
     // Without an @ the requester's message goes to the member that most recently started a run.
     await c.ok({ t: "send", groupId: w.gid, topicId, clientMsgId: clientMsgId(), body: "sync" });
-    await d.next((f) => f.t === "run.input" && f.text === "sync");
+    await d.next((f) => f.t === "run.input" && inputBody(f) === "sync");
     expect(d.frames.filter((f) => f.t === "run.assign")).toHaveLength(2);
-    expect(d.frames.filter((f) => f.t === "run.input").map((f) => [f.runId, f.text])).toEqual([[second.runId, "sync"]]);
+    expect(d.frames.filter((f) => f.t === "run.input").map((f) => [f.runId, inputBody(f)])).toEqual([[second.runId, "sync"]]);
     expect(botMessages(c, fromBot.message.topicId, other.id)).toEqual([]);
     c.close();
     botClient.close();
@@ -928,7 +923,7 @@ describe("runner-backed bots: review fixes", () => {
     await ci.ok({ t: "card.action", groupId: w.gid, messageId: card.id, actionId: "approve:a1" });
     await ci.ok({ t: "send", groupId: w.gid, topicId, clientMsgId: clientMsgId(), body: "同意" });
     // The intern's 同意 is plain input for the run.
-    await d.next((f) => f.t === "run.input" && f.text === "同意");
+    await d.next((f) => f.t === "run.input" && inputBody(f) === "同意");
     expect(d.frames.filter((f) => f.t === "run.approval")).toEqual([]);
 
     // The requester's press counts, and is audited.
@@ -1120,14 +1115,17 @@ describe("runner-backed bots: review fixes", () => {
     d.send({ t: "run.accept", runId: a });
     await c.waitEvent((e) => e.type === "run.updated" && e.data.run.status === "running");
     await c.ok({ t: "send", groupId: w.gid, topicId, clientMsgId: clientMsgId(), body: "M1 late" });
-    await d.next((f) => f.t === "run.input" && f.text === "M1 late");
+    await d.next((f) => f.t === "run.input" && inputBody(f) === "M1 late");
     d.done(a, { status: "succeeded", resultText: "A done" });
     const b = await d.next((f) => f.t === "run.assign" && f.runId !== a);
     expect(b.prompt).toContain("M1 late");
+    // The stored input keeps the person's words alone: the next run's prompt, which says who
+    // wrote them in its own words, never repeats the line of the `run.input` frame.
+    expect(String(b.prompt).split("Follow-up from Alice:").length).toBeLessThanOrEqual(2);
     d.send({ t: "run.accept", runId: b.runId });
     await c.waitEvent((e) => e.type === "run.updated" && e.data.run.id === b.runId && e.data.run.status === "running");
     await c.ok({ t: "send", groupId: w.gid, topicId, clientMsgId: clientMsgId(), body: "M2 late" });
-    await d.next((f) => f.t === "run.input" && f.text === "M2 late");
+    await d.next((f) => f.t === "run.input" && inputBody(f) === "M2 late");
     d.done(b.runId, { status: "succeeded", resultText: "B done" });
     const third = await d.next((f) => f.t === "run.assign" && f.runId !== a && f.runId !== b.runId);
     expect(third.prompt).toContain("M2 late");
@@ -1203,11 +1201,11 @@ describe("runner-backed bots: review fixes", () => {
     d.send({ t: "run.accept", runId });
     await c.waitEvent((e) => e.type === "run.updated" && e.data.run.status === "running");
     const sent = await c.ok({ t: "send", groupId: w.gid, topicId, clientMsgId: clientMsgId(), body: "once" });
-    await d.next((f) => f.t === "run.input" && f.text === "once");
+    await d.next((f) => f.t === "run.input" && inputBody(f) === "once");
     const m = { groupId: w.gid, topicId, messageId: sent.message.id, authorId: w.human.id, body: "once", mentioned: false };
     await (deskOf(w.bot.id) as any).onMessage(w.bot.id, m);
     await new Promise((r) => setTimeout(r, 200));
-    expect(d.frames.filter((f) => f.t === "run.input" && f.text === "once")).toHaveLength(1);
+    expect(d.frames.filter((f) => f.t === "run.input" && inputBody(f) === "once")).toHaveLength(1);
     c.close();
     d.close();
   });

@@ -5,13 +5,12 @@ import { z } from "zod";
 import product from "../../../product.json";
 import { authenticateMachine } from "../bots/store";
 import { auditStatement } from "../core/audit";
-import type { AuthContext } from "../core/auth";
+import { type AuthContext, requireAdmin } from "../core/auth";
 import {
   INVITE_CODE_LENGTH,
   LEGACY_INVITE_CODE_LENGTH,
   normalizeInviteCode,
   sha256Hex,
-  timingSafeEqualString,
 } from "../core/crypto";
 import type { Env } from "../core/env";
 import { ApiError } from "../core/errors";
@@ -237,10 +236,7 @@ export function registerOpsRoutes(): void {
     path: "/v1/admin/releases/:version/withdraw",
     auth: "none",
     async handler({ env, request, url, params, body }) {
-      const given = request.headers.get("x-admin-secret") ?? "";
-      const expected = env.ADMIN_SECRET ?? "";
-      const ok = await timingSafeEqualString(given, expected);
-      if (!expected || !ok) throw new ApiError("unauthorized", "invalid admin secret");
+      await requireAdmin(request, env);
       const b = await body(z.object({ restore: z.boolean().optional() }));
       // A version is withdrawn as a whole: its DMG and the files of its other platforms.
       const row =
@@ -358,10 +354,7 @@ async function downloadVersion(env: Env, request: Request, url: URL, version: st
 
 /** Stores the file of `version` for `platform` (admin secret) and answers with its `UpdateInfo`. */
 async function publishRelease(env: Env, request: Request, url: URL, version: string, platform: ReleasePlatform): Promise<UpdateInfo> {
-  const given = request.headers.get("x-admin-secret") ?? "";
-  const expected = env.ADMIN_SECRET ?? "";
-  const ok = await timingSafeEqualString(given, expected);
-  if (!expected || !ok) throw new ApiError("unauthorized", "invalid admin secret");
+  await requireAdmin(request, env);
   if (!ReleaseVersion.safeParse(version).success) throw new ApiError("invalid", "version must be MAJOR.MINOR.PATCH");
   const sha256 = (request.headers.get("x-sha256") ?? "").trim();
   if (!/^[0-9a-f]{64}$/.test(sha256)) throw new ApiError("invalid", "X-Sha256 must be 64 lowercase hex");

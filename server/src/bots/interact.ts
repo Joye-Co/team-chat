@@ -6,6 +6,7 @@
 import type { Expect, PartRef } from "@chat/protocol";
 import { type Env, gatewayStub } from "../core/env";
 import { featureTransient } from "../core/gateway";
+import { logger } from "../core/logger";
 import type { RoomContext } from "../core/registry";
 import { type CardEventDelivery, registerCardEventHandler, registerRequesterResolver } from "../cards2/delivery";
 import { onDirectoryForget } from "../cards2/state";
@@ -25,13 +26,13 @@ export interface InteractionIn {
   topicId: string;
   eventId: string;
   source:
-    | { kind: "card"; messageId: string; blockId?: string; actionId?: string; rev: number }
+    | { kind: "card"; messageId: string; blockId?: string; actionId?: string; rev: number; currentRev?: number }
     | { kind: "artifact"; artifactId: string; version: number; eventId: string; ask: boolean };
   /** Card event name, or the page event name. */
   event: string;
   value?: unknown;
   actorId: string;
-  /** Card: the block (or footer action) at that rev, for the envelope. */
+  /** Card: the block (or footer action) as the card has it now (`source.currentRev ?? source.rev`), for the envelope. */
   block?: unknown;
   /** Card title or 产出 title, for the text form. */
   title?: string;
@@ -55,6 +56,8 @@ export interface LiveCardEvent {
   at: number;
   /** The block (or footer action) the event names, at the card's current rev. */
   block?: unknown;
+  /** The card's current rev (`rev` is the one the person saw; a live event may come from an older one). */
+  cardRev?: number;
   /** The card's title. */
   title?: string;
 }
@@ -99,20 +102,26 @@ async function liveExpect(env: Env, authorId: string): Promise<Expect> {
  */
 export async function expectFor(env: Env, authorId: string, topicId: string): Promise<Expect> {
   const r = await responder(env, authorId);
-  if (r.kind === "none") return { by: authorId, mode: "none" };
+  if (r.kind === "none") return gone(authorId);
   if (r.kind === "live") return liveExpect(env, authorId);
   try {
     return { by: authorId, ...(await deskStub(env, authorId).expectFor(authorId, topicId)) };
-  } catch {
-    return { by: authorId, mode: "none" };
+  } catch (err) {
+    logger.warn("expect of a runner member failed", { err });
+    return { by: authorId, mode: "none", reason: "run.failed" };
   }
 }
+
+/** The `expect` for a member that was removed or turned off: nobody responds. */
+const gone = (memberId: string): Expect => ({ by: memberId, mode: "none", reason: "member.inactive" });
 
 async function toRunner(env: Env, authorId: string, x: InteractionIn): Promise<Expect> {
   try {
     return { by: authorId, ...(await deskStub(env, authorId).interaction(authorId, x)) };
-  } catch {
-    return { by: authorId, mode: "none" };
+  } catch (err) {
+    // The event reached nobody: the ack says so, and the log says why.
+    logger.warn("interaction delivery to a runner member failed", { event: x.event, source: x.source.kind, err });
+    return { by: authorId, mode: "none", reason: "run.failed" };
   }
 }
 
@@ -122,11 +131,13 @@ async function toRunner(env: Env, authorId: string, x: InteractionIn): Promise<E
  */
 export async function deliverCardEvent(room: RoomContext, authorId: string, e: LiveCardEvent): Promise<Expect> {
   const r = await responder(room.env, authorId);
-  if (r.kind === "none") return { by: authorId, mode: "none" };
+  if (r.kind === "none") return gone(authorId);
   if (r.kind === "runner") {
     const source: InteractionIn["source"] = { kind: "card", messageId: e.messageId, rev: e.rev };
     if (e.blockId) source.blockId = e.blockId;
     if (e.actionId) source.actionId = e.actionId;
+    // The card changed since the person saw it: say which rev `block` is from.
+    if (e.cardRev !== undefined && e.cardRev > e.rev) source.currentRev = e.cardRev;
     const x: InteractionIn = { groupId: room.groupId, topicId: e.topicId, eventId: e.eventId, source, event: e.event, actorId: e.actorId };
     const value = e.inputs !== undefined ? { ...(e.value !== undefined ? { value: e.value } : {}), inputs: e.inputs } : e.value;
     if (value !== undefined) x.value = value;
@@ -153,7 +164,7 @@ export async function deliverCardEvent(room: RoomContext, authorId: string, e: L
 /** A page event for the version's creator (transient `artifact.event`, or BotDesk). */
 export async function deliverPageEvent(room: RoomContext, creatorId: string, e: LivePageEvent): Promise<Expect> {
   const r = await responder(room.env, creatorId);
-  if (r.kind === "none") return { by: creatorId, mode: "none" };
+  if (r.kind === "none") return gone(creatorId);
   if (r.kind === "runner") {
     const x: InteractionIn = {
       groupId: room.groupId,
@@ -187,13 +198,14 @@ export async function deliverPageEvent(room: RoomContext, creatorId: string, e: 
 
 type CardRow = { ext: string | null };
 
-/** The block (or footer action) a card event names, and the card's title, from the room's copy. */
-function cardContext(room: RoomContext, e: CardEventDelivery): { block?: unknown; title?: string } {
+/** The block (or footer action) a card event names, the card's title and its rev, from the room's copy (the card as it is now). */
+function cardContext(room: RoomContext, e: CardEventDelivery): { block?: unknown; title?: string; rev?: number } {
   const row = room.sql.exec<CardRow>("SELECT ext FROM messages WHERE id = ?", e.messageId).toArray()[0];
-  const card = row?.ext ? (JSON.parse(row.ext) as { cardV2?: { title?: string; blocks: unknown[]; actions?: { id: string }[] } }).cardV2 : undefined;
+  const card = row?.ext ? (JSON.parse(row.ext) as { cardV2?: { rev?: number; title?: string; blocks: unknown[]; actions?: { id: string }[] } }).cardV2 : undefined;
   if (!card) return {};
-  const out: { block?: unknown; title?: string } = {};
+  const out: { block?: unknown; title?: string; rev?: number } = {};
   if (card.title) out.title = card.title;
+  if (typeof card.rev === "number") out.rev = card.rev;
   if (e.blockId) out.block = answerBlocks(card as never, { blockId: e.blockId })[e.blockId];
   else if (e.actionId) out.block = card.actions?.find((a) => a.id === e.actionId);
   return out;
@@ -207,7 +219,7 @@ function cardContext(room: RoomContext, e: CardEventDelivery): { block?: unknown
  */
 registerCardEventHandler(async (room, e) => {
   const r = await responder(room.env, e.authorId);
-  if (r.kind === "none") return { by: e.authorId, mode: "none" };
+  if (r.kind === "none") return gone(e.authorId);
   if (r.kind !== "runner") return undefined;
   if (e.stored) {
     // cards2 (F5): a retract inside the window reaches the run that has the answer.
@@ -239,6 +251,7 @@ registerCardEventHandler(async (room, e) => {
   };
   for (const k of ["blockId", "actionId", "value", "inputs", "part"] as const) if (e[k] !== undefined) (live as unknown as Record<string, unknown>)[k] = e[k];
   if (ctx.block !== undefined) live.block = ctx.block;
+  if (ctx.rev !== undefined) live.cardRev = ctx.rev;
   if (ctx.title) live.title = ctx.title;
   return deliverCardEvent(room, e.authorId, live);
 });

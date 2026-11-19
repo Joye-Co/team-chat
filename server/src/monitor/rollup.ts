@@ -5,7 +5,7 @@ import type { RunStatus } from "@chat/protocol";
 import { sanitizeUsage } from "../bots/desk/core";
 
 export interface DeskRollup {
-  active: { runId: string; status: RunStatus; startedAt: number | null; runtime: string | null; paused: boolean }[];
+  active: { runId: string; status: RunStatus; startedAt: number | null; runtime: string | null; paused: boolean; groupId: string; topicId: string }[];
   queued: { runId: string; queuedAt: number }[];
   finished: number;
   succeeded: number;
@@ -22,12 +22,12 @@ const FAILED = "('failed','blocked')";
 
 export function deskRollup(sql: SqlStorage, machineId: string, dayStart: number): DeskRollup {
   const active = sql
-    .exec<{ id: string; status: RunStatus; started_at: number | null; created_at: number; runtime: string | null; paused_by: string | null }>(
-      "SELECT id, status, started_at, created_at, runtime, paused_by FROM runs WHERE ended_at IS NULL AND machine_id = ? ORDER BY created_at",
+    .exec<{ id: string; status: RunStatus; started_at: number | null; created_at: number; runtime: string | null; paused_by: string | null; group_id: string; topic_id: string }>(
+      "SELECT id, status, started_at, created_at, runtime, paused_by, group_id, topic_id FROM runs WHERE ended_at IS NULL AND machine_id = ? ORDER BY created_at",
       machineId,
     )
     .toArray()
-    .map((r) => ({ runId: r.id, status: r.status, startedAt: r.started_at ?? r.created_at, runtime: r.runtime, paused: r.paused_by !== null }));
+    .map((r) => ({ runId: r.id, status: r.status, startedAt: r.started_at ?? r.created_at, runtime: r.runtime, paused: r.paused_by !== null, groupId: r.group_id, topicId: r.topic_id }));
   const queued = sql
     .exec<{ id: string; queued_at: number }>(
       "SELECT id, queued_at FROM runs WHERE ended_at IS NULL AND status = 'created' AND machine_id IS NULL AND queued_at IS NOT NULL ORDER BY queued_at, id",

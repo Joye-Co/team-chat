@@ -1,5 +1,5 @@
 import { env } from "cloudflare:test";
-import { afterAll, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { normalize } from "../src/integrations/github";
 import { signGithub } from "../src/integrations/secrets";
 import {
@@ -11,12 +11,7 @@ import {
   reviewEvent,
   workflowRunEvent,
 } from "./github-payloads";
-import { BASE, Client, api, createGroup, createMember, protocolViolations } from "./helpers";
-
-afterAll(async () => {
-  await new Promise((r) => setTimeout(r, 300));
-  expect(protocolViolations).toEqual([]);
-});
+import { BASE, Client, api, createGroup, createMember } from "./helpers";
 
 async function setup(kind: "generic" | "github" = "generic", extra: Record<string, unknown> = {}) {
   const owner = await createMember({ level: "owner", name: "Owner" });

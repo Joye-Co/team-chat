@@ -84,11 +84,10 @@ impl Executor for Local {
                 return;
             }
         }
-        eprintln!(
-            "{} run {}: stopping CLI left by the previous daemon",
-            crate::proto::now_ms(),
+        crate::problems::log(format_args!(
+            "run {}: stopping CLI left by the previous daemon",
             meta.run_id
-        );
+        ));
         // SAFETY: plain syscall; a negative pid addresses the process group.
         unsafe {
             libc::kill(-pgid, libc::SIGKILL);
