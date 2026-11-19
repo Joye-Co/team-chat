@@ -4,6 +4,7 @@ import type {
   AcceptanceItem,
   AddArtifactVersionRequest,
   ArtifactEventDecl,
+  ArtifactPreview,
   BotRun,
   DeskNotesResponse,
   EndRunRequest,
@@ -24,7 +25,7 @@ import type {
   PutDeskNoteResponse,
   SendResult,
 } from "@chat/protocol";
-import { MAX_FILE_BYTES, PutArtifactMediaRequest } from "@chat/protocol";
+import { ArtifactPreview as ArtifactPreviewSchema, MAX_ARTIFACT_DATA_BYTES, MAX_FILE_BYTES, PutArtifactMediaRequest } from "@chat/protocol";
 import { ChatError, isRetryable } from "./errors.ts";
 import { checkArtifactEvents } from "./pattern.ts";
 
@@ -50,6 +51,33 @@ export interface UploadInput {
   height?: number;
 }
 
+/** `HttpClient.publishHtml`: one HTML page as a 产出 of kind `html`, or a new version of one. */
+export interface PublishHtmlInput {
+  groupId: string;
+  topicId: string;
+  title: string;
+  html: string;
+  note?: string;
+  /** Adds a version to this 产出 instead of making a new one. */
+  artifactId?: string;
+  extraFiles?: { path: string; mime: string; data: Uint8Array | ArrayBuffer | Blob }[];
+  /**
+   * 1.1: events the page may send back (`teamchat.emit`, `teamchat.ask`); they reach
+   * `Bot.onArtifactEvent`. Only a bot's version keeps them.
+   */
+  events?: ArtifactEventDecl[];
+  /**
+   * 1.1: the first data snapshot of the version (the page's `teamchat.getData` and `onData`), at
+   * most 256 KiB. Without it the page opens with `null` until the first `pushArtifactData`.
+   * Only a bot's version keeps it.
+   */
+  data?: unknown;
+  /** 1.1: the title, summary and up to 6 figures of the version's preview card. */
+  preview?: ArtifactPreview;
+  /** 1.1: this bot's run that made the version (`Bot.currentRun(topicId)`). */
+  runId?: string;
+}
+
 type Body = string | Uint8Array | ArrayBuffer | Blob;
 
 export function normalizeBaseUrl(url: string): string {
@@ -62,6 +90,23 @@ async function toBytes(data: Uint8Array | ArrayBuffer | Blob): Promise<Uint8Arra
   if (data instanceof Uint8Array) return data;
   if (data instanceof ArrayBuffer) return new Uint8Array(data);
   return new Uint8Array(await data.arrayBuffer());
+}
+
+/**
+ * Checks a data snapshot of a 产出 version as the server does: JSON of at most 256 KiB
+ * (`MAX_ARTIFACT_DATA_BYTES`). Throws `ChatError` `too_large` or `invalid` before anything is sent.
+ */
+export function checkArtifactData(data: unknown): void {
+  if (data === undefined) return;
+  let text: string | undefined;
+  try {
+    text = JSON.stringify(data);
+  } catch {
+    text = undefined;
+  }
+  if (text === undefined) throw new ChatError("invalid", "data is not JSON");
+  const bytes = new TextEncoder().encode(text).byteLength;
+  if (bytes > MAX_ARTIFACT_DATA_BYTES) throw new ChatError("too_large", `data is ${bytes} bytes; a snapshot is at most ${MAX_ARTIFACT_DATA_BYTES}`);
 }
 
 export async function sha256Hex(bytes: Uint8Array): Promise<string> {
@@ -299,21 +344,14 @@ export class HttpClient {
    * Uploads one HTML page (and optional extra files) and makes a 产出 of kind `html`, or
    * adds a version when `artifactId` is given.
    */
-  async publishHtml(input: {
-    groupId: string;
-    topicId: string;
-    title: string;
-    html: string;
-    note?: string;
-    artifactId?: string;
-    extraFiles?: { path: string; mime: string; data: Uint8Array | ArrayBuffer | Blob }[];
-    /** 1.1: events the page may send back (`emitEvent`); they reach `Bot.onArtifactEvent`. */
-    events?: ArtifactEventDecl[];
-    /** 1.1: this bot's run that made the version (`Bot.currentRun(topicId)`). */
-    runId?: string;
-  }): Promise<ArtifactVersionResponse> {
-    // Before the uploads: a declaration the server refuses fails here.
+  async publishHtml(input: PublishHtmlInput): Promise<ArtifactVersionResponse> {
+    // Before the uploads: a declaration, a snapshot or a preview the server refuses fails here.
     checkArtifactEvents(input.events);
+    checkArtifactData(input.data);
+    if (input.preview !== undefined) {
+      const p = ArtifactPreviewSchema.safeParse(input.preview);
+      if (!p.success) throw new ChatError("invalid", `preview: ${p.error.issues[0]?.path.join(".") ?? ""} ${p.error.issues[0]?.message ?? ""}`.trim());
+    }
     const entry = "index.html";
     const files = [
       { path: entry, fileId: (await this.uploadFile({ groupId: input.groupId, topicId: input.topicId, name: entry, mime: "text/html", data: new TextEncoder().encode(input.html) })).fileId },
@@ -325,6 +363,8 @@ export class HttpClient {
     }
     const extra = {
       ...(input.events ? { events: input.events } : {}),
+      ...(input.data !== undefined ? { data: input.data as CreateArtifactRequest["data"] } : {}),
+      ...(input.preview ? { preview: input.preview } : {}),
       ...(input.runId ? { runId: input.runId } : {}),
     };
     if (input.artifactId) {
