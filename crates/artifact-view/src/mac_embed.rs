@@ -7,10 +7,9 @@
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::Ordering;
 
 use block2::RcBlock;
-use dispatch2::DispatchQueue;
 use objc2::rc::{Retained, Weak};
 use objc2::runtime::{AnyClass, AnyObject};
 use objc2::{ClassType, DefinedClass, MainThreadOnly, define_class, msg_send, sel};
@@ -23,26 +22,11 @@ use objc2_foundation::{
     MainThreadMarker, NSData, NSDictionary, NSError, NSObject, NSPoint, NSProcessInfo, NSRect,
     NSSize, NSString,
 };
-use objc2_web_kit::{WKWebView, WKWebViewConfiguration};
+use objc2_web_kit::WKWebView;
 
 use crate::embed::{EmbedOptions, Placement, Rect, place};
-use crate::mac::{self, Controller, State};
+use crate::mac::{self, Controller, PageWebView, State};
 use crate::{ArtifactEvent, Capabilities, Error, VersionSpec};
-
-/// Wrapper that lets main-thread values ride a block onto the main queue.
-struct MainOnly<T>(T);
-// SAFETY: only ever sent to `DispatchQueue::main()`, so the value is created and used on the
-// main thread.
-unsafe impl<T> Send for MainOnly<T> {}
-
-fn emit_async(cb: &Rc<dyn Fn(ArtifactEvent)>, event: ArtifactEvent) {
-    let job = MainOnly((cb.clone(), event));
-    DispatchQueue::main().exec_async(move || {
-        let job = job;
-        let (cb, event) = job.0;
-        cb(event);
-    });
-}
 
 define_class!(
     /// The clipping container: flipped, so the web view frame inside it uses the host's
@@ -61,75 +45,11 @@ define_class!(
     }
 );
 
-struct WebIvars {
-    cb: Rc<dyn Fn(ArtifactEvent)>,
-    pass_scroll: Cell<bool>,
-    host: Weak<NSView>,
-}
-
-define_class!(
-    /// The page view. It reports keyboard focus changes, and with `pass_scroll` it gives
-    /// wheel and trackpad scrolling to the host view.
-    // SAFETY: WKWebView may be subclassed; the overrides call the superclass and the class
-    // does not implement Drop.
-    #[unsafe(super(WKWebView, NSView, NSResponder, NSObject))]
-    #[thread_kind = MainThreadOnly]
-    #[name = "TeamChatArtifactEmbedWebView"]
-    #[ivars = WebIvars]
-    struct EmbedWebView;
-
-    impl EmbedWebView {
-        #[unsafe(method(becomeFirstResponder))]
-        fn become_first_responder(&self) -> bool {
-            // SAFETY: NSResponder's method with this signature.
-            let ok: bool = unsafe { msg_send![super(self), becomeFirstResponder] };
-            if ok {
-                emit_async(&self.ivars().cb, ArtifactEvent::FocusChanged { focused: true });
-            }
-            ok
-        }
-
-        #[unsafe(method(resignFirstResponder))]
-        fn resign_first_responder(&self) -> bool {
-            // SAFETY: NSResponder's method with this signature.
-            let ok: bool = unsafe { msg_send![super(self), resignFirstResponder] };
-            if ok {
-                emit_async(&self.ivars().cb, ArtifactEvent::FocusChanged { focused: false });
-            }
-            ok
-        }
-
-        #[unsafe(method(acceptsFirstMouse:))]
-        fn accepts_first_mouse(&self, event: Option<&NSEvent>) -> bool {
-            FIRST_MOUSE_FOR_SELF_TESTS.load(Ordering::Relaxed) || {
-                // SAFETY: NSView's method with this signature.
-                let ok: bool = unsafe { msg_send![super(self), acceptsFirstMouse: event] };
-                ok
-            }
-        }
-
-        #[unsafe(method(scrollWheel:))]
-        fn scroll_wheel(&self, event: &NSEvent) {
-            if self.ivars().pass_scroll.get()
-                && let Some(host) = self.ivars().host.load()
-            {
-                host.scrollWheel(event);
-                return;
-            }
-            // SAFETY: NSResponder's method with this signature.
-            unsafe { msg_send![super(self), scrollWheel: event] }
-        }
-    }
-);
-
-/// Set by [`EmbeddedArtifact::post_click`]: see there.
-static FIRST_MOUSE_FOR_SELF_TESTS: AtomicBool = AtomicBool::new(false);
-
 /// One 产出 page embedded in a host window. Main thread only. Dropping it removes the view
 /// and stops the page (also its media).
 pub struct EmbeddedArtifact {
     container: Retained<ClipView>,
-    web_view: Retained<EmbedWebView>,
+    web_view: Retained<PageWebView>,
     controller: Retained<Controller>,
     state: Rc<RefCell<State>>,
     host: Weak<NSView>,
@@ -198,16 +118,16 @@ impl EmbeddedArtifact {
             }
         }
 
-        let web_view: Retained<EmbedWebView> = {
-            let this = EmbedWebView::alloc(mtm).set_ivars(WebIvars {
-                cb: cb.clone(),
-                pass_scroll: Cell::new(pass_scroll),
-                host: Weak::new(host_view),
-            });
-            let cfg: &WKWebViewConfiguration = &config.config;
-            // SAFETY: WKWebView's designated initializer.
-            unsafe { msg_send![super(this), initWithFrame: zero, configuration: cfg] }
-        };
+        let web_view = PageWebView::new(
+            mtm,
+            zero,
+            &config.config,
+            cb.clone(),
+            Some(host_view),
+            pass_scroll,
+            true,
+            inspectable,
+        );
         mac::wire(&web_view, &controller, inspectable);
         // SAFETY: `_setDrawsBackground:` takes one BOOL; it is checked first. A page with a
         // transparent body then shows the host's surface instead of white.
@@ -379,7 +299,9 @@ impl EmbeddedArtifact {
     /// Shows another version (new origin, content and data) in the same view. `caps` are
     /// that version's bridge capabilities.
     pub fn show_version(&self, spec: VersionSpec, caps: Capabilities) -> Result<(), Error> {
-        mac::switch_version(&self.state, spec, caps)?;
+        if let Some(ended) = mac::switch_version(&self.state, spec, caps)? {
+            self.controller.emit(ended);
+        }
         self.controller.load_current(&self.web_view);
         Ok(())
     }
@@ -406,9 +328,15 @@ impl EmbeddedArtifact {
         &self,
         version: u32,
         reply_id: &serde_json::Value,
-        result: Result<serde_json::Value, crate::Reject>,
+        result: Result<serde_json::Value, crate::Failure>,
     ) -> bool {
         mac::finish(&self.state, &self.web_view, version, reply_id, result)
+    }
+
+    /// Gives the page other colours and words for its `就这里提问` menu (the app's theme
+    /// changed), now and for its next load.
+    pub fn set_ref_menu(&self, menu: crate::RefMenu) {
+        mac::set_ref_menu(&self.state, &self.web_view, menu);
     }
 
     /// Changes the bridge capabilities of the page that shows now.
@@ -467,7 +395,7 @@ impl EmbeddedArtifact {
         if self.is_closed() {
             return false;
         }
-        FIRST_MOUSE_FOR_SELF_TESTS.store(true, Ordering::Relaxed);
+        mac::FIRST_MOUSE_FOR_SELF_TESTS.store(true, Ordering::Relaxed);
         let Some(window) = self.web_view.window() else {
             return false;
         };
