@@ -22,6 +22,10 @@
     },
     "ops/restore": {
       "name": "@chat/ops-restore",
+      "devDependencies": {
+        "@types/bun": "^1.4.4",
+        "typescript": "^7.0.2",
+      },
     },
     "packages/bot-sdk": {
       "name": "@chat/bot-sdk",
