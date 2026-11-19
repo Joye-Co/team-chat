@@ -10,7 +10,7 @@ use gpui::{
 
 use super::{
     AdminPage, AdminView, model,
-    model::{Attention, AttentionKind, Tone},
+    model::{Attention, AttentionKind, AttentionTarget, Tone},
     usage::{UsageRange, kpi_card},
 };
 use crate::{
@@ -20,7 +20,7 @@ use crate::{
         MemberAvatar, Sym,
         native::{
             Alert, AlertTone, EmptyLine, NativeType as _, PushSize, PushStyle, TruncText,
-            card_surface, native_colors, progress, push_button,
+            native_colors, panel_card_surface, progress, push_button,
             tokens::{avatar, height, monitor as t, space},
         },
     },
@@ -49,14 +49,20 @@ fn now_ms() -> u64 {
         .max(0) as u64
 }
 
-/// 比上一段多 / 少 / 一样, for a count.
-fn compare(now: u64, before: u64) -> String {
+/// 比上周多 / 少 / 一样, for a count; `prev` names the range it is compared with.
+fn compare(now: u64, before: u64, prev: &str) -> String {
     if now == before {
-        m::HOME_SAME.to_string()
+        fill(m::HOME_SAME, &[("prev", prev)])
     } else if now > before {
-        fill(m::HOME_MORE, &[("n", &(now - before).to_string())])
+        fill(
+            m::HOME_MORE,
+            &[("prev", prev), ("n", &(now - before).to_string())],
+        )
     } else {
-        fill(m::HOME_LESS, &[("n", &(before - now).to_string())])
+        fill(
+            m::HOME_LESS,
+            &[("prev", prev), ("n", &(before - now).to_string())],
+        )
     }
 }
 
@@ -88,8 +94,19 @@ impl AdminView {
             if let Some(d) = self.fleet.monitors.get(&x.id) {
                 for a in model::attention(d, now, &names, &time) {
                     out.push(Attention {
-                        meta: if a.meta.is_empty() {
+                        title: if a.kind == AttentionKind::Offline {
+                            fill(m::ATT_OFFLINE, &[("name", &x.name)])
+                        } else {
+                            a.title.clone()
+                        },
+                        meta: if a.kind == AttentionKind::Offline {
+                            // The title names the computer already.
+                            a.meta.clone()
+                        } else if a.meta.is_empty() {
                             x.name.clone()
+                        } else if a.kind == AttentionKind::CliLoggedOut {
+                            // 去登录 narrows this row: what it cost is the part that must show.
+                            format!("{} · {}", a.meta, x.name)
                         } else {
                             format!("{} · {}", x.name, a.meta)
                         },
@@ -99,9 +116,20 @@ impl AdminView {
             } else if !x.connected {
                 out.push(Attention {
                     kind: AttentionKind::Offline,
-                    title: m::ATT_OFFLINE.into(),
-                    meta: x.name.clone(),
+                    title: fill(m::ATT_OFFLINE, &[("name", &x.name)]),
+                    meta: x
+                        .last_heartbeat_at
+                        .map(|t| {
+                            let ago = model::ago(now.saturating_sub(t.max(0) as u64));
+                            fill(m::ATT_OFFLINE_META, &[("ago", &ago)])
+                        })
+                        .unwrap_or_default(),
                     tone: Tone::Bad,
+                    target: Some(AttentionTarget {
+                        page: AttentionKind::Offline.page(),
+                        machine: Some(x.id.clone()),
+                        topic: None,
+                    }),
                 });
             }
         }
@@ -129,6 +157,11 @@ impl AdminView {
                             ],
                         ),
                         tone: Tone::Bad,
+                        target: Some(AttentionTarget {
+                            page: AttentionKind::Budget.page(),
+                            machine: None,
+                            topic: None,
+                        }),
                     });
                     continue;
                 }
@@ -145,6 +178,11 @@ impl AdminView {
                         ),
                         meta: fill(m::ATT_BUDGET_META, &[("budget", &usd(cents as f64 / 100.))]),
                         tone: if share >= 1. { Tone::Bad } else { Tone::Warn },
+                        target: Some(AttentionTarget {
+                            page: AttentionKind::Budget.page(),
+                            machine: None,
+                            topic: None,
+                        }),
                     });
                 }
             }
@@ -160,10 +198,16 @@ impl AdminView {
                             &[("when", &model::duration(i.expires_at - now))],
                         ),
                         tone: Tone::Info,
+                        target: Some(AttentionTarget {
+                            page: AttentionKind::Invite.page(),
+                            machine: None,
+                            topic: None,
+                        }),
                     });
                 }
             }
         }
+        model::rank_attention(&mut out);
         out
     }
 
@@ -172,13 +216,40 @@ impl AdminView {
         let Some(u) = self.usage.data.clone() else {
             return match &self.usage.error {
                 Some(e) => Alert::new(Sym::Failed, m::USAGE_FAILED)
+                    .on_surface()
                     .tone(AlertTone::Destructive)
                     .description(e.clone())
+                    .action(Self::retry_action(
+                        "home-retry",
+                        |v, cx| {
+                            v.usage.error = None;
+                            v.fetch_home(cx);
+                        },
+                        cx,
+                    ))
                     .into_any_element(),
                 None => super::overview::page_skeleton(cx).into_any_element(),
             };
         };
         let week = self.usage.range == UsageRange::Week;
+        // The cards name their period in every range.
+        let (topics_label, spent_label, artifacts_label) = match self.usage.range {
+            UsageRange::Week => (
+                m::HOME_KPI_TOPICS_WEEK,
+                m::USAGE_SPENT_WEEK,
+                m::HOME_KPI_ARTIFACTS_WEEK,
+            ),
+            UsageRange::Month => (
+                m::HOME_KPI_TOPICS_MONTH,
+                m::USAGE_SPENT_MONTH,
+                m::HOME_KPI_ARTIFACTS_MONTH,
+            ),
+            UsageRange::LastMonth => (
+                m::HOME_KPI_TOPICS_LAST_MONTH,
+                m::USAGE_SPENT_LAST_MONTH,
+                m::HOME_KPI_ARTIFACTS_LAST_MONTH,
+            ),
+        };
         // What the AI 服务 page saved last wins over what 总览 read when it opened.
         let ai_configured = self
             .ai
@@ -244,23 +315,19 @@ impl AdminView {
                 cx,
             ))
             .child(kpi_card(
-                if week {
-                    m::HOME_KPI_TOPICS_WEEK
-                } else {
-                    m::HOME_KPI_TOPICS
-                },
+                topics_label,
                 Sym::Topic,
                 u.total.topics.to_string(),
-                compare(u.total.topics as u64, u.previous.topics as u64),
+                compare(
+                    u.total.topics as u64,
+                    u.previous.topics as u64,
+                    self.usage.range.previous_word(),
+                ),
                 None,
                 cx,
             ))
             .child(kpi_card(
-                if week {
-                    m::USAGE_SPENT_WEEK
-                } else {
-                    m::USAGE_SPENT
-                },
+                spent_label,
                 Sym::BarChart,
                 usd(total),
                 match budget_cents {
@@ -282,11 +349,7 @@ impl AdminView {
                 cx,
             ))
             .child(kpi_card(
-                if week {
-                    m::HOME_KPI_ARTIFACTS_WEEK
-                } else {
-                    m::HOME_KPI_ARTIFACTS
-                },
+                artifacts_label,
                 Sym::Document,
                 artifacts.len().to_string(),
                 if artifacts.is_empty() {
@@ -306,6 +369,9 @@ impl AdminView {
             .child(
                 div()
                     .flex()
+                    // Each card hugs its own content (§2.4): a short 谁在用 is not stretched
+                    // to a long 要注意.
+                    .items_start()
                     .gap(space::S16)
                     .child(
                         div()
@@ -321,6 +387,7 @@ impl AdminView {
                             .flex()
                             .child(super::overview::attention_panel(
                                 self.home_attention(now, ai_configured),
+                                cx.entity(),
                                 cx,
                             )),
                     ),
@@ -352,11 +419,23 @@ impl AdminView {
             PushSize::Small,
             cx,
         )
+        // It leads to a page: a chevron says so.
+        .child(crate::ui::icons::sym(
+            Sym::ChevronRight,
+            crate::ui::sf_symbols::SymSize::INLINE_SMALL,
+            k.secondary,
+        ))
         .on_click(move |_, window, cx| {
             view.update(cx, |v, cx| v.open_page(AdminPage::Members, window, cx))
         });
+        // A ghost button has no edge at rest: pulled out by its padding, its content ends on
+        // the card's inset, where the amounts below end.
+        let all = div()
+            .flex_none()
+            .mr(-crate::ui::native::tokens::metrics::BUTTON_SMALL_PAD)
+            .child(all);
         let n = rows.len().min(WHO_ROWS);
-        card_surface(cx)
+        panel_card_surface(cx)
             .flex_1()
             .p(space::S24)
             .flex()
@@ -364,6 +443,8 @@ impl AdminView {
             .gap(space::S8)
             .child(
                 div()
+                    // One header height beside 要注意, so the two titles share a line.
+                    .h(height::SM)
                     .flex()
                     .items_center()
                     .gap(space::S8)
@@ -491,9 +572,20 @@ impl AdminView {
             PushSize::Small,
             cx,
         )
+        // It leads to a page: a chevron says so, as on 全部成员.
+        .child(crate::ui::icons::sym(
+            Sym::ChevronRight,
+            crate::ui::sf_symbols::SymSize::INLINE_SMALL,
+            k.secondary,
+        ))
         .on_click(move |_, window, cx| {
             view.update(cx, |v, cx| v.open_page(AdminPage::Machines, window, cx))
         });
+        // Pulled out by its padding: its content ends on the edge of the cards below.
+        let manage = div()
+            .flex_none()
+            .mr(-crate::ui::native::tokens::metrics::BUTTON_SMALL_PAD)
+            .child(manage);
         let mut rows: Vec<AnyElement> = vec![];
         let mut it = cards.into_iter();
         while let Some(a) = it.next() {
@@ -541,8 +633,8 @@ mod tests {
 
     #[test]
     fn compare_says_more_less_or_same() {
-        assert_eq!(compare(5, 5), m::HOME_SAME);
-        assert_eq!(compare(7, 5), fill(m::HOME_MORE, &[("n", "2")]));
-        assert_eq!(compare(3, 5), fill(m::HOME_LESS, &[("n", "2")]));
+        assert_eq!(compare(5, 5, "上周"), "和上周一样");
+        assert_eq!(compare(7, 5, "上周"), "比上周多 2 个");
+        assert_eq!(compare(3, 5, "上个月"), "比上个月少 2 个");
     }
 }

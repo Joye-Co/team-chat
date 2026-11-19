@@ -58,6 +58,9 @@ pub struct MemoryBoard {
     services: Services,
     scope: MemoryScope,
     host: Host,
+    /// The board sits on the 团队管理 content panel, not in the settings
+    /// window: its alerts take that panel's fill.
+    admin_panel: bool,
     /// The AI member's name (`MemoryScope::Member`).
     name: String,
     memories: Option<Result<Vec<Memory>, AdminError>>,
@@ -113,6 +116,7 @@ impl MemoryBoard {
             services,
             scope,
             host,
+            admin_panel: false,
             name,
             memories: None,
             day: None,
@@ -279,6 +283,12 @@ impl MemoryBoard {
             _ => None,
         });
         model::can_write(scope, me.as_ref())
+    }
+
+    /// The board of 团队管理 › 记忆: it sits on that window's content panel.
+    pub fn on_admin_panel(mut self) -> Self {
+        self.admin_panel = true;
+        self
     }
 
     /// Whether I may change one memory: by its own scope (我的约定 holds two).
@@ -1018,6 +1028,8 @@ impl Render for MemoryBoard {
                     header = header.action(a);
                 }
                 widgets::pane()
+                    // The admin window starts its pages at its own top inset.
+                    .when(self.admin_panel, |d| d.pt(metrics::HAIRLINE))
                     .child(widgets::section(
                         header,
                         div()
