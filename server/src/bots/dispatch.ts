@@ -655,6 +655,13 @@ export const ACCEPTANCE_RULE = [
 ].join("\n");
 
 /**
+ * What a message body draws and where the app folds it. The same sentence as `MESSAGE_FORMS` in
+ * apps/daemon/src/chat_run.rs, whose test holds it to the limits of the desktop app.
+ */
+export const MESSAGE_FORMS_RULE =
+  "A message draws Markdown tables, code fences with a language and at most 4 `mermaid` diagrams. A code fence over 30 lines is folded to 24, and a finished answer over about 60 rows or 4,000 characters to its first blocks: put the conclusion first.";
+
+/**
  * The text without its fenced `acceptance` blocks (the daemon already sent them as the run's
  * acceptance criteria, which the done card shows). An unclosed fence stays as it is.
  */
