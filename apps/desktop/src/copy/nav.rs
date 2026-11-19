@@ -79,13 +79,6 @@ crate::copy! {
     HOURS_AGO = "{n} 小时前",
     DAYS_AGO = "{n} 天前",
     YEAR_MONTH_DAY = "{y}年{m}月{d}日",
-    WEEKDAY_MON = "周一",
-    WEEKDAY_TUE = "周二",
-    WEEKDAY_WED = "周三",
-    WEEKDAY_THU = "周四",
-    WEEKDAY_FRI = "周五",
-    WEEKDAY_SAT = "周六",
-    WEEKDAY_SUN = "周日",
     // app menu
     MENU_ABOUT = "关于 {product}",
     ABOUT_VERSION = "版本 {version}",

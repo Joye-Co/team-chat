@@ -2212,7 +2212,65 @@ fn embed_body(state: &FolderState, has_detail: bool) -> EmbedBody {
     }
 }
 
-pub fn embed(node: &Node, b: &CardV2Block, _window: &mut Window, cx: &mut App) -> AnyElement {
+/// The inline preview of an embedded 产出 that is not a web page, the same one a message
+/// shows (`views/media`). `None` when its kind has no preview: the block then offers the
+/// window.
+fn embed_media(
+    ctx: &Ctx,
+    block: &str,
+    title: &str,
+    folder: &crate::data::ArtifactFolder,
+    detail: Option<&crate::data::ArtifactDetail>,
+    window: &mut Window,
+    cx: &mut App,
+) -> Option<(AnyElement, crate::views::media::inline::EmbedFacts)> {
+    use crate::views::media::{self, MediaFile, inline, state::Target, store::MediaKey};
+    // The folder is open: its entry says the kind while the 产出's record is still on its way.
+    let files: Vec<MediaFile> = detail
+        .and_then(|d| d.versions.iter().find(|v| v.version == folder.version))
+        .map(|v| {
+            v.files
+                .iter()
+                .map(|f| MediaFile {
+                    path: f.path.clone(),
+                    size: f.size,
+                    mime: f.mime.clone(),
+                })
+                .collect()
+        })
+        .unwrap_or_else(|| {
+            vec![MediaFile {
+                path: folder.entry.clone(),
+                size: 0,
+                mime: media::mime_for(&folder.entry).to_string(),
+            }]
+        });
+    let kind = ctx
+        .env
+        .provider
+        .artifact_media(&folder.artifact_id, folder.version)
+        .and_then(|m| media::poster::local_kind(m.kind))
+        .unwrap_or_else(|| media::classify(&folder.entry, &files));
+    let spec = inline::InlineSpec {
+        key: MediaKey::new(folder.artifact_id.clone(), folder.version),
+        kind,
+        title: title.to_string(),
+        bytes: files.iter().map(|f| f.size).sum(),
+        target: Target {
+            provider: Some(ctx.env.provider.clone()),
+            group_id: ctx.msg.group_id.clone(),
+            topic_id: ctx.msg.topic_id.clone(),
+        },
+        id: ctx.id(format!("embed-media-{block}")),
+        // The embed's frame is its card and its header says what the file is.
+        bare: true,
+    };
+    let el = inline::render(&spec, window, cx)?;
+    crate::selftest::drawn::mark("embed-media", block.to_string());
+    Some((el, inline::embed_facts(&spec, cx)))
+}
+
+pub fn embed(node: &Node, b: &CardV2Block, window: &mut Window, cx: &mut App) -> AnyElement {
     let CardV2Block::Embed {
         id,
         artifact_id,
@@ -2254,7 +2312,18 @@ pub fn embed(node: &Node, b: &CardV2Block, _window: &mut Window, cx: &mut App) -
             file.map_or(c::EMBED_KIND, crate::views::media::MediaKind::label)
         ),
     );
+    let media = match (&state, shown) {
+        (Some(Ok(f)), EmbedBody::NotPage) => {
+            embed_media(ctx, id, &name, f, detail.as_ref(), window, cx)
+        }
+        _ => None,
+    };
+    let (media, facts) = match media {
+        Some((el, facts)) => (Some(el), facts),
+        None => (None, Default::default()),
+    };
     let body: AnyElement = match (state, shown) {
+        (_, EmbedBody::NotPage) if media.is_some() => div().children(media).into_any_element(),
         (Some(Ok(f)), EmbedBody::Page) => {
             // inc-integrate: the 产出 page host owns the bridge (capabilities by author,
             // live data, asks, refs, the pending band); the block narrows the declared
@@ -2357,6 +2426,9 @@ pub fn embed(node: &Node, b: &CardV2Block, _window: &mut Window, cx: &mut App) -
         version: Some(*version),
     };
     let _ = (g, tp);
+    // The sandbox chip and the actions strip describe a page that is open: a file has
+    // neither, and a page that did not open has no actions to send.
+    let page = file.is_none() && shown != EmbedBody::Failed;
     div()
         .rounded(theme::radius::LG)
         .border_1()
@@ -2388,17 +2460,24 @@ pub fn embed(node: &Node, b: &CardV2Block, _window: &mut Window, cx: &mut App) -
                         .child(name),
                 )
                 .child(
+                    // One group with no gap, so the dot sits evenly between the two.
                     div()
                         .flex_none()
-                        .mono()
+                        .flex()
+                        .items_center()
                         .text_color(k.ink_3)
-                        .child(fill(c::EMBED_VERSION, &[("n", &version.to_string())])),
+                        .child(
+                            div()
+                                .mono()
+                                .child(fill(c::EMBED_VERSION, &[("n", &version.to_string())])),
+                        )
+                        .child(format!(
+                            " · {}",
+                            file.map_or(c::EMBED_KIND, crate::views::media::MediaKind::label)
+                        ))
+                        .children(facts.meta.map(|m| format!(" · {m}"))),
                 )
-                .child(div().flex_none().text_color(k.ink_3).child(format!(
-                    "· {}",
-                    file.map_or(c::EMBED_KIND, crate::views::media::MediaKind::label)
-                )))
-                .when(file.is_none(), |el| {
+                .when(page, |el| {
                     el.child(
                         div()
                             .ml_auto()
@@ -2411,10 +2490,30 @@ pub fn embed(node: &Node, b: &CardV2Block, _window: &mut Window, cx: &mut App) -
                             .child(c::EMBED_SANDBOX),
                     )
                 })
+                .children(facts.copy.clone().map(|text| {
+                    div()
+                        .id(eid(node, format!("embed-copy-{id}")))
+                        .ml_auto()
+                        .flex_none()
+                        .size(px(24.))
+                        .rounded(crate::ui::native::tokens::radius::ITEM)
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .hover(|s| s.bg(k.hover))
+                        .on_click(move |_, _, cx| {
+                            crate::views::media::parts::copy_text(
+                                text.clone(),
+                                crate::copy::media::COPIED,
+                                cx,
+                            )
+                        })
+                        .child(ui::icon(Sym::Copy, px(14.), k.ink_2))
+                }))
                 .child(
                     div()
                         .id(eid(node, format!("embed-open-{id}")))
-                        .when(file.is_some(), |el| el.ml_auto())
+                        .when(!page && facts.copy.is_none(), |el| el.ml_auto())
                         .flex_none()
                         .size(px(24.))
                         .rounded(crate::ui::native::tokens::radius::ITEM)
@@ -2427,7 +2526,7 @@ pub fn embed(node: &Node, b: &CardV2Block, _window: &mut Window, cx: &mut App) -
                 ),
         )
         .child(body)
-        .when(file.is_none(), |el| {
+        .when(page, |el| {
             el.child(
                 meta(div())
                     .h(crate::ui::native::tokens::height::DEFAULT)

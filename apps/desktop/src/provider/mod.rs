@@ -151,7 +151,7 @@ struct State {
     connection: Option<ConnectionState>,
     /// Extra messages per topic beyond the view's limit (older pages).
     extra: HashMap<String, usize>,
-    loading_older: HashSet<String>,
+    loading_older: HashMap<String, String>,
     /// Pending topic id -> real topic id, after the ack.
     aliases: HashMap<String, String>,
     /// Sends into a pending topic whose first message still uploads its files (an upload job,
@@ -879,6 +879,13 @@ impl CoreProvider {
                             }
                         };
                         s.connection = Some(state);
+                        // A page asked for on the connection that just dropped never
+                        // answers: those 话题 stop showing the older-messages skeleton.
+                        if state != ConnectionState::Online {
+                            out.extend(s.loading_older.drain().map(|(topic_id, group_id)| {
+                                Change::Messages { group_id, topic_id }
+                            }));
+                        }
                     }
                 }
                 out.push(Change::Connection);
@@ -924,7 +931,7 @@ impl CoreProvider {
                 group_id, topic_id, ..
             } => {
                 let mut s = self.state();
-                if s.loading_older.remove(&topic_id) {
+                if s.loading_older.remove(&topic_id).is_some() {
                     *s.extra.entry(topic_id.clone()).or_default() += PAGE;
                 }
                 out.push(Change::Messages { group_id, topic_id });
@@ -1475,7 +1482,7 @@ impl ChatProvider for CoreProvider {
                 .collect();
             (
                 s.extra.get(&real).copied().unwrap_or(0),
-                s.loading_older.contains(&real),
+                s.loading_older.contains_key(&real),
                 deferred,
             )
         };
@@ -1588,7 +1595,7 @@ impl ChatProvider for CoreProvider {
         }
         let cached = a.client.store().message_count_cached(&real).unwrap_or(0) as usize;
         let mut s = self.state();
-        if s.loading_older.contains(&real) {
+        if s.loading_older.contains_key(&real) {
             return;
         }
         let shown = s.extra.get(&real).copied().unwrap_or(0) + PAGE;
@@ -1602,8 +1609,13 @@ impl ChatProvider for CoreProvider {
             }]);
             return;
         }
+        // Not connected: the page cannot arrive, so nothing is marked as loading (the
+        // skeleton above the first message would stay for good).
+        if s.connection != Some(ConnectionState::Online) {
+            return;
+        }
         if a.client.load_older(&real).is_ok() {
-            s.loading_older.insert(real.clone());
+            s.loading_older.insert(real.clone(), group_id.to_string());
             drop(s);
             self.emit(vec![Change::Messages {
                 group_id: group_id.into(),

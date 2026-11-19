@@ -278,6 +278,13 @@ pub const SCENES: &[Scene] = &[
         },
     },
     Scene {
+        name: "login-email-resent",
+        about: "The login view just after 重新发送: the line under the slots says so and the link counts down",
+        start: Start::SignedOut,
+        setup: |_, _| {},
+        open: |services, content, cx| open_login(services, content, "%joye@example.com", false, cx),
+    },
+    Scene {
         name: "offline",
         about: "The connection banner above the sidebar footer while reconnecting",
         start: Start::Offline,
@@ -627,7 +634,7 @@ pub const SCENES: &[Scene] = &[
     },
     Scene {
         name: "group-menu",
-        about: "The menu of a 群 row in the sidebar (right-click): 静音, 提醒 ▸, 重命名群…, 添加成员, 离开群",
+        about: "The menu of a 群 row in the sidebar (right-click): 静音, 提醒 ▸, 重命名…, 添加成员, 离开群",
         start: Start::SignedIn,
         setup: open_first_topic,
         open: crate::views::nav::selftest::scenes::group_menu,
@@ -701,6 +708,13 @@ pub const SCENES: &[Scene] = &[
         start: Start::SignedIn,
         setup: open_first_topic,
         open: crate::views::search::preview::open_dialog,
+    },
+    Scene {
+        name: "search-artifact",
+        about: "⇧⌘F with 月报 typed on the v2 team: the 产出 section finds 10 月数据月报 by name, with its kind's symbol, version, 话题 and time",
+        start: Start::V2Files,
+        setup: |s, cx| s.nav.update(cx, |nav, cx| nav.open_desk(cx)),
+        open: crate::views::search::preview::open_artifact_dialog,
     },
     Scene {
         name: "search-hit",
@@ -1168,7 +1182,7 @@ pub fn all() -> Vec<&'static Scene> {
 const CORE_SCENES: &[Scene] = &[
     Scene {
         name: "topic-core",
-        about: "话题 page on the real provider and a seeded cache: 改动 from the PR link, the pinned review, 产出 with its preview, 用到的决定 and 用时和成本",
+        about: "话题 page on the real provider and a seeded cache: 改动 from the PR link, the pinned review, 产出 with its preview, 用到的决定 and 用时和花费",
         start: Start::Core,
         setup: |s, cx| {
             v2_open_topic(
@@ -1828,9 +1842,12 @@ pub fn open_login(
                 l.preview_server(WORST_SERVER, window, cx);
             }
             // `=` shows 用邮箱登录 with that address; `#address digits` the
-            // code step with those digits typed.
+            // code step with those digits typed; `%address` that step just
+            // after 重新发送.
             if let Some(email) = code.strip_prefix('=') {
                 l.preview_email(email, None, window, cx)
+            } else if let Some(email) = code.strip_prefix('%') {
+                l.preview_email_resent(email, window, cx)
             } else if let Some(rest) = code.strip_prefix('#') {
                 let (email, digits) = rest.split_once(' ').unwrap_or((rest, ""));
                 l.preview_email(email, Some(digits), window, cx)
@@ -1882,6 +1899,9 @@ fn worst_login_code(code: &'static str) -> &'static str {
         }
         "#joye@example.com 042" => {
             "#huang.deshiou.product-design-and-frontend@northwind-industries-holdings.example.com 042"
+        }
+        "%joye@example.com" => {
+            "%huang.deshiou.product-design-and-frontend@northwind-industries-holdings.example.com"
         }
         // A long code against a long host that cannot be reached.
         "@K7QM2X9A" => "@K7QM2X9ABC3D",
