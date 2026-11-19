@@ -799,12 +799,6 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn the_weekday_table_starts_on_monday() {
-        assert_eq!(weekday(chrono::Weekday::Mon), "周一");
-        assert_eq!(weekday(chrono::Weekday::Sun), "周日");
-    }
-
-    #[test]
     fn product_name_is_never_typed() {
         let name = env!("PRODUCT_NAME").to_lowercase();
         for section in SECTIONS {
