@@ -54,9 +54,11 @@ pub struct InspectorSection {
     title: SharedString,
     collapsed: bool,
     action: Option<AnyElement>,
+    note: Option<SharedString>,
     rows: Vec<AnyElement>,
     on_toggle: Option<Click>,
     grouped: bool,
+    list_rows: bool,
 }
 
 impl InspectorSection {
@@ -66,9 +68,11 @@ impl InspectorSection {
             title: title.into(),
             collapsed: false,
             action: None,
+            note: None,
             rows: Vec::new(),
             on_toggle: None,
             grouped: false,
+            list_rows: false,
         }
     }
 
@@ -81,6 +85,16 @@ impl InspectorSection {
         self
     }
 
+    /// A grouped section whose rows are a list of one kind (members): the
+    /// rows are [`metrics::INSPECTOR_LIST_ROW`] high and touch, so the same
+    /// list has one pitch in every pane (§2.6 compact rows, D13).
+    pub fn list_rows(mut self) -> Self {
+        self.list_rows = true;
+        self
+    }
+
+    /// Starts folded. Without [`Self::on_toggle`] the section keeps its own state
+    /// from there: its chevron always folds it.
     pub fn collapsed(mut self, collapsed: bool) -> Self {
         self.collapsed = collapsed;
         self
@@ -90,6 +104,14 @@ impl InspectorSection {
     /// edge of the header.
     pub fn action(mut self, el: impl IntoElement) -> Self {
         self.action = Some(el.into_any_element());
+        self
+    }
+
+    /// A 12 muted note in the header of a grouped section, before the
+    /// action (a fact about the section that is not one of its rows: no
+    /// member works on it yet). Cut at the tail.
+    pub fn note(mut self, text: impl Into<SharedString>) -> Self {
+        self.note = Some(text.into());
         self
     }
 
@@ -107,7 +129,33 @@ impl InspectorSection {
 impl RenderOnce for InspectorSection {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let k = native_colors(cx);
-        let chevron = if self.collapsed {
+        // A view that does not hold the state itself: the section remembers it, so a
+        // chevron is never a dead control.
+        let initial = self.collapsed;
+        let own = self
+            .on_toggle
+            .is_none()
+            .then(|| window.use_keyed_state(self.id.clone(), cx, |_, _| initial));
+        let collapsed = own.as_ref().map_or(initial, |s| *s.read(cx));
+        let on_toggle = self.on_toggle.clone().or_else(|| {
+            own.map(|s| -> Click {
+                Rc::new(move |_, _, cx| {
+                    s.update(cx, |c, cx| {
+                        *c = !*c;
+                        cx.notify();
+                    })
+                })
+            })
+        });
+        // A click on the action is the action's, not the header's.
+        let action = self.action.map(|el| {
+            div()
+                .id("section-action")
+                .flex_none()
+                .on_click(|_, _, cx| cx.stop_propagation())
+                .child(el)
+        });
+        let chevron = if collapsed {
             Sf::ChevronRight
         } else {
             Sf::ChevronDown
@@ -124,19 +172,20 @@ impl RenderOnce for InspectorSection {
                     div()
                         .id(self.id)
                         .min_h(px(28.))
-                        .px(px(2.))
+                        .pr(super::tokens::space::S2)
                         .flex()
                         .items_center()
                         .gap(super::tokens::space::S6)
                         .child(
                             div()
-                                .flex_1()
-                                .min_w(px(0.))
+                                .flex_none()
                                 .n_headline()
                                 .text_color(k.label)
                                 .child(self.title),
                         )
-                        .children(self.action)
+                        // The chevron trails the title; the action stands
+                        // alone at the trailing edge, so the two never read
+                        // as one pull-down.
                         .child(symbol(
                             chevron,
                             super::tokens::icon::SM,
@@ -144,11 +193,21 @@ impl RenderOnce for InspectorSection {
                             k.tertiary,
                             window,
                         ))
-                        .when_some(self.on_toggle, |d, f| {
-                            d.on_click(move |e, w, cx| f(e, w, cx))
-                        }),
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w(px(0.))
+                                .pl(super::tokens::space::S6)
+                                .flex()
+                                .justify_end()
+                                .n_subheadline()
+                                .text_color(k.secondary)
+                                .children(self.note.map(TruncText::new)),
+                        )
+                        .children(action)
+                        .when_some(on_toggle, |d, f| d.on_click(move |e, w, cx| f(e, w, cx))),
                 )
-                .when(!self.collapsed, |d| {
+                .when(!collapsed, |d| {
                     d.child(
                         div()
                             .w_full()
@@ -156,18 +215,21 @@ impl RenderOnce for InspectorSection {
                             .overflow_hidden()
                             .rounded(metrics::GROUP_RADIUS)
                             .bg(k.group)
-                            .px(px(14.))
+                            .px(metrics::INSPECTOR_GROUP_INSET)
                             .py(px(10.))
                             .flex()
                             .flex_col()
-                            .gap(super::tokens::space::S6)
+                            .when(!self.list_rows, |d| d.gap(super::tokens::space::S6))
                             .children(self.rows),
                     )
                 })
                 .into_any_element();
         }
         // COMPLETENESS.md §2.5: px 16, sections 24 apart; the GroupLabel h32
-        // (12 medium muted) with an optional 28 ghost action.
+        // (12 medium muted) with an optional 28 ghost action. With an action the
+        // first row starts 4 lower, so the 28 control never sits 2 above a
+        // selected row's fill.
+        let has_action = action.is_some();
         div()
             .w_full()
             .px(metrics::INSPECTOR_PAD)
@@ -182,27 +244,30 @@ impl RenderOnce for InspectorSection {
                     .flex()
                     .items_center()
                     .gap(super::tokens::space::S4)
-                    .child(symbol(
+                    // The chevron trails the title, as in the grouped header.
+                    .child(
+                        div()
+                            .min_w(px(0.))
+                            .truncate()
+                            .n_section()
+                            .text_color(k.secondary)
+                            .child(self.title),
+                    )
+                    .child(div().flex_none().child(symbol(
                         chevron,
                         super::tokens::icon::SM,
                         Weight::Semibold,
                         k.secondary,
                         window,
-                    ))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w(px(0.))
-                            .n_section()
-                            .text_color(k.secondary)
-                            .child(self.title),
-                    )
-                    .children(self.action)
-                    .when_some(self.on_toggle, |d, f| {
-                        d.on_click(move |e, w, cx| f(e, w, cx))
-                    }),
+                    )))
+                    .child(div().flex_1().min_w(px(0.)))
+                    .children(action)
+                    .when_some(on_toggle, |d, f| d.on_click(move |e, w, cx| f(e, w, cx))),
             )
-            .when(!self.collapsed, |d| d.children(self.rows))
+            .when(has_action && !collapsed, |d| {
+                d.child(div().flex_none().h(super::tokens::space::S4))
+            })
+            .when(!collapsed, |d| d.children(self.rows))
             .into_any_element()
     }
 }

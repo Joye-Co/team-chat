@@ -31,39 +31,18 @@ pub fn menu_surface(cx: &App) -> gpui::Div {
         .flex_col()
 }
 
-/// A popover surface (§7.3): radius 12, `sheet` fill, `float`, with an
-/// arrow on its top edge pointing at the control (`arrow_x` from the
-/// leading edge).
-pub fn popover_surface(arrow_x: gpui::Pixels, cx: &App) -> gpui::Div {
+/// A popover surface (§2.11): the standard float surface, radius 8, the
+/// menu fill, a 1 px border and shadow md, like [`menu_surface`] without
+/// its padding. No arrow: the surface opens next to its control.
+pub fn popover_surface(cx: &App) -> gpui::Div {
     let k = native_colors(cx);
-    let arrow = metrics::POPOVER_ARROW;
     div()
-        .relative()
         .flex_none()
         .rounded(metrics::POPOVER_RADIUS)
-        .bg(k.sheet)
-        .shadow(k.glass())
-        .child(
-            // A square turned 45°: GPUI has no rotation for divs, so the
-            // arrow is two stacked bars narrowing upward.
-            div()
-                .absolute()
-                .top(-arrow / 2.)
-                .left(arrow_x - arrow / 2.)
-                .w(arrow)
-                .h(arrow / 2.)
-                .flex()
-                .flex_col()
-                .items_center()
-                .child(
-                    div()
-                        .w(arrow / 2.)
-                        .h(arrow / 4.)
-                        .rounded_t(px(2.))
-                        .bg(k.sheet),
-                )
-                .child(div().w(arrow).h(arrow / 4.).bg(k.sheet)),
-        )
+        .bg(k.menu)
+        .border_1()
+        .border_color(k.separator)
+        .shadow(super::tokens::shadow::md())
 }
 
 /// A 1 px separator inset to the text column.
@@ -150,7 +129,7 @@ impl MenuRow {
         self
     }
 
-    /// The red text of a destructive item.
+    /// A destructive item: a red symbol, the label in the text color.
     pub fn destructive(mut self, on: bool) -> Self {
         self.destructive = on;
         self
@@ -163,17 +142,18 @@ impl RenderOnce for MenuRow {
         let hl = self.highlighted && !self.disabled;
         // D10: the highlight is the `accent` (muted) fill with foreground
         // text, never an inverted row.
-        let text = if self.disabled {
-            k.tertiary
-        } else if self.destructive {
+        let text = if self.disabled { k.tertiary } else { k.label };
+        // The state color stays on the symbol; the label keeps the text
+        // color (D3: no colored text run longer than its icon).
+        let glyph_ink = if self.destructive && !self.disabled {
             k.red
         } else {
-            k.label
+            text
         };
         let glyph = self
             .symbol
             .or(self.checked.then_some(Sf::Check))
-            .map(|sf| symbol(sf, metrics::MENU_SYMBOL, Weight::Regular, text, window));
+            .map(|sf| symbol(sf, metrics::MENU_SYMBOL, Weight::Regular, glyph_ink, window));
         div()
             .flex_none()
             .h(metrics::MENU_ROW)
