@@ -150,12 +150,38 @@ function cancelAction(label: string | undefined): CardV2Action[] {
   return label ? [{ id: CARD_IDS.cancel, label, kind: "cancel" }] : [];
 }
 
-/** Checks a v2 card and returns it parsed. Throws ChatError `invalid` with the first issue. */
+/** How many problems of one card an error lists. */
+const MAX_CARD_ISSUES = 5;
+
+/** One schema issue as a line that names the block (or action) it is in. */
+function issueLine(card: CardV2, path: readonly PropertyKey[], message: string): string {
+  const list = (key: PropertyKey | undefined): unknown[] | undefined => {
+    const v = key === "blocks" || key === "actions" ? (card as unknown as Record<string, unknown>)?.[key] : undefined;
+    return Array.isArray(v) ? v : undefined;
+  };
+  const at = typeof path[1] === "number" ? (list(path[0])?.[path[1]] as { id?: unknown; type?: unknown } | undefined) : undefined;
+  if (at && typeof at === "object") {
+    const id = typeof at.id === "string" ? `"${at.id}"` : `#${String(path[1])}`;
+    const rest = path.slice(2).join(".");
+    const what = path[0] === "blocks" ? `block ${id}${typeof at.type === "string" ? ` (${at.type})` : ""}` : `action ${id}`;
+    return `${what}${rest ? ` ${rest}` : ""}: ${message}`;
+  }
+  const where = path.join(".");
+  // A write rule (`card.limits: …`) names its block itself; the path `blocks` adds nothing.
+  return where && !(where === "blocks" && /^card\.[a-z_]+: /.test(message)) ? `${where}: ${message}` : message;
+}
+
+/**
+ * Checks a v2 card and returns it parsed. Throws ChatError `invalid` that lists up to 5
+ * problems, each with the id and type of its block.
+ */
 export function checkCardV2(card: CardV2): CardV2 {
   const r = CardV2Schema.safeParse(card);
   if (!r.success) {
-    const issue = r.error.issues[0];
-    throw new ChatError("invalid", `card: ${issue?.path.join(".") || "(root)"} ${issue?.message ?? ""}`.trim());
+    const lines = [...new Set(r.error.issues.map((i) => issueLine(card, i.path, i.message)))];
+    const more = lines.length - MAX_CARD_ISSUES;
+    const shown = lines.slice(0, MAX_CARD_ISSUES).join("; ");
+    throw new ChatError("invalid", `card: ${shown || "does not fit the protocol"}${more > 0 ? `; and ${more} more` : ""}`);
   }
   return r.data;
 }

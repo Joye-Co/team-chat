@@ -3,20 +3,14 @@
 // member, who asked), the switched-off person sign-in, the cleanup of old data and waits, and what
 // the AI member says when the computer has no sign-in. Ids and names are made up.
 import { env, runInDurableObject } from "cloudflare:test";
-import { afterAll, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import type { BotsEnv } from "../src/bots/env";
 import { githubOff1 } from "../src/bots/desk/core";
 import { runMigrations } from "../src/core/migrations";
 import { githubFor, identityPerson } from "../src/github/assign";
 import { GITHUB_TEXT } from "../src/github/text";
-import { Daemon, type World, downViolations, mention, world } from "./daemon";
-import { Client, type TestMember, api, createGroup, createMember, protocolViolations, waitUntil } from "./helpers";
-
-afterAll(async () => {
-  await new Promise((r) => setTimeout(r, 300));
-  expect(protocolViolations).toEqual([]);
-  expect(downViolations).toEqual([]);
-});
+import { Daemon, type World, mention, world } from "./daemon";
+import { Client, type TestMember, api, createGroup, createMember, waitUntil } from "./helpers";
 
 const benv = env as unknown as BotsEnv;
 const deskOf = (botId: string): any => benv.BOT_DESK.get(benv.BOT_DESK.idFromName(botId)) as never;

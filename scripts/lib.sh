@@ -7,9 +7,45 @@ DIST="${DIST:-$ROOT/dist}"
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
 log() { printf '==> %s\n' "$*" >&2; }
 
+# tool_hint <tool>: where a tool that does not ship with the system comes from, or nothing.
+tool_hint() {
+  case "$1" in
+    cargo | rustc) printf 'rustup, https://rustup.rs; rust-toolchain.toml names the toolchain' ;;
+    bun) printf 'https://bun.sh' ;;
+    rcodesign) printf 'cargo install apple-codesign' ;;
+    jq | gh | shellcheck) printf 'for example: brew install %s' "$1" ;;
+  esac
+}
+
+# need <tool>...: stops when one is missing, after naming every missing one of the call and
+# where to get it.
 need() {
-  local c
-  for c in "$@"; do command -v "$c" >/dev/null 2>&1 || die "missing tool: $c"; done
+  local c hint missing=() lines=""
+  for c in "$@"; do command -v "$c" >/dev/null 2>&1 || missing+=("$c"); done
+  [ "${#missing[@]}" -gt 0 ] || return 0
+  if [ "${#missing[@]}" = 1 ]; then
+    hint="$(tool_hint "${missing[0]}")"
+    die "missing tool: ${missing[0]}${hint:+ ($hint)}"
+  fi
+  for c in "${missing[@]}"; do
+    hint="$(tool_hint "$c")"
+    lines+=$'\n'"  $c${hint:+ ($hint)}"
+  done
+  die "missing tools:$lines"
+}
+
+# usage: prints the comment block at the top of the running script (from line 2 to the first
+# line that is not a comment) without the "# ". Every script's --help is this, so no script
+# keeps line numbers of itself.
+usage() {
+  awk 'NR == 1 { next } !/^#/ { exit } { sub(/^# ?/, ""); print }' "$0"
+}
+
+# opt_value <option> [value]: the value of an option; stops when the option came without one.
+# In an option loop: X="$(opt_value "$@")"; shift 2
+opt_value() {
+  [ $# -ge 2 ] && [ -n "$2" ] || die "$1 needs a value"
+  printf '%s' "$2"
 }
 
 # product <key>: a string field of product.json.
@@ -52,12 +88,28 @@ valid_release_version() {
   [[ "$1" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
 }
 
+# default_target_dir: where cargo builds when CARGO_TARGET_DIR is not set: one folder per
+# worktree for every script, so a merged branch has one folder to delete.
+default_target_dir() { printf '%s' "$ROOT/target"; }
+
 cargo_env() {
   # shellcheck disable=SC1091
   [ -f "$HOME/.cargo/env" ] && . "$HOME/.cargo/env"
   need cargo
-  export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$ROOT/target}"
+  export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$(default_target_dir)}"
   if [ -z "${RUSTC_WRAPPER:-}" ] && command -v sccache >/dev/null 2>&1; then export RUSTC_WRAPPER=sccache; fi
+}
+
+# warn_low_disk: one warning when the home volume has less than 60 GB free (a desktop debug
+# target takes 10-30 GB). It never stops a build, and says nothing in CI.
+warn_low_disk() {
+  [ -z "${CI:-}" ] || return 0
+  local free_kb
+  free_kb="$(df -Pk "$HOME" 2>/dev/null | awk 'NR == 2 { print $4 }')" || return 0
+  [[ "$free_kb" =~ ^[0-9]+$ ]] || return 0
+  if [ "$free_kb" -lt $((60 * 1024 * 1024)) ]; then
+    log "warning: $((free_kb / 1024 / 1024)) GB free on the disk of $HOME, less than the 60 GB a build should start with; delete the target folders of merged branches"
+  fi
 }
 
 # bin_name <package>: the first binary target of a workspace package.

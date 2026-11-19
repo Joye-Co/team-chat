@@ -442,12 +442,7 @@ pub fn permission_outcome(options: &[Value], approve: bool) -> Value {
     }
 }
 
-/// What a run tells an agent whose earlier session could not be continued: its prompt carries
-/// only what is new since that session.
-pub const LOST_SESSION_NOTE: &str = "Your earlier conversation in this topic could not be \
-continued: this is a new session and you do not remember it. The messages below are only what \
-is new since then. Before you act, read the topic and what was decided with `chat-run topic \
-history`.";
+pub use super::LOST_SESSION_NOTE;
 
 /// The first prompt: the run note (how to use `chat-run`), when set, then the prompt. When
 /// `lost`: the whole prompt (`spec.full_prompt`) when the server sent it, or else the

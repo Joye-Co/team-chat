@@ -409,9 +409,14 @@ export class MachineLink extends DurableObject<BotsEnv> {
     }
     const parsed = UpFrame.safeParse(raw);
     if (!parsed.success) {
-      const t = (raw as { t?: unknown })?.t;
-      this.log.warn("bad daemon frame", { t: typeof t === "string" ? t.slice(0, 32) : null, issue: parsed.error.issues[0]?.message });
-      return this.send(ws, { t: "error", error: { code: "invalid", message: "invalid frame" } });
+      // Only the frame type, the field path and the rule: never a value of the frame.
+      const given = (raw as { t?: unknown } | null)?.t;
+      const t = typeof given === "string" ? given.slice(0, 32) : null;
+      const issue = parsed.error.issues[0];
+      const path = issue?.path.join(".") || "(root)";
+      this.log.warn("bad daemon frame", { t, path, issue: issue?.message });
+      const message = `invalid frame${t === null ? "" : ` ${t}`}: ${path} ${issue?.message ?? ""}`.trim();
+      return this.send(ws, { t: "error", error: { code: "invalid", message } });
     }
     // Frames of one link are handled one at a time, in order.
     const next = this.chain.then(() => this.handle(ws, parsed.data));
