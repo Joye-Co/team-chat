@@ -251,6 +251,8 @@ impl CardUi {
 // ---------------------------------------------------------------------------
 // The tree
 
+use crate::ui::native::FocusRow as _;
+
 /// The card's blocks by id, and the top-level ones in reading order.
 pub(crate) struct Tree<'a> {
     by_id: HashMap<&'a str, &'a CardV2Block>,
@@ -563,7 +565,13 @@ pub(crate) fn render_node(
         _ => leaf(node, b, window, cx),
     };
     let el = interact::decorate(node, b, inner, window, cx);
-    parts::wrap(node, b, el, window, cx)
+    let el = parts::wrap(node, b, el, window, cx);
+    // 复制 where no 引用提问 part menu offers it. A container's children carry their own.
+    if b.is_container() {
+        el
+    } else {
+        b20::copyable_run(node.ctx, &[b], el, cx)
+    }
 }
 
 /// A leaf block: the 2.1 renderers, else the 2.0 one.
@@ -571,7 +579,7 @@ fn leaf(node: &Node, b: &CardV2Block, window: &mut Window, cx: &mut App) -> AnyE
     let ctx = node.ctx;
     match b {
         CardV2Block::Decision { .. } => leaves::decision(node, b, window, cx),
-        CardV2Block::Rank { .. } => leaves::rank(node, b, cx),
+        CardV2Block::Rank { .. } => leaves::rank(node, b, window, cx),
         CardV2Block::Rating { .. } => leaves::rating(node, b, cx),
         CardV2Block::Scale { .. } => leaves::scale(node, b, cx),
         CardV2Block::Confirm { .. } => leaves::confirm(node, b, cx),
@@ -717,13 +725,20 @@ fn group(
         .min_w(px(0.))
         .h(crate::ui::native::tokens::height::SM)
         .when(can_collapse, |el| {
-            el.on_click(move |_, _, cx| {
-                ui.update(cx, |u, cx| {
-                    let b = u.block_mut(&gid);
-                    b.collapsed = Some(!closed);
-                    cx.notify();
+            // The head of a section that folds is a row control: the row hover reaching
+            // past the text, the pointer, a tab stop with the focus ring and Enter / Space.
+            el.mx(-space::S6)
+                .px(space::S6)
+                .rounded(crate::ui::native::tokens::radius::ITEM)
+                .focus_row(false, cx)
+                .cursor_pointer()
+                .on_click(move |_, _, cx| {
+                    ui.update(cx, |u, cx| {
+                        let b = u.block_mut(&gid);
+                        b.collapsed = Some(!closed);
+                        cx.notify();
+                    })
                 })
-            })
         })
         .when(can_collapse, |el| {
             el.child(ui::icon(
@@ -732,7 +747,7 @@ fn group(
                 } else {
                     Sym::ChevronDown
                 },
-                px(14.),
+                crate::ui::native::tokens::icon::MARK,
                 k.ink_3,
             ))
         })
@@ -767,7 +782,10 @@ fn group(
         col = col.child(
             div()
                 .mt(space::S6)
-                .when(can_collapse, |el| el.pl(space::S20))
+                .when(can_collapse, |el| {
+                    // On the head's title: past its chevron and their gap.
+                    el.pl(crate::ui::native::tokens::icon::MARK + space::S8)
+                })
                 .child(stack(node, children, window, cx)),
         );
     }
@@ -783,7 +801,6 @@ fn tabs(node: &Node, b: &CardV2Block, window: &mut Window, cx: &mut App) -> AnyE
     else {
         return div().into_any_element();
     };
-    let k = theme::colors(cx);
     let current = node
         .ui
         .block(id)
@@ -792,55 +809,107 @@ fn tabs(node: &Node, b: &CardV2Block, window: &mut Window, cx: &mut App) -> AnyE
         .filter(|t| tabs.iter().any(|x| &x.id == t))
         .or_else(|| tabs.first().map(|t| t.id.clone()))
         .unwrap_or_default();
+    // The one tabs control of the kit (gpui-component buttons on a segment track, §1.8):
+    // every tab a tab stop with its hover and focus ring. Many long labels scroll sideways
+    // inside the card instead of pushing it wide.
+    let declared = b
+        .base()
+        .is_some_and(|x| x.events().iter().any(|e| e == "tab.open"));
+    let ids: Vec<String> = tabs.iter().map(|t| t.id.clone()).collect();
+    let selected = ids.iter().position(|t| *t == current).unwrap_or(0);
+    let (ui, emit, bid) = (
+        node.ctx.ui.clone(),
+        interact::Emitter::of(node.ctx),
+        id.clone(),
+    );
+    // Tabs that do not fit scroll sideways and say so: the right end fades into the card
+    // (§2.21), the last tab clears the fade at the end, and the open tab is brought into view.
+    let scroll_id: gpui::ElementId = node.ctx.id(format!("tabs-scroll-{id}")).into();
+    let scroll = window
+        .use_keyed_state(scroll_id.clone(), cx, |_, _| gpui::ScrollHandle::new())
+        .read(cx)
+        .clone();
+    let control = crate::ui::native::Segmented::new(
+        node.ctx.id(format!("tabs-{id}")),
+        tabs.iter()
+            .map(|t| crate::ui::native::Segment::Label(t.label.clone().into())),
+    )
+    .selected(selected)
+    .reveal_in(&scroll, space::S16)
+    .on_change(move |ix, _, cx| {
+        let Some(tid) = ids.get(ix).cloned() else {
+            return;
+        };
+        let first = ui.update(cx, |u, cx| {
+            let b = u.block_mut(&bid);
+            b.tab = Some(tid.clone());
+            cx.notify();
+            b.opened.insert(tid.clone())
+        });
+        if first && declared {
+            emit.send(
+                &bid,
+                "tab.open",
+                serde_json::json!({ "tabId": tid }),
+                None,
+                cx,
+            );
+        }
+    });
+    let scrolls = scroll.max_offset().x > px(0.);
+    let scrolled = scroll.offset().x < px(0.);
+    let card = crate::ui::native::native_colors(cx).sheet;
     let bar = div()
-        .flex()
-        .flex_none()
-        .p(px(2.))
-        .gap(crate::ui::native::tokens::space::S2)
-        .rounded(theme::radius::MD)
-        .bg(k.sunken)
-        .children(tabs.iter().map(|t| {
-            let on = t.id == current;
-            let ui = node.ctx.ui.clone();
-            let emit = interact::Emitter::of(node.ctx);
-            let (bid, tid) = (id.clone(), t.id.clone());
-            let declared = b
-                .base()
-                .is_some_and(|x| x.events().iter().any(|e| e == "tab.open"));
+        .relative()
+        .w_full()
+        .min_w(px(0.))
+        .child(
             div()
-                .id(node.ctx.id(format!("tab-{id}-{}", t.id)))
-                .h(px(26.))
-                .px(space::S10)
-                .rounded(crate::ui::native::tokens::radius::ITEM)
+                .id(scroll_id)
+                .w_full()
                 .flex()
-                .items_center()
-                .text_size(crate::ui::native::tokens::text::UI.0)
-                .text_color(if on { k.ink } else { k.ink_2 })
-                .when(on, |el| {
-                    el.bg(k.bg)
-                        .font_weight(theme::MEDIUM_WEIGHT)
-                        .shadow(k.sec_hi())
-                })
-                .when(!on, |el| el.hover(|s| s.text_color(k.ink)))
-                .on_click(move |_, _, cx| {
-                    let first = ui.update(cx, |u, cx| {
-                        let b = u.block_mut(&bid);
-                        b.tab = Some(tid.clone());
-                        cx.notify();
-                        b.opened.insert(tid.clone())
-                    });
-                    if first && declared {
-                        emit.send(
-                            &bid,
-                            "tab.open",
-                            serde_json::json!({ "tabId": tid }),
-                            None,
-                            cx,
-                        );
-                    }
-                })
-                .child(t.label.clone())
-        }));
+                .overflow_x_scroll()
+                .restrict_scroll_to_axis()
+                .track_scroll(&scroll)
+                .child(
+                    div()
+                        .flex_none()
+                        .flex()
+                        .child(control)
+                        .when(scrolls, |el| el.pr(space::S16)),
+                ),
+        )
+        .when(scrolls, |el| {
+            el.child(
+                div()
+                    .absolute()
+                    .top_0()
+                    .bottom_0()
+                    .right_0()
+                    .w(space::S16)
+                    .bg(gpui::linear_gradient(
+                        90.,
+                        gpui::linear_color_stop(card.opacity(0.), 0.),
+                        gpui::linear_color_stop(card, 1.),
+                    )),
+            )
+        })
+        // Scrolled along, the tabs passed fade out at the left end the same way.
+        .when(scrolled, |el| {
+            el.child(
+                div()
+                    .absolute()
+                    .top_0()
+                    .bottom_0()
+                    .left_0()
+                    .w(space::S16)
+                    .bg(gpui::linear_gradient(
+                        90.,
+                        gpui::linear_color_stop(card, 0.),
+                        gpui::linear_color_stop(card.opacity(0.), 1.),
+                    )),
+            )
+        });
     let pane = tabs
         .iter()
         .find(|t| t.id == current)
@@ -849,7 +918,7 @@ fn tabs(node: &Node, b: &CardV2Block, window: &mut Window, cx: &mut App) -> AnyE
         .flex()
         .flex_col()
         .gap(space::S12)
-        .child(div().flex().child(bar))
+        .child(bar)
         .children(pane)
         .into_any_element()
 }
@@ -869,12 +938,20 @@ fn questionnaire(node: &Node, b: &CardV2Block, window: &mut Window, cx: &mut App
     let questions: Vec<&CardV2Block> = children.iter().filter_map(|id| child(node, id)).collect();
     let inputs: Vec<&&CardV2Block> = questions.iter().filter(|q| q.takes_input()).collect();
     let required: Vec<&&&CardV2Block> = inputs.iter().filter(|q| leaves::is_required(q)).collect();
+    // A blank text field is in the form's values, and it is not an answer.
+    let filled = |id: Option<&str>| {
+        use crate::views::cards::v2::form::Val;
+        id.and_then(|id| node.ctx.values.get(id))
+            .is_some_and(|v| match v {
+                Val::Text(t) => !t.trim().is_empty(),
+                Val::Choice(c) | Val::Order(c) => !c.is_empty(),
+                Val::Rows(r) => !r.is_empty(),
+                Val::Switch(_) | Val::Num(_) => true,
+            })
+    };
     let done = required
         .iter()
-        .filter(|q| {
-            form21::problem(node.ctx.card, q, &node.ctx.values).is_none()
-                && q.id().is_some_and(|id| node.ctx.values.contains_key(id))
-        })
+        .filter(|q| form21::problem(node.ctx.card, q, &node.ctx.values).is_none() && filled(q.id()))
         .count();
     let live = node.ctx.live();
     let mut col = div().flex().flex_col().min_w(px(0.));
@@ -884,15 +961,18 @@ fn questionnaire(node: &Node, b: &CardV2Block, window: &mut Window, cx: &mut App
         let answered = inputs
             .iter()
             .filter(|q| {
-                q.id().is_some_and(|id| node.ctx.values.contains_key(id))
-                    && form21::problem(node.ctx.card, q, &node.ctx.values).is_none()
+                filled(q.id()) && form21::problem(node.ctx.card, q, &node.ctx.values).is_none()
             })
             .count();
-        let dashes = div().w(px(64.)).child(crate::ui::native::determinate_bar(
-            answered as f32 / inputs.len().max(1) as f32,
-            None,
-            cx,
-        ));
+        // The bar counts what the words beside it count: 必答 when there are any.
+        let share = if required.is_empty() {
+            answered as f32 / inputs.len().max(1) as f32
+        } else {
+            done as f32 / required.len() as f32
+        };
+        let dashes = div()
+            .w(px(64.))
+            .child(crate::ui::native::determinate_bar(share, None, cx));
         col = col.child(
             meta(div())
                 .mb(space::S8)
@@ -995,6 +1075,61 @@ pub(crate) fn question(text: &str, cx: &App) -> Div {
         .font_weight(FontWeight::SEMIBOLD)
         .text_color(k.ink)
         .child(text.to_string())
+}
+
+#[cfg(test)]
+mod selection_tests {
+    use gpui::{
+        AppContext as _, Modifiers, MouseButton, ParentElement as _, Render, Styled as _, div,
+        point, px,
+    };
+
+    struct Title;
+
+    impl Render for Title {
+        fn render(
+            &mut self,
+            _: &mut gpui::Window,
+            _: &mut gpui::Context<Self>,
+        ) -> impl gpui::IntoElement {
+            div()
+                .size_full()
+                .child(gpui_base::SelectableText::new("title", "十月复盘的结论"))
+        }
+    }
+
+    /// The window root draws the selection layer, so a run of card text selects by dragging.
+    #[gpui::test]
+    fn a_drag_over_card_text_selects_it(cx: &mut gpui::TestAppContext) {
+        cx.update(gpui_component::init);
+        let window = cx.update(|cx| {
+            cx.open_window(Default::default(), |window, cx| {
+                let view = cx.new(|_| Title);
+                cx.new(|cx| gpui_base::Root::new(view, window, cx))
+            })
+            .unwrap()
+        });
+        let cx = &mut gpui::VisualTestContext::from_window(window.into(), cx);
+        cx.run_until_parked();
+        cx.simulate_mouse_down(
+            point(px(1.), px(6.)),
+            MouseButton::Left,
+            Modifiers::default(),
+        );
+        cx.simulate_mouse_move(
+            point(px(400.), px(6.)),
+            Some(MouseButton::Left),
+            Modifiers::default(),
+        );
+        cx.simulate_mouse_up(
+            point(px(400.), px(6.)),
+            MouseButton::Left,
+            Modifiers::default(),
+        );
+        cx.run_until_parked();
+        let text = cx.update(|window, cx| gpui_base::TextSelection::selected_text(window, cx));
+        assert_eq!(text, "十月复盘的结论");
+    }
 }
 
 #[cfg(test)]

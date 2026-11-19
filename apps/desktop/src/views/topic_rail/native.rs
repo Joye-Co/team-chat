@@ -320,11 +320,15 @@ fn changed_files(
                 Some(p) => div()
                     .w_full()
                     .pb(space::S8)
+                    // The row above names the file and its counts: the
+                    // patch has no header of its own.
                     .child(crate::views::cards::v2::blocks::diff(
-                        Some(&f.path),
+                        gpui::ElementId::Name(format!("changes-diff-{i}").into()),
+                        None,
                         p,
-                        Some(f.additions),
-                        Some(f.deletions),
+                        None,
+                        None,
+                        window,
                         cx,
                     ))
                     .into_any_element(),

@@ -315,6 +315,27 @@ impl CardCache {
     }
 }
 
+/// True for a file record a recording tile can play.
+fn playable(status: proto::FileStatus, mime: &str) -> bool {
+    status == proto::FileStatus::Ready && mime.starts_with("video/")
+}
+
+/// The record of the recording a card names, when it is a ready video this account may read.
+pub(super) async fn load_recording(
+    client: &Client,
+    file_id: &str,
+) -> Result<proto::FileRef, crate::data::FileError> {
+    let meta = client
+        .http()
+        .file_meta(file_id)
+        .await
+        .map_err(|_| crate::data::FileError::NotFound)?;
+    if !playable(meta.status, &meta.mime) {
+        return Err(crate::data::FileError::NotFound);
+    }
+    Ok(meta.to_file_ref())
+}
+
 /// Fetches the file record, checks that it is a ready image of a sane size,
 /// and downloads it into the file cache (or finds it there).
 async fn load_image(
@@ -358,6 +379,13 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_a_ready_video_plays() {
+        assert!(playable(proto::FileStatus::Ready, "video/mp4"));
+        assert!(!playable(proto::FileStatus::Ready, "image/png"));
+        assert!(!playable(proto::FileStatus::Pending, "video/mp4"));
+    }
 
     #[test]
     fn refusal_codes_map_to_errors() {

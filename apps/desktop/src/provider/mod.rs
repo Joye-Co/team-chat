@@ -265,6 +265,19 @@ impl CoreProvider {
         self.state().account.clone()
     }
 
+    /// My stored answer to the current rev of card `message_id` that can be taken back:
+    /// the account, the rev and the answer id.
+    fn my_card_answer(&self, message_id: &str) -> Option<(Arc<Account>, u32, String)> {
+        let a = self.account()?;
+        // From the card cache: a card asks this on every draw.
+        let rev = ChatProvider::card_v2(self, "", message_id)?.card.rev;
+        let id = self
+            .shared
+            .cards_v2
+            .my_answer_id(&a.client, message_id, &a.me.id, rev)?;
+        Some((a, rev, id))
+    }
+
     fn emit(&self, mut changes: Vec<Change>) {
         if changes.is_empty() {
             return;
@@ -1040,6 +1053,21 @@ impl CoreProvider {
                 {
                     let mine = ev.actor_id == a.me.id;
                     self.shared.cards_v2.on_answered(&d.message_id, mine, d.rev);
+                    if let Some(m) = a.client.store().message(&d.message_id).ok().flatten() {
+                        out.extend([
+                            Change::Messages {
+                                group_id: m.group_id,
+                                topic_id: m.topic_id,
+                            },
+                            Change::Todo,
+                        ]);
+                    }
+                }
+                // 撤回 on any device: the answer is gone, the card asks again.
+                if let chat_core::proto::EventData::CardRetracted(d) = &ev.data
+                    && let Some(a) = self.account()
+                {
+                    self.shared.cards_v2.on_retracted(&d.message_id);
                     if let Some(m) = a.client.store().message(&d.message_id).ok().flatten() {
                         out.extend([
                             Change::Messages {
@@ -2583,6 +2611,42 @@ impl ChatProvider for CoreProvider {
         }
     }
 
+    fn can_retract_card_v2_answer(&self, _group_id: &str, message_id: &str) -> bool {
+        self.my_card_answer(message_id).is_some()
+    }
+
+    fn retract_card_v2_answer(&self, group_id: &str, topic_id: &str, message_id: &str) {
+        let Some((a, rev, answer_id)) = self.my_card_answer(message_id) else {
+            return;
+        };
+        let now = crate::selftest::clock::now_ms();
+        let request = crate::data::cards_v2::CardEventRequest {
+            rev,
+            event: chat_core::proto::EVENT_ANSWER_RETRACT.to_string(),
+            ..Default::default()
+        };
+        match a.client.retract_card_answer(message_id, &answer_id) {
+            Ok(client_event_id) => {
+                self.shared
+                    .card_events
+                    .sent(message_id, client_event_id, request, true, now)
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "card answer retract refused");
+                self.shared.card_events.failed_now(
+                    message_id,
+                    request,
+                    crate::data::cards_v2::CardEventFailure::Other,
+                    now,
+                );
+            }
+        }
+        self.emit(vec![Change::Messages {
+            group_id: group_id.to_string(),
+            topic_id: topic_id.to_string(),
+        }]);
+    }
+
     // --- inc-cards21: the interaction loop ---
     fn send_card_event(
         &self,
@@ -2697,6 +2761,20 @@ impl ChatProvider for CoreProvider {
         self.shared
             .cards
             .image(&a.client, file_id, move || this.emit(vec![change]))
+    }
+
+    fn card_recording(&self, file_id: &str) -> crate::data::Reply<crate::data::FileAttachment> {
+        let (tx, rx) = futures::channel::oneshot::channel();
+        let Some(a) = self.account() else {
+            let _ = tx.send(Err(crate::data::FileError::SignedOut));
+            return rx;
+        };
+        let (client, id) = (a.client.clone(), file_id.to_string());
+        a.client.spawn(async move {
+            let file = cards::load_recording(&client, &id).await;
+            let _ = tx.send(file.map(|f| convert::file_ref(&f)));
+        });
+        rx
     }
 
     fn card_image_file(&self, file_id: &str) -> Option<crate::data::FileAttachment> {

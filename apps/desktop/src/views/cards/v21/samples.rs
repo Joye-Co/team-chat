@@ -67,6 +67,37 @@ pub const NOTE_DRAFT: &str = "c21-note-draft";
 /// Ledger answered my click with a new message off screen.
 pub const NOTE_REPLY: &str = "c21-note-reply";
 
+/// A press the member cannot take, one card per `expect.reason`.
+pub const NONE_REASONS: [(&str, &str); 5] = [
+    ("c21-none-inactive", "member.inactive"),
+    ("c21-none-runner", "runner.off"),
+    ("c21-none-external", "run.external"),
+    ("c21-none-limit", "run.limit"),
+    ("c21-none-failed", "run.failed"),
+];
+
+/// A section that folds over a table that sorts, both on the card's first view.
+pub const KEYS_TABLE: &str = "c21-keys-table";
+/// A buttons block that declares no `button.press`.
+pub const NO_EVENTS: &str = "c21-no-events";
+
+/// My bar click the server refused: I may not do this step.
+pub const NOTE_FORBIDDEN: &str = "c21-note-forbidden";
+/// My bar click that did not get to Ledger (the server refused it for another reason).
+pub const NOTE_REJECTED: &str = "c21-note-rejected";
+/// Ledger answered my bar click with `failed` and no note.
+pub const NOTE_UNHANDLED: &str = "c21-note-unhandled";
+/// Ledger answered my bar click with `failed` and why.
+pub const NOTE_WHY: &str = "c21-note-why";
+/// Schema fields: slots in another time zone, a rank where only the top 3 count, a field
+/// with help and a number with its unit.
+pub const FIELDS: &str = "c21-fields";
+/// Two text blocks, two charts and three pictures in one card (element ids by block id).
+pub const TWINS: &str = "c21-twins";
+/// Controls a keyboard walks: five long tabs, a group, a metric that takes a press, a
+/// sortable 40-row table to pick from and a chart of 20 bars to pick from.
+pub const CONTROLS: &str = "c21-controls";
+
 /// One sample: the card message, stored answers, my answer on its way and my events
 /// (event times are ms before now).
 pub struct Sample21 {
@@ -154,6 +185,22 @@ fn acked(
     }
 }
 
+/// A live event of mine the server answered with `expect.mode: none` and `reason`.
+pub fn acked_none(id: &str, block: &str, reason: &str) -> MyCardEvent {
+    let mut e = acked(
+        id,
+        block,
+        "button.press",
+        json!({}),
+        ExpectMode::None,
+        LEDGER,
+    );
+    if let CardEventPhase::Acked { ack, .. } = &mut e.phase {
+        ack.expect.reason = Some(reason.into());
+    }
+    e
+}
+
 /// Moves an event to `now - ago`.
 pub fn at_ago(e: &MyCardEvent, ago: Millis, now: Millis) -> MyCardEvent {
     let mut e = e.clone();
@@ -165,6 +212,21 @@ pub fn at_ago(e: &MyCardEvent, ago: Millis, now: Millis) -> MyCardEvent {
         CardEventPhase::Sending => {}
     }
     e
+}
+
+/// Today (this computer's date) at `hour:minute` on the clock of `zone`: the slots of a
+/// sample read the same hours on every computer.
+fn at_zone(zone: chrono_tz::Tz, hour: u32, minute: u32) -> Millis {
+    use chrono::{Local, TimeZone as _};
+    Local
+        .timestamp_millis_opt(at(12, 0))
+        .single()
+        .and_then(|noon| {
+            noon.date_naive()
+                .and_hms_opt(hour, minute, 0)
+                .and_then(|t| zone.from_local_datetime(&t).single())
+        })
+        .map_or_else(|| at(hour, minute), |t| t.timestamp_millis())
 }
 
 fn base(title: &str, intent: &str, fallback: &str) -> Value {
@@ -345,8 +407,8 @@ fn conflict_rev3() -> Value {
             "summary": "新增群 38 个；抖音 10-14 到 10-16 埋点缺了 3 天。",
             "blocks": [
                 { "id": "kpis", "type": "row", "children": ["m_groups", "m_dau"] },
-                { "id": "m_groups", "type": "metric", "label": "新增群", "value": 38, "delta": 12, "unit": "%", "better": "up", "note": "比 9 月" },
-                { "id": "m_dau", "type": "metric", "label": "日活", "value": 2340, "delta": 4, "unit": "%", "better": "up", "note": "比 9 月" },
+                { "id": "m_groups", "type": "metric", "label": "新增群", "value": 38, "delta": 4, "better": "up", "note": "比 9 月" },
+                { "id": "m_dau", "type": "metric", "label": "日活", "value": 2340, "delta": 90, "better": "up", "note": "比 9 月" },
                 { "id": "check", "type": "decision", "label": "这个数据对不对？", "required": true, "fallbackText": "对 / 有问题",
                   "options": [ { "id": "ok", "label": "对，可以发周会" }, { "id": "wrong", "label": "有问题" } ],
                   "deliver": "onSubmit", "events": ["choice.change"] },
@@ -622,7 +684,11 @@ pub fn all() -> Vec<Sample21> {
         ),
     ));
     let day = 24 * 3600 * 1000;
-    let slot = |id: &str, d: i64, h: u32, conflicts: Value| json!({ "id": id, "start": at(h, 0) + d * day, "end": at(h, 0) + d * day + 3600 * 1000, "conflicts": conflicts });
+    // The hours are the card's zone's (`tz`), whatever zone this computer is in.
+    let slot = |id: &str, d: i64, h: u32, conflicts: Value| {
+        let start = at_zone(chrono_tz::Asia::Shanghai, h, 0) + d * day;
+        json!({ "id": id, "start": start, "end": start + 3600 * 1000, "conflicts": conflicts })
+    };
     out.push(sample(
         SLOTS,
         ALL,
@@ -899,6 +965,215 @@ pub fn all() -> Vec<Sample21> {
         ));
         out.push(s);
     }
+    for (id, reason) in NONE_REASONS {
+        let mut s = sample(
+            id,
+            GROWTH,
+            T_REPORT,
+            LEDGER,
+            at(9, 40),
+            with(
+                base("按渠道再拆一次？", "info", "Ledger：按渠道再拆一次？"),
+                json!({
+                    "blocks": [
+                        { "id": "more", "type": "buttons", "events": ["button.press"],
+                          "fallbackText": "按渠道拆开",
+                          "buttons": [{ "id": "split", "label": "按渠道拆开" }] }
+                    ]
+                }),
+            ),
+        );
+        s.events.push((1_000, acked_none(id, "more", reason)));
+        out.push(s);
+    }
+    out.push(sample(
+        KEYS_TABLE,
+        GROWTH,
+        T_REPORT,
+        LEDGER,
+        at(10, 34),
+        with(
+            base("按负责人看", "info", "Ledger：按负责人看"),
+            json!({
+                "blocks": [
+                    { "id": "g", "type": "group", "title": "明细", "summary": "点标题收起", "children": ["g_text"] },
+                    { "id": "g_text", "type": "text", "text": "这一组可以用键盘收起和展开。" },
+                    { "id": "table", "type": "table", "title": "按负责人", "columns": ["渠道", "负责人", "新增群"],
+                      "rows": [["微博", "小王", "14"], ["B 站", "李雪", "9"], ["抖音", "Forge", "5"]],
+                      "sortable": true }
+                ]
+            }),
+        ),
+    ));
+    out.push(sample(
+        NO_EVENTS,
+        GROWTH,
+        T_REPORT,
+        LEDGER,
+        at(9, 40),
+        with(
+            base("这周的安排", "info", "Ledger：这周的安排"),
+            json!({
+                "blocks": [
+                    { "id": "inert", "type": "buttons", "fallbackText": "周一开会 / 周三发版",
+                      "buttons": [ { "id": "a", "label": "周一开会" }, { "id": "b", "label": "周三发版" } ] }
+                ]
+            }),
+        ),
+    ));
+    // A live event that did not get through: the bar goes back and the card says why.
+    let failed_at = |id: &str, phase: CardEventPhase| {
+        let mut s = sample(id, GROWTH, T_REPORT, LEDGER, at(9, 40), bars_rev1());
+        let mut e = acked(
+            id,
+            "bars",
+            "chart.select",
+            click.clone(),
+            ExpectMode::Live,
+            LEDGER,
+        );
+        e.phase = phase;
+        s.events.push((1_000, e));
+        s
+    };
+    out.push(failed_at(
+        NOTE_FORBIDDEN,
+        CardEventPhase::Failed {
+            failure: CardEventFailure::Forbidden,
+            at: 0,
+        },
+    ));
+    out.push(failed_at(
+        NOTE_REJECTED,
+        CardEventPhase::Failed {
+            failure: CardEventFailure::Other,
+            at: 0,
+        },
+    ));
+    out.push(failed_at(
+        NOTE_UNHANDLED,
+        CardEventPhase::Resolved {
+            result: crate::data::cards_v2::InteractionResult::Failed,
+            note: None,
+            at: 0,
+        },
+    ));
+    out.push(failed_at(
+        NOTE_WHY,
+        CardEventPhase::Resolved {
+            result: crate::data::cards_v2::InteractionResult::Failed,
+            note: Some("B 站的数还没同步，过几分钟再点".into()),
+            at: 0,
+        },
+    ));
+    let day = 86_400_000;
+    let tokyo = |h: u32, m: u32| at_zone(chrono_tz::Asia::Tokyo, h, m);
+    out.push(sample(
+        FIELDS,
+        DEV,
+        T_V4,
+        JOJO,
+        at(10, 30),
+        with(
+            base("和东京那边对一下 4.0", "ask", "Jojo 问：什么时候开会、先做哪三件、订几个座位"),
+            json!({
+                "ask": { "from": [ME] },
+                "blocks": [
+                    { "id": "qs", "type": "questionnaire", "children": ["when", "order", "seats", "day"],
+                      "submitLabel": "发给东京", "fallbackText": "开会时间、优先级和座位" },
+                    { "id": "when", "type": "slots", "label": "哪个时间开会？", "tz": "Asia/Tokyo",
+                      "required": true, "fallbackText": "时间段", "slots": [
+                        { "id": "a", "start": tokyo(10, 0) + day, "end": tokyo(11, 0) + day },
+                        { "id": "b", "start": tokyo(15, 0) + day, "end": tokyo(15, 30) + day },
+                        { "id": "c", "start": tokyo(10, 0) + 2 * day, "end": tokyo(11, 0) + 2 * day, "conflicts": [LIXUE] },
+                        { "id": "d", "start": tokyo(15, 0) + 2 * day, "end": tokyo(16, 30) + 2 * day } ] },
+                    { "id": "order", "type": "rank", "label": "先做哪三件？", "rankTop": 3, "fallbackText": "排序",
+                      "items": [ { "id": "photos", "label": "按活动整理照片", "meta": "约 2 周" },
+                                 { "id": "share", "label": "群相册分享到微博", "meta": "约 4 天" },
+                                 { "id": "birthday", "label": "生日提醒", "meta": "约 3 天" },
+                                 { "id": "night", "label": "夜间消息汇总", "meta": "约 1 周" },
+                                 { "id": "weekly", "label": "群主周报", "meta": "约 1 周" } ] },
+                    { "id": "seats", "type": "input", "kind": "number", "label": "订几个座位？", "unit": "个",
+                      "min": 1, "max": 40, "default": 12, "help": "会议室最多坐 40 个人，含东京来的 6 位" },
+                    { "id": "day", "type": "input", "kind": "date", "label": "最晚哪天定下来？",
+                      "help": "东京那边要提前一周订机票" }
+                ],
+                "actions": [ { "id": "send", "label": "提交", "style": "primary", "kind": "submit" } ]
+            }),
+        ),
+    ));
+    let weeks = ["10-06", "10-13", "10-20", "10-27"];
+    out.push(sample(
+        TWINS,
+        GROWTH,
+        T_REPORT,
+        LEDGER,
+        at(10, 32),
+        with(
+            base("两段话、两张图和三张截图", "info", "Ledger：微博和 B 站各一段"),
+            json!({
+                "blocks": [
+                    { "id": "weibo_text", "type": "text", "text": "**微博**这个月涨得最快，四周里有三周在涨。" },
+                    { "id": "bili_text", "type": "text", "text": "**B 站**停更了两周，后两周才回来。" },
+                    { "id": "weibo", "type": "chart", "kind": "line", "label": "微博 · 每周", "x": weeks,
+                      "series": [ { "name": "新增群", "values": [2, 3, 4, 5] } ] },
+                    { "id": "bili", "type": "chart", "kind": "line", "label": "B 站 · 每周", "x": weeks,
+                      "series": [ { "name": "新增群", "values": [3, 1, 2, 3] } ] },
+                    { "id": "shots", "type": "row", "children": ["tall", "wide", "small"] },
+                    { "id": "tall", "type": "image", "fileId": "f-pic-tall", "alt": "手机截图" },
+                    { "id": "wide", "type": "image", "fileId": "f-pic-wide", "alt": "全景图" },
+                    { "id": "small", "type": "image", "fileId": "f-pic-small", "alt": "小图" },
+                    { "id": "pano", "type": "image", "fileId": "f-pic-wide", "alt": "全景图" }
+                ]
+            }),
+        ),
+    ));
+    let names: Vec<String> = (1..=20).map(|i| format!("渠道 {i:02}")).collect();
+    let counts: Vec<usize> = (0..20).map(|i| 3 + (i * 7) % 23).collect();
+    let rows: Vec<Vec<String>> = (0..40)
+        .map(|i| {
+            vec![
+                format!(
+                    "渠道 {:02} · 一个很长很长的渠道名字，写不下的时候要截断",
+                    i + 1
+                ),
+                ["小王", "李雪", "Forge"][i % 3].to_string(),
+                ((i * 37) % 90 + 4).to_string(),
+            ]
+        })
+        .collect();
+    out.push(sample(
+        CONTROLS,
+        GROWTH,
+        T_REPORT,
+        LEDGER,
+        at(10, 34),
+        with(
+            base("这些都能用键盘走", "info", "Ledger：按渠道看、按人看"),
+            json!({
+                "blocks": [
+                    { "id": "dau", "type": "metric", "label": "日活（点一下看明细）", "value": 2340, "delta": 4,
+                      "better": "up", "events": ["metric.press"], "emitBy": "members" },
+                    { "id": "tabs", "type": "tabs", "tabs": [
+                        { "id": "a", "label": "全部渠道的每周新增", "children": ["bars"] },
+                        { "id": "b", "label": "按负责人拆开的明细", "children": ["table"] },
+                        { "id": "c", "label": "微博和它的三个子渠道", "children": ["g"] },
+                        { "id": "d", "label": "B 站停更那两周", "children": ["d_text"] },
+                        { "id": "e", "label": "抖音和小红书的试投放", "children": ["e_text"] } ] },
+                    { "id": "d_text", "type": "text", "text": "B 站 10 月中停更了两周。" },
+                    { "id": "e_text", "type": "text", "text": "两个新渠道各投了一周。" },
+                    { "id": "bars", "type": "chart", "kind": "bar", "label": "新增群 · 按渠道", "x": names,
+                      "series": [ { "id": "groups", "name": "新增群", "values": counts } ],
+                      "events": ["chart.select", "chart.clear"], "emitBy": "members" },
+                    { "id": "table", "type": "table", "title": "按负责人", "columns": ["渠道", "负责人", "新增群"],
+                      "rows": rows, "select": "multiple", "sortable": true,
+                      "events": ["table.select"], "emitBy": "members" },
+                    { "id": "g", "type": "group", "title": "明细", "summary": "点标题收起", "children": ["g_text"] },
+                    { "id": "g_text", "type": "text", "text": "这一组可以用键盘收起和展开。" }
+                ]
+            }),
+        ),
+    ));
     let mut draft = sample(
         NOTE_DRAFT,
         GROWTH,

@@ -64,7 +64,9 @@ use crate::{
 pub use line::{notification_text, plan_row};
 // --- inc-cards21 ---
 pub(crate) use chart::{
-    chart as chart_el, plot_left as chart_plot_left, y_from_top as chart_y_from_top,
+    ChartPeek, chart_with_peek as chart_el, legend_room as chart_legend_room,
+    pick_legend_room as chart_pick_legend_room, plot_left as chart_plot_left,
+    y_from_top as chart_y_from_top,
 };
 // --- end inc-cards21 ---
 
@@ -231,9 +233,13 @@ pub fn render(
         .as_ref()
         .map(|p| p.drafts_kept.iter().map(|s| s.to_string()).collect())
         .unwrap_or_default();
+    let tab = env.preset.as_ref().and_then(|p| p.tab);
     let ui = window.use_keyed_state(SharedString::from(format!("{key}-ui")), cx, |_, _| {
         let mut u = super::v21::CardUi::new(prev);
         u.drafts_kept = kept.into_iter().collect();
+        if let Some((block, tab)) = tab {
+            u.block_mut(block).tab = Some(tab.to_string());
+        }
         u
     });
     let seen = ui.read(cx).seen.clone();
@@ -443,6 +449,13 @@ fn has_draft(card: &CardV2) -> bool {
             }
         )
     })
+}
+
+/// A card that answers with a choice or fields draws the record line of the answer.
+fn has_record(card: &CardV2) -> bool {
+    card.all_blocks()
+        .iter()
+        .any(|b| matches!(b, CardV2Block::Decision { .. } | CardV2Block::Input { .. }))
 }
 
 /// The card has form fields (the optional note of a decision does not
@@ -700,11 +713,11 @@ pub(crate) fn frame(_waits: bool, cx: &App) -> gpui::Div {
 /// 12/18 text, the artboard's meta line.
 pub(crate) fn meta(el: gpui::Div) -> gpui::Div {
     el.text_size(crate::ui::native::tokens::text::META.0)
-        .line_height(px(18.))
+        .line_height(crate::ui::native::tokens::card_v2::META_LINE)
 }
 
 /// The label and the detail of the strip.
-pub(crate) fn strip_words(ctx: &Ctx, cx: &App) -> (String, String) {
+pub(crate) fn strip_words(ctx: &Ctx) -> (String, String) {
     // A name in a state line is cut first, so times and the state word stay.
     let author_short = short_name(&ctx.author);
     let author = author_short.as_str();
@@ -733,32 +746,34 @@ pub(crate) fn strip_words(ctx: &Ctx, cx: &App) -> (String, String) {
     match ctx.state {
         CardState::Pending => {
             // The §2.12 word of the ask (T, `topic_page::ask_words`): 等你审 for a
-            // review, 等你回答 for any other ask (a form and a draft too); the detail
-            // says what is left to do.
+            // review, 等你回答 for any other ask (a form and a draft too). The band says
+            // the state once (DESIGN.md §7.13): the detail is only the hint that helps
+            // (how the answer is sent), never the badge again in other words.
             let word = ask_word(ctx);
             if has_fields(ctx.card) {
                 let ready = form::problems(ctx.card, &ctx.values).is_empty();
                 if ready {
                     (word.into(), c::STRIP_FILL_READY_DETAIL.into())
                 } else {
-                    (word.into(), fill(c::STRIP_WAITS, &[("name", author)]))
+                    (word.into(), String::new())
                 }
-            } else if has_draft(ctx.card) && ctx.form.read(cx).editing.is_some() {
-                (word.into(), fill(c::STRIP_WAITS, &[("name", author)]))
+            } else if has_draft(ctx.card) {
+                (word.into(), String::new())
             } else {
+                // A choice says what 提交 waits for at the button (the footer).
                 let detail = if ctx.quick() {
                     c::STRIP_WAITS_QUICK
-                } else if has_draft(ctx.card) {
-                    c::STRIP_WAITS_CONFIRM
-                } else if takes_input(ctx.card) {
-                    c::STRIP_WAITS_CHOOSE
                 } else {
-                    c::STRIP_WAITS_APPROVE
+                    ""
                 };
-                (word.into(), fill(detail, &[("name", author)]))
+                (word.into(), detail.into())
             }
         }
         CardState::WaitingOn => (waiting_on(ctx), c::STRIP_WAITING_ON_DETAIL.into()),
+        // A card with a record line says who it goes to there, once.
+        CardState::Sending { .. } if has_record(ctx.card) => {
+            (c::STRIP_SENDING.into(), String::new())
+        }
         CardState::Sending { .. } => (
             c::STRIP_SENDING.into(),
             fill(c::STRIP_SENDING_DETAIL, &[("name", author)]),
@@ -810,6 +825,9 @@ pub(crate) fn strip_words(ctx: &Ctx, cx: &App) -> (String, String) {
                         &[("name", &who), ("time", &at(answer))],
                     ),
                 )
+            } else if blocks::answer_unclaimed(ctx, &answer.actor_id, answer.at) {
+                // The record line says where the answer is: the member has not taken it.
+                (c::STRIP_ANSWERED.into(), String::new())
             } else {
                 (
                     c::STRIP_ANSWERED.into(),
@@ -894,7 +912,7 @@ pub(crate) fn strip_words(ctx: &Ctx, cx: &App) -> (String, String) {
 }
 
 /// The §2.12 word of an ask on this card: the ask's own kind when 需要你拍板 lists it,
-/// else 等你审 for a card that asks me about a PR (a review), else 等你回答.
+/// else 等你审 for a card that asks me about a PR or a diff (a review), else 等你回答.
 fn ask_word(ctx: &Ctx) -> &'static str {
     let listed = ctx
         .env
@@ -912,10 +930,11 @@ fn ask_word(ctx: &Ctx) -> &'static str {
         || ctx.card.all_blocks().iter().any(|b| {
             matches!(
                 b,
-                CardV2Block::Ref {
-                    target: RefTarget::Pr { .. },
-                    ..
-                }
+                CardV2Block::Diff { .. }
+                    | CardV2Block::Ref {
+                        target: RefTarget::Pr { .. },
+                        ..
+                    }
             )
         });
     let kind = listed.unwrap_or(if review {
@@ -1105,7 +1124,10 @@ impl StripParts {
             Some(state) => ui::native::StatusBadge::new(state, self.label.clone())
                 .max_w(m::MAX_WIDTH / 2.)
                 .into_any_element(),
+            // The same muted fill as the StatusBadges beside it (§2.2), never the
+            // outline pill.
             None => ui::native::Badge::new(self.label.clone())
+                .secondary()
                 .icon(Sym::Refresh, n.secondary)
                 .max_w(m::MAX_WIDTH / 2.)
                 .into_any_element(),
@@ -1135,13 +1157,15 @@ pub(crate) fn strip_parts(ctx: &Ctx, cx: &App) -> Option<StripParts> {
         _ if updated.is_some() => None,
         Some(PendTone::Live) => Some(BadgeState::Working),
         Some(PendTone::Quiet) => Some(BadgeState::Queued),
+        Some(PendTone::Gone) => Some(BadgeState::Deactivated),
+        Some(PendTone::Off) => Some(BadgeState::Offline),
         Some(PendTone::Bad) => Some(BadgeState::Failed),
         None => Some(badge_state(ctx.state)?),
     };
     let (label, detail) = match (&waiting, &updated) {
         (Some((l, d, _)), _) => (l.clone(), d.clone()),
         (None, Some((l, d))) => (l.clone(), d.clone()),
-        (None, None) => super::v21::band::words(ctx, strip_words(ctx, cx)),
+        (None, None) => super::v21::band::words(ctx, strip_words(ctx)),
     };
     let right = (waiting.is_none() && updated.is_none())
         .then(|| super::v21::band::right(ctx))
@@ -1316,7 +1340,9 @@ fn header(ctx: &Ctx, cx: &App) -> Option<AnyElement> {
         .flex()
         .items_center()
         .gap(space::S8)
-        .min_h(ui::native::cards::card::AVATAR)
+        // One row height with or without an action (the sm button), so sibling
+        // headers keep the same offsets.
+        .h(ui::native::cards::card::HEADER_ROW)
         .when(!in_topic, |el| {
             el.child(ui::MemberAvatar::new(
                 member.as_ref(),
@@ -1348,12 +1374,16 @@ fn header(ctx: &Ctx, cx: &App) -> Option<AnyElement> {
     let conflict = super::v21::interact::conflicted(ctx).then(|| {
         div()
             .pt(space::S4)
+            // On the meta column, as the path line; a topic's header has no avatar.
+            .when(!in_topic, |el| {
+                el.pl(ui::native::cards::card::AVATAR + space::S8)
+            })
             .flex()
             .items_center()
             .gap(space::S4)
             .n_subheadline()
             .text_color(n.secondary)
-            .child(Sym::Alert.inline_small().text_color(n.secondary))
+            .child(Sym::Refresh.inline_small().text_color(n.secondary))
             .child(crate::copy::cards21::CONFLICT_TOAST)
     });
     Some(
@@ -1378,11 +1408,27 @@ fn title(ctx: &Ctx, has_header: bool, cx: &App) -> AnyElement {
         // A compact card's title: 14 semibold (§2.4).
         .n_headline()
         .font_weight(FontWeight::SEMIBOLD)
-        .text_color(n.label)
+        // A superseded or expired card: the title in the muted token, never a
+        // dimmed layer over text that is already muted (D1).
+        .text_color(if ctx.state.muted() {
+            n.secondary
+        } else {
+            n.label
+        })
         // A title is one line of text: line breaks and runs of spaces collapse
         // (break-ui), and it wraps at most to 2 lines.
         .line_clamp(2)
-        .child(one_line_text(&ctx.card.title))
+        // 复制 on the title copies what the card says: its title and its one-line reading.
+        .child(blocks::copyable(
+            ctx.id("copy-title"),
+            card_text(ctx.card),
+            div()
+                .child(gpui_base::SelectableText::new(
+                    ctx.id("title-text"),
+                    one_line_text(&ctx.card.title),
+                ))
+                .into_any_element(),
+        ))
         // --- inc-cards21: the 2.1 summary line under the title ---
         .when_some(
             ctx.card
@@ -1397,11 +1443,31 @@ fn title(ctx: &Ctx, has_header: bool, cx: &App) -> AnyElement {
                         .n_message()
                         .font_weight(FontWeight::NORMAL)
                         .text_color(n.secondary)
-                        .child(s),
+                        .child(gpui_base::SelectableText::new(ctx.id("summary-text"), s)),
                 )
             },
         )
         .into_any_element()
+}
+
+/// The words of a card for the clipboard: its title, its summary and its fallback (the
+/// one-line reading every card carries), each once.
+pub(crate) fn card_text(card: &CardV2) -> String {
+    let mut out: Vec<String> = Vec::new();
+    for part in [
+        Some(one_line_text(&card.title)),
+        card.summary.clone(),
+        Some(card.fallback.clone()),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        let part = part.trim().to_string();
+        if !part.is_empty() && !out.contains(&part) {
+            out.push(part);
+        }
+    }
+    out.join("\n")
 }
 
 /// A card that is not fetched yet (§2.14): the card frame with skeletons in
@@ -1435,7 +1501,8 @@ pub(crate) fn loading_card(cx: &App) -> AnyElement {
         .into_any_element()
 }
 
-/// A card that cannot be read (§2.15): an Alert in its place, with 重试.
+/// A card that cannot be read (§2.15): an Alert in its place. The cause it names is
+/// a newer format, so its action is the app's 检查更新….
 pub(crate) fn failed_card(id: SharedString, cx: &App) -> AnyElement {
     let n = ui::native::native_colors(cx);
     div()
@@ -1444,7 +1511,19 @@ pub(crate) fn failed_card(id: SharedString, cx: &App) -> AnyElement {
             ui::native::Alert::new(Sym::Failed, c::CARD_DECODE_FAILED)
                 .description(c::CARD_DECODE_FAILED_DETAIL)
                 .icon_color(n.red)
-                .action(button(id, c::STRIP_RETRY, PushStyle::Outline, cx)),
+                .action(
+                    button(
+                        id,
+                        crate::copy::overlays::MENU_CHECK,
+                        PushStyle::Outline,
+                        cx,
+                    )
+                    .on_click(|_, _, cx| {
+                        if let Some(u) = crate::updater::global(cx) {
+                            u.update(cx, |u, cx| u.check_now(cx));
+                        }
+                    }),
+                ),
         )
         .into_any_element()
 }
@@ -1625,8 +1704,15 @@ fn full(ctx: &Ctx, window: &mut Window, cx: &mut App) -> AnyElement {
     };
     // --- end inc-cards21 ---
     let footer = footer(ctx, window, cx);
-    let muted = ctx.state.muted();
     let inset = ui::native::cards::card::INSET;
+    // A closing ref list keeps its last row's hover height and the card's one inset.
+    let bottom = if footer.is_some() {
+        space::S4
+    } else if !super::v21::is_21(ctx.card) && blocks::ends_in_ref_list(ctx, cx) {
+        inset - blocks::REF_ROW_PAD
+    } else {
+        inset
+    };
     let card = frame(false, cx)
         .flex()
         .flex_col()
@@ -1636,7 +1722,7 @@ fn full(ctx: &Ctx, window: &mut Window, cx: &mut App) -> AnyElement {
             div()
                 .pt(inset)
                 .px(inset)
-                .pb(if footer.is_some() { space::S4 } else { inset })
+                .pb(bottom)
                 .flex()
                 .flex_col()
                 .min_w(px(0.))
@@ -1646,7 +1732,6 @@ fn full(ctx: &Ctx, window: &mut Window, cx: &mut App) -> AnyElement {
                         .flex()
                         .flex_col()
                         .min_w(px(0.))
-                        .when(muted, |el| el.opacity(m::MUTED))
                         .child(title)
                         .children(body),
                 ),
@@ -1768,8 +1853,8 @@ pub(crate) fn footer_stack(
 /// like the rest of the card, buttons 8 pt apart.
 pub(crate) fn card_footer(_cx: &App) -> gpui::Div {
     let inset = ui::native::cards::card::INSET;
-    // One footer row (§2.4): the buttons keep their width and a note cuts at
-    // its end instead of wrapping under them.
+    // One footer row (§2.4): the buttons keep their width. A note is never in
+    // this row: `footer_stack` puts it on its own line above the actions.
     div()
         .flex_none()
         .flex()
@@ -1893,7 +1978,7 @@ fn footer(ctx: &Ctx, window: &mut Window, cx: &mut App) -> Option<AnyElement> {
                     items.push(
                         button(
                             ctx.id("draft-done"),
-                            fill(c::DRAFT_DONE, &[("label", &submit.label)]),
+                            fill(c::DRAFT_DONE, &[("label", &shown_label(ctx.card, &submit))]),
                             PushStyle::Default,
                             cx,
                         )
@@ -1912,8 +1997,14 @@ fn footer(ctx: &Ctx, window: &mut Window, cx: &mut App) -> Option<AnyElement> {
                         .on_click(move |_, _, cx| form.update(cx, |f, cx| f.set_editing(false, cx)))
                         .into_any_element(),
                     );
-                    desc = Some(note(c::DRAFT_REPLACES.into(), false, cx));
-                    return Some(footer_stack(items, desc.take(), cx));
+                    // Publishing stays what it is while the words change: the lock note too.
+                    let notes = div()
+                        .flex()
+                        .flex_col()
+                        .gap(space::S4)
+                        .child(note(c::DRAFT_REPLACES.into(), false, cx))
+                        .children(lock_note(ctx, live, cx));
+                    return Some(footer_stack(items, Some(notes.into_any_element()), cx));
                 }
                 let a2 = a.clone();
                 let s2 = submit.clone();
@@ -1950,8 +2041,8 @@ fn footer(ctx: &Ctx, window: &mut Window, cx: &mut App) -> Option<AnyElement> {
                     );
                 }
                 link_buttons(&mut items, cx);
-                items.extend(lock_note(ctx, live, cx));
-                return Some(footer_stack(items, desc.take(), cx));
+                // The lock note is the footer's description: above the actions (§2.4).
+                return Some(footer_stack(items, lock_note(ctx, live, cx), cx));
             }
             if takes_input(ctx.card) {
                 // A decision with three or more options: an optional note
@@ -1967,7 +2058,8 @@ fn footer(ctx: &Ctx, window: &mut Window, cx: &mut App) -> Option<AnyElement> {
                         cx,
                     ));
                 }
-                let ready = live && form::problems(ctx.card, &ctx.values).is_empty();
+                let picked = form::problems(ctx.card, &ctx.values).is_empty();
+                let ready = live && picked;
                 items.push(if ready {
                     let a = a.clone();
                     button(
@@ -1983,8 +2075,12 @@ fn footer(ctx: &Ctx, window: &mut Window, cx: &mut App) -> Option<AnyElement> {
                         .into_any_element()
                 });
                 link_buttons(&mut items, cx);
+                // Why 提交 is off, right above it, until something is picked.
+                if live && !picked {
+                    desc = Some(note(c::STRIP_WAITS_CHOOSE.into(), false, cx));
+                }
                 // --- inc-cards21: the ask's promise at the right ---
-                if super::v21::is_21(ctx.card)
+                else if super::v21::is_21(ctx.card)
                     && let Some(p) = ctx.card.ask.as_ref().and_then(|a| a.promise.clone())
                 {
                     desc = Some(note(p, false, cx));
@@ -2010,11 +2106,10 @@ fn footer(ctx: &Ctx, window: &mut Window, cx: &mut App) -> Option<AnyElement> {
                 );
             }
             link_buttons(&mut items, cx);
-            items.extend(lock_note(ctx, live, cx));
             if items.is_empty() {
-                return None;
+                return lock_note(ctx, live, cx).map(|n| footer_stack(items, Some(n), cx));
             }
-            Some(footer_stack(items, desc.take(), cx))
+            Some(footer_stack(items, lock_note(ctx, live, cx), cx))
         }
         CardState::Sending { action_id } => {
             // The pressed control spins; the rest wait.
@@ -2259,13 +2354,70 @@ fn shown_label(card: &CardV2, action: &CardV2Action) -> String {
         || submit_action(card).is_some_and(|s| s.id == action.id);
     let asks_first = matches!(kind, CardActionKind::Submit | CardActionKind::Reject)
         && (kind == CardActionKind::Submit && guarded && irreversible || action.confirm.is_some());
+    let label = action_label(card, action);
     if asks_first {
-        crate::copy::fill(
-            crate::copy::desk::DESK_ACTION_MORE,
-            &[("label", &action.label)],
-        )
+        crate::copy::fill(crate::copy::desk::DESK_ACTION_MORE, &[("label", &label)])
     } else {
-        action.label.clone()
+        label
     }
 }
+
+/// The words on an answer button: the action's label, or, on the card's one submit, the
+/// `submitLabel` its questionnaire names (the member's own word for the step, bots.md).
+pub(crate) fn action_label(card: &CardV2, action: &CardV2Action) -> String {
+    let submit = submit_action(card).is_some_and(|s| s.id == action.id);
+    card.blocks
+        .iter()
+        .find_map(|b| match b {
+            CardV2Block::Questionnaire {
+                submit_label: Some(l),
+                ..
+            } if submit && !l.trim().is_empty() => Some(l.clone()),
+            _ => None,
+        })
+        .unwrap_or_else(|| action.label.clone())
+}
 // --- end v13/ux-pages ---
+
+#[cfg(test)]
+mod label_tests {
+    use super::*;
+
+    #[test]
+    fn the_submit_button_takes_the_questionnaires_own_word() {
+        let card = |submit: Option<&str>| -> CardV2 {
+            let mut q = serde_json::json!({ "id": "qs", "type": "questionnaire", "children": ["ok"],
+                "fallbackText": "一个问题" });
+            if let Some(s) = submit {
+                q["submitLabel"] = serde_json::json!(s);
+            }
+            serde_json::from_value(serde_json::json!({
+                "v": 2, "catalog": "tc.card/2.1", "rev": 1, "intent": "ask", "title": "t", "fallback": "f",
+                "ask": { "from": ["me"] },
+                "blocks": [ q,
+                    { "id": "ok", "type": "confirm", "label": "可以吗", "yes": "可以", "no": "不行", "fallbackText": "f" } ],
+                "actions": [
+                    { "id": "send", "label": "提交", "style": "primary", "kind": "submit" },
+                    { "id": "later", "label": "晚点再说", "kind": "reject" } ]
+            }))
+            .unwrap()
+        };
+        let named = card(Some("一起提交"));
+        assert_eq!(
+            action_label(&named, &named.actions.as_ref().unwrap()[0]),
+            "一起提交"
+        );
+        assert_eq!(
+            action_label(&named, &named.actions.as_ref().unwrap()[1]),
+            "晚点再说",
+            "only the submit"
+        );
+        let plain = card(None);
+        assert_eq!(
+            action_label(&plain, &plain.actions.as_ref().unwrap()[0]),
+            "提交"
+        );
+        // The card's words for the clipboard: each line once.
+        assert_eq!(card_text(&plain), "t\nf");
+    }
+}

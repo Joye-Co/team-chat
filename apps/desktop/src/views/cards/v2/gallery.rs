@@ -40,10 +40,16 @@ pub enum Section {
     Notify,
     /// Loading, a card that cannot be read, a long choice (§2.14, §2.15).
     Load,
+    /// Blocks at the schema's limits: 6 metrics, long charts, a 200 by 20 table.
+    Many,
+    /// A 600-line diff, every kind of proof, long code.
+    Long,
+    /// The answer record while my answer sits with the member.
+    Record,
 }
 
 impl Section {
-    pub const ALL: [Section; 14] = [
+    pub const ALL: [Section; 17] = [
         Section::States,
         Section::Choice,
         Section::Approve,
@@ -58,6 +64,9 @@ impl Section {
         Section::Page,
         Section::Notify,
         Section::Load,
+        Section::Many,
+        Section::Long,
+        Section::Record,
     ];
 
     fn number(self) -> usize {
@@ -80,6 +89,9 @@ impl Section {
             Section::Page => c::GALLERY_S_PAGE,
             Section::Notify => c::GALLERY_S_NOTIFY,
             Section::Load => c::GALLERY_S_LOAD,
+            Section::Many => c::GALLERY_S_MANY,
+            Section::Long => c::GALLERY_S_LONG,
+            Section::Record => c::GALLERY_S_RECORD,
         }
     }
 
@@ -99,6 +111,9 @@ impl Section {
             Section::Page => c::GALLERY_S_PAGE_NOTE,
             Section::Notify => c::GALLERY_S_NOTIFY_NOTE,
             Section::Load => c::GALLERY_S_LOAD_NOTE,
+            Section::Many => c::GALLERY_S_MANY_NOTE,
+            Section::Long => c::GALLERY_S_LONG_NOTE,
+            Section::Record => c::GALLERY_S_RECORD_NOTE,
         }
     }
 }
@@ -714,6 +729,75 @@ impl CardsGallery {
                     self.card(CHOICE_LONG, d, me, None, "a", window, cx),
                 )],
             ),
+            Section::Many => (
+                vec![
+                    item(
+                        c::GALLERY_MANY_METRICS,
+                        "",
+                        self.card(METRICS_MANY, d, me, None, "a", window, cx),
+                    ),
+                    item(
+                        c::GALLERY_MANY_POINTS,
+                        "",
+                        self.card(CHART_MANY, d, me, None, "a", window, cx),
+                    ),
+                    item(
+                        c::GALLERY_MANY_BARS,
+                        "",
+                        self.card(CHART_BARS, d, me, None, "a", window, cx),
+                    ),
+                ],
+                vec![item(
+                    c::GALLERY_MANY_ROWS,
+                    "",
+                    self.card(TABLE_BIG, d, me, None, "a", window, cx),
+                )],
+            ),
+            Section::Long => (
+                vec![item(
+                    c::GALLERY_LONG_DIFF,
+                    "",
+                    self.card(DIFF_LONG, d, me, None, "a", window, cx),
+                )],
+                vec![
+                    item(
+                        c::GALLERY_PROOF_KINDS,
+                        "",
+                        self.card(PROOF_KINDS, d, me, None, "a", window, cx),
+                    ),
+                    item(
+                        c::GALLERY_LONG_CODE,
+                        "",
+                        self.card(CODE_LONG, d, me, None, "a", window, cx),
+                    ),
+                ],
+            ),
+            Section::Record => (
+                vec![
+                    item(
+                        c::GALLERY_RECORD_FRESH,
+                        "",
+                        self.card(RECORD_FRESH, d, me, None, "a", window, cx),
+                    ),
+                    item(
+                        c::GALLERY_RECORD_REFUSED,
+                        "",
+                        self.card(RECORD_REFUSED, d, me, None, "a", window, cx),
+                    ),
+                ],
+                vec![
+                    item(
+                        c::GALLERY_RECORD_SLOW,
+                        "",
+                        self.card(RECORD_SLOW, d, me, None, "a", window, cx),
+                    ),
+                    item(
+                        c::GALLERY_RECORD_SILENT,
+                        "",
+                        self.card(RECORD_SILENT, d, me, None, "a", window, cx),
+                    ),
+                ],
+            ),
         };
         div()
             .flex()
@@ -725,7 +809,6 @@ impl CardsGallery {
 
     /// The confirm sheet as it opens, with the name half typed.
     fn sheet_preview(&self, cx: &App) -> AnyElement {
-        let k = theme::colors(cx);
         let Some(msg) = self.services.provider.card_v2(OPS, APPROVE) else {
             return div().into_any_element();
         };
@@ -735,25 +818,33 @@ impl CardsGallery {
             msg.card.ask.as_ref().and_then(|a| a.irreversible.as_ref()),
         );
         let field = confirm::field_box(div().child("orderbot-pr").into_any_element(), cx);
+        // The window dimmed by the real scrim token, as under the live sheet.
+        let n = crate::ui::native::native_colors(cx);
         div()
             .rounded(theme::radius::LG)
-            .bg(theme::card_v2::alpha(k.ink, 0.18))
-            .py(px(40.))
-            .px(px(48.))
-            .flex()
-            .justify_center()
+            .overflow_hidden()
+            .bg(n.content)
             .child(
-                crate::ui::native::sheet_surface(crate::ui::native::SheetWidth::Form, cx)
-                    .overflow_hidden()
-                    .child(confirm::sheet(
-                        &text,
-                        Some(field),
-                        false,
-                        "gallery-sheet",
-                        None,
-                        None,
-                        cx,
-                    )),
+                // Children are clipped to the box, not to its radius.
+                div()
+                    .rounded(theme::radius::LG)
+                    .bg(n.dim)
+                    .p(space::S48)
+                    .flex()
+                    .justify_center()
+                    .child(
+                        crate::ui::native::sheet_surface(crate::ui::native::SheetWidth::Form, cx)
+                            .overflow_hidden()
+                            .child(confirm::sheet(
+                                &text,
+                                Some(field),
+                                false,
+                                "gallery-sheet",
+                                None,
+                                None,
+                                cx,
+                            )),
+                    ),
             )
             .into_any_element()
     }

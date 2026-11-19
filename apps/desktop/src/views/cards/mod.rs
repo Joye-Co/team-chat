@@ -40,7 +40,7 @@ use crate::{
         Message,
         card::{Card, CardBlock, CardTone},
     },
-    theme::{self, space},
+    theme::{self, Type as _, space},
     ui::{self, native::NativeType as _},
     views::timeline::extras::{ExtrasContext, MessageExtra},
 };
@@ -228,12 +228,30 @@ pub fn render_card(
             .map(|s| s.label.clone())
             .or_else(|| word.map(str::to_string))
             .map(|label| {
+                // An ask answers on the first press: said beside the badge as in Card v2,
+                // so the option rows stay where they are when the line goes.
+                let quick = is_ask(card) && actions::awaits_first_press(message, ctx);
                 div()
                     .flex()
+                    .items_center()
+                    .gap(space::S8)
                     .mb(space::S8)
                     // A member's own status words cut with "…" and a tooltip, so a
                     // long one never runs to the card edge (F3, A1-22).
                     .child(ui::native::StatusBadge::new(badge, label).max_w(BADGE_MAX))
+                    .when(quick, |el| {
+                        el.child(
+                            // Beside a long status word the line cuts, it never wraps.
+                            div()
+                                .flex_1()
+                                .min_w(px(0.))
+                                .t_meta()
+                                .text_color(k.text_3)
+                                .child(ui::truncate::TruncText::new(
+                                    crate::copy::cards_v2::STRIP_WAITS_QUICK,
+                                )),
+                        )
+                    })
             })
     };
     // A title is one line of text: line breaks and runs of spaces collapse,

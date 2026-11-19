@@ -2349,6 +2349,10 @@ pub trait ChatProvider: Send + Sync + 'static {
     fn card_image(&self, _group_id: &str, _topic_id: &str, _file_id: &str) -> Option<PathBuf> {
         None
     }
+    /// The record of a recording a card names by file id, when the 话题 does not list it.
+    fn card_recording(&self, _file_id: &str) -> Reply<FileAttachment> {
+        reply_err(FileError::NotFound)
+    }
     /// The file of a card image once [`Self::card_image`] has its local copy, for the
     /// image viewer (name, size, size in pixels). `None` before.
     fn card_image_file(&self, _file_id: &str) -> Option<FileAttachment> {
@@ -2702,6 +2706,15 @@ pub trait ChatProvider: Send + Sync + 'static {
     /// Takes back my answer while it is still queued (撤回), or forgets a
     /// refused one. Emits `Change::Messages` for the topic.
     fn withdraw_card_v2_answer(&self, _group_id: &str, _topic_id: &str, _message_id: &str) {}
+    /// True when my stored answer to the card can be taken back (撤回): it has an answer
+    /// id the server knows (`card.event answer.retract`).
+    fn can_retract_card_v2_answer(&self, _group_id: &str, _message_id: &str) -> bool {
+        false
+    }
+    /// Takes back my stored answer to the card (撤回). The request is one of my card
+    /// events ([`Self::card_v2_events`], event `answer.retract`): on its way, then gone
+    /// with the answer, or refused when the member has started. Emits `Change::Messages`.
+    fn retract_card_v2_answer(&self, _group_id: &str, _topic_id: &str, _message_id: &str) {}
 
     // --- inc-cards21: the interaction loop (INTERACT §3, §4.4) ---
 

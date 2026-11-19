@@ -86,6 +86,19 @@ pub const ART_EMBED_BROKEN: &str = "art-v2-embed-broken";
 /// Embedded in a card but a single file, not a web page (这个产出不是网页).
 pub const ART_EMBED_FILE: &str = "art-v2-embed-file";
 
+/// A one-page PDF with a line of text, for the embed that is a file.
+const SAMPLE_PDF: &str = "%PDF-1.4
+1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj
+2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj
+3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 420 200]/Contents 4 0 R/Resources<</Font<</F1 5 0 R>>>>>>endobj
+4 0 obj<</Length 48>>stream
+BT /F1 18 Tf 32 120 Td (Budget by channel) Tj ET
+endstream endobj
+5 0 obj<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>endobj
+trailer<</Root 1 0 R/Size 6>>
+%%EOF
+";
+
 const MIN: i64 = 60_000;
 
 /// Today at `hh:mm` local time. The sample day runs from 09:00 to the
@@ -180,6 +193,12 @@ struct Data {
     /// Usable (T6, T7): the sample live run's phase fields and its held commands.
     hold: run_phase::RunHold,
     hand: Vec<run_phase::HandCommand>,
+    /// The live run waits for a computer and has not started.
+    live_queued: bool,
+    /// The live run finished every step (the 完成 scene).
+    live_done: bool,
+    /// The card the live run waits on me for (the waiting phase scenes).
+    live_ask: Option<AskItem>,
     // topic track (v11/topic): who approved PR #61 and when.
     approval: Option<(MemberId, Millis)>,
     /// My own notify settings, so the 通知 sections and menus can be tried
@@ -1114,6 +1133,9 @@ impl V2Samples {
                 ..Default::default()
             },
             hand: Vec::new(),
+            live_queued: false,
+            live_done: false,
+            live_ask: None,
             approval: None,
             muted_groups: Default::default(),
             levels: HashMap::new(),
@@ -1121,6 +1143,57 @@ impl V2Samples {
             muted_topics: Default::default(),
             relay_refusal: None,
         }
+    }
+
+    /// The sample team with 产出 that are files of many kinds (the 产出 list's 类型
+    /// column, symbols and filter): a PDF, a video, a table, a Markdown document and
+    /// a code file, each named after its file. Only the 产出 list scenes use it.
+    pub fn with_file_artifacts() -> Arc<Self> {
+        let s = Self::new();
+        s.with(|d| {
+            for (i, (id, group, topic, title, by)) in [
+                ("art-v2-f-pdf", OPS, T_RELEASE, "巡检报告-11-03.pdf", WATCH),
+                (
+                    "art-v2-f-video",
+                    DEV,
+                    T_RECONNECT,
+                    "重连测试录屏.mp4",
+                    FORGE,
+                ),
+                (
+                    "art-v2-f-table",
+                    GROWTH,
+                    T_REPORT,
+                    "10 月各渠道新增.csv",
+                    LEDGER,
+                ),
+                (
+                    "art-v2-f-doc",
+                    DEV,
+                    T_RECONNECT,
+                    "重连重复问题复盘.md",
+                    FORGE,
+                ),
+                ("art-v2-f-code", DEV, T_RECONNECT, "reconnect.ts", FORGE),
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                d.artifacts.push((
+                    group.into(),
+                    artifact(
+                        id,
+                        topic,
+                        ArtifactKind::File,
+                        title,
+                        1,
+                        by,
+                        at(9, 30) - i as i64 * 7 * MIN,
+                    ),
+                ));
+            }
+        });
+        s
     }
 
     /// The sample team as the Card v2 gallery shows it: Watch's release that I approved
@@ -1371,6 +1444,123 @@ impl V2Samples {
         }]);
     }
 
+    /// The waiting phase scenes: the live run's card in its 话题, open for me.
+    pub fn ask_on_live_run(&self, kind: AskKind) {
+        let approval = kind == AskKind::Approval;
+        let title = if approval {
+            "压测要占用测试库，现在开始吗？"
+        } else {
+            "滚动锚点按哪种方式修？"
+        };
+        let body = if approval {
+            serde_json::json!({
+                "v": 1,
+                "title": title,
+                "tone": "warning",
+                "blocks": [
+                    { "type": "text", "text": "压测期间测试库大约 10 分钟不能用。" }
+                ],
+                "actions": [
+                    { "id": "go", "label": "批准", "style": "primary" },
+                    { "id": "hold", "label": "先不做" }
+                ]
+            })
+        } else {
+            serde_json::json!({
+                "v": 1,
+                "title": title,
+                "blocks": [
+                    { "type": "text", "text": "Forge 推荐 A：改动小，不影响现有列表。" }
+                ],
+                "actions": [
+                    { "id": "a", "label": "A 按消息定位" },
+                    { "id": "b", "label": "B 按像素定位" }
+                ]
+            })
+        };
+        let when = at(9, 51);
+        let mut ask = message(DEV, T_VIRTUAL, 3, FORGE, when, title);
+        ask.id = format!("{T_VIRTUAL}-ask");
+        self.with(|d| {
+            d.cards.insert(ask.id.clone(), card(body));
+            d.live_ask = Some(AskItem {
+                group_id: DEV.into(),
+                topic_id: T_VIRTUAL.into(),
+                message_id: Some(ask.id.clone()),
+                from: FORGE.into(),
+                kind,
+                title: title.into(),
+                at: when,
+            });
+            d.messages.entry(T_VIRTUAL.into()).or_default().push(ask);
+        });
+    }
+
+    /// The needs-reply scene: the report of the ended run, which asks for the reply.
+    pub fn report_on_live_run(&self) {
+        let mut report = message(
+            DEV,
+            T_VIRTUAL,
+            3,
+            FORGE,
+            at(9, 54),
+            "压测跑完了：一万条消息滚动最低 57 fps，内存 212 MB。第 8,000 条的跳转还没检查，要我接着查吗？",
+        );
+        report.id = format!("{T_VIRTUAL}-report");
+        self.with(|d| {
+            d.messages.entry(T_VIRTUAL.into()).or_default().push(report);
+            // The 话题 waits on me for the reply, as the run's pane says.
+            if let Some(t) = d.topics.iter_mut().find(|t| t.id == T_VIRTUAL) {
+                t.waiting_on = vec![ME.into()];
+            }
+        });
+    }
+
+    /// The phase scenes of an ended run: the live run itself ends (`status`,
+    /// its end, why), so the thread, the plan and the replay agree with the
+    /// phase. `all_done` finishes every step of its plan (完成).
+    pub fn end_live_run(&self, status: RunStatus, summary: Option<&str>, all_done: bool) {
+        self.with(|d| {
+            if let Some(r) = d.runs.iter_mut().find(|r| r.id == RUN_VIRTUAL) {
+                r.status = status;
+                r.ended_at = Some(at(9, 55));
+                r.summary = summary.map(Into::into);
+                if all_done {
+                    for p in &mut r.plan {
+                        p.state = PlanState::Done;
+                    }
+                }
+            }
+            if all_done && let Some(t) = d.topics.iter_mut().find(|t| t.id == T_VIRTUAL) {
+                t.status = TopicStatus::Done;
+            }
+            d.live_done = all_done;
+        });
+        self.emit(vec![Change::Runs {
+            group_id: DEV.into(),
+            topic_id: T_VIRTUAL.into(),
+        }]);
+    }
+
+    /// The scene of a run queued for a computer: it has not started, so it
+    /// has no computer, no screen lines and no step under way.
+    pub fn queue_live_run(&self) {
+        self.with(|d| {
+            d.live_queued = true;
+            if let Some(r) = d.runs.iter_mut().find(|r| r.id == RUN_VIRTUAL) {
+                r.started_at = None;
+                r.machine_name = None;
+                for p in &mut r.plan {
+                    p.state = PlanState::Pending;
+                }
+            }
+        });
+        self.emit(vec![Change::Runs {
+            group_id: DEV.into(),
+            topic_id: T_VIRTUAL.into(),
+        }]);
+    }
+
     /// Usable (T7 scenes): the commands of the person holding the live run.
     pub fn set_hand(&self, hand: Vec<run_phase::HandCommand>) {
         self.with(|d| d.hand = hand);
@@ -1425,6 +1615,7 @@ impl ChatProvider for V2Samples {
         file_id: &str,
     ) -> Option<std::path::PathBuf> {
         pages_samples::sample_image(file_id)
+            .or_else(|| crate::views::cards::v2::samples::sample_picture(file_id))
     }
 
     fn session(&self) -> SessionState {
@@ -1542,11 +1733,24 @@ impl ChatProvider for V2Samples {
                 created_by: summary.created_by.clone(),
                 created_at: summary.updated_at - (summary.version - v) as i64 * 24 * 60 * MIN,
                 // --- v11/media ---
-                entry: "index.html".into(),
-                files: vec![ArtifactVersionFile {
-                    path: "index.html".into(),
-                    size: 18_400,
-                    mime: "text/html".into(),
+                // A file 产出 holds the file it is named after; a page its index.
+                entry: if summary.kind == ArtifactKind::File {
+                    summary.title.clone()
+                } else {
+                    "index.html".into()
+                },
+                files: vec![if summary.kind == ArtifactKind::File {
+                    ArtifactVersionFile {
+                        path: summary.title.clone(),
+                        size: 48_000,
+                        mime: String::new(),
+                    }
+                } else {
+                    ArtifactVersionFile {
+                        path: "index.html".into(),
+                        size: 18_400,
+                        mime: "text/html".into(),
+                    }
                 }],
                 // --- end v11/media ---
             })
@@ -1905,6 +2109,7 @@ impl ChatProvider for V2Samples {
         if approved {
             asks.retain(|a| a.topic_id != T_RECONNECT);
         }
+        asks.extend(self.with(|d| d.live_ask.clone()));
         asks
     }
     fn done_today(&self) -> Vec<DoneItem> {
@@ -2104,7 +2309,7 @@ impl ChatProvider for V2Samples {
     ) -> crate::data::AdminReply<crate::data::memory::MemoryUpdate> {
         self.inner.undo_memory_update(update_id)
     }
-    /// 需要你批准的事 of the samples: the team's rules (`GET /v1/settings/approvals`).
+    /// 要先批准的事 of the samples: the team's rules (`GET /v1/settings/approvals`).
     fn approval_defaults(&self) -> crate::data::AdminReply<crate::data::ApprovalDefaults> {
         crate::data::reply_now(Ok(crate::data::ApprovalDefaults {
             delete_data: false,
@@ -2184,6 +2389,29 @@ impl ChatProvider for V2Samples {
             step: Some(step),
         };
         use ScreenLineKind as K;
+        // A run still queued for a computer has no screen yet.
+        if self.with(|d| d.live_queued) {
+            return Some(MachineScreen {
+                run_id: run_id.into(),
+                machine_name: None,
+                lines: Vec::new(),
+                started_at: None,
+                takeover_url: None,
+                paused_by: None,
+            });
+        }
+        // A finished run also has the screens of its last two steps.
+        let rest = if self.with(|d| d.live_done) {
+            vec![
+                line(K::Result, "跳到第 8,000 条：位置不变", 50, 2),
+                line(K::Command, "cargo test -p desktop topic_list", 51, 3),
+                line(K::Result, "test result: ok. 14 passed", 52, 3),
+                line(K::Command, "gh pr create --fill", 54, 4),
+                line(K::Result, "已创建 PR #62", 55, 4),
+            ]
+        } else {
+            Vec::new()
+        };
         Some(MachineScreen {
             run_id: run_id.into(),
             machine_name: Some("Mac mini".into()),
@@ -2199,7 +2427,10 @@ impl ChatProvider for V2Samples {
                 line(K::Result, "滚动 60 秒：平均 118 fps，最低 57 fps", 48, 2),
                 line(K::Result, "内存 212 MB", 48, 2),
                 line(K::Output, "跳到第 8,000 条，检查滚动位置…", 49, 2),
-            ],
+            ]
+            .into_iter()
+            .chain(rest)
+            .collect(),
             started_at: Some(at(9, 31)),
             takeover_url: None,
             paused_by: self.with(|d| d.hold.paused_by.clone()),
@@ -2209,6 +2440,21 @@ impl ChatProvider for V2Samples {
         if run_id != RUN_VIRTUAL {
             return Vec::new();
         }
+        // Nothing is checked before the run starts.
+        if self.with(|d| d.live_queued) {
+            return [
+                "一万条消息滚动不卡",
+                "内存不涨",
+                "跳到第 8,000 条后位置不跳",
+            ]
+            .into_iter()
+            .map(|text| AcceptanceItem {
+                text: text.into(),
+                ..Default::default()
+            })
+            .collect();
+        }
+        let done = self.with(|d| d.live_done);
         vec![
             // panes track: the 实时查看 artboard's 验收标准.
             AcceptanceItem {
@@ -2225,12 +2471,17 @@ impl ChatProvider for V2Samples {
             },
             AcceptanceItem {
                 text: "跳到第 8,000 条后位置不跳".into(),
+                met: done.then_some(true),
                 ..Default::default()
             },
         ]
     }
     fn run_step_times(&self, run_id: &str) -> Vec<Millis> {
         match run_id {
+            RUN_VIRTUAL if self.with(|d| d.live_queued) => Vec::new(),
+            RUN_VIRTUAL if self.with(|d| d.live_done) => {
+                vec![at(9, 31), at(9, 35), at(9, 46), at(9, 50), at(9, 53)]
+            }
             RUN_VIRTUAL => vec![at(9, 31), at(9, 35), at(9, 46)],
             RUN_RECONNECT => vec![at(9, 14), at(9, 22), at(9, 30), at(9, 41), at(9, 52)],
             _ => Vec::new(),
@@ -2746,7 +2997,7 @@ impl ChatProvider for V2Samples {
                 .join("team-chat-v2-samples")
                 .join(artifact_id);
             let _ = std::fs::create_dir_all(&dir);
-            let _ = std::fs::write(dir.join("预算.pdf"), "%PDF-1.4\n%%EOF\n");
+            let _ = std::fs::write(dir.join("预算.pdf"), SAMPLE_PDF);
             let (tx, rx) = futures::channel::oneshot::channel();
             let _ = tx.send(Ok(ArtifactFolder {
                 artifact_id: artifact_id.into(),
@@ -2873,6 +3124,14 @@ impl ChatProvider for V2Samples {
             ]);
             return;
         }
+        if let Some((group_id, topic_id)) = self.cards_v2.withdraw(message_id, ME) {
+            self.emit(vec![Change::Messages { group_id, topic_id }, Change::Todo]);
+        }
+    }
+    fn can_retract_card_v2_answer(&self, _group_id: &str, message_id: &str) -> bool {
+        self.cards_v2.can_retract(message_id, ME)
+    }
+    fn retract_card_v2_answer(&self, _group_id: &str, _topic_id: &str, message_id: &str) {
         if let Some((group_id, topic_id)) = self.cards_v2.withdraw(message_id, ME) {
             self.emit(vec![Change::Messages { group_id, topic_id }, Change::Todo]);
         }

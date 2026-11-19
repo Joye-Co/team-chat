@@ -135,7 +135,7 @@ pub fn problems(card: &CardV2, values: &Values) -> Vec<Problem> {
     out
 }
 
-/// The labels of the missing required fields (`还差名字、岗位、入职日期`).
+/// The labels of the missing required fields (`还没填：名字、岗位、入职日期`).
 pub fn missing_labels(problems: &[Problem]) -> Vec<String> {
     problems
         .iter()
@@ -287,6 +287,8 @@ pub struct Preset {
     pub prev: Option<std::sync::Arc<CardV2>>,
     /// v11/pb-cards: blocks whose typed text a new rev kept (内容变了 · 用新的).
     pub drafts_kept: Vec<&'static str>,
+    /// The open tab of a tabs block, `(block id, tab id)` (screenshot scenes).
+    pub tab: Option<(&'static str, &'static str)>,
 }
 
 /// v11/pb-cards: the picked values of one block at one moment.
@@ -315,6 +317,8 @@ pub struct CardForm {
     pub checks_all: bool,
     /// inc-cards21: rank orders, numbers and matrix rows.
     other: HashMap<String, Val>,
+    /// When the answer record redraws next (its wait stage changes).
+    pub wake_at: Option<std::time::Instant>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -354,6 +358,7 @@ impl CardForm {
             refs_all: false,
             checks_all: false,
             other: HashMap::new(),
+            wake_at: None,
             _subscriptions: Vec::new(),
         };
         for (k, v) in &s.initial {
@@ -625,6 +630,21 @@ impl CardForm {
         field
     }
 
+    /// Puts `text` in the one-line field of `block`, the one the form holds now (a new rev
+    /// or 用新的 replaces it).
+    pub fn set_line(
+        &mut self,
+        block: &str,
+        text: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Field::Line(s) = self.field(block, None, false, window, cx) {
+            s.update(cx, |s, cx| s.set_value(text, window, cx));
+        }
+        cx.notify();
+    }
+
     /// Every value now: chosen, switched and typed (a field not shown yet
     /// keeps its initial text).
     pub fn values(&self, cx: &gpui::App) -> Values {
@@ -668,6 +688,47 @@ mod tests {
             "actions": [{ "id": "submit", "label": "提交", "style": "primary" }]
         }))
         .unwrap()
+    }
+
+    struct Blank;
+
+    impl gpui::Render for Blank {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl gpui::IntoElement {
+            gpui::div()
+        }
+    }
+
+    /// A date picked after 用新的 replaced the field reaches the form.
+    #[gpui::test]
+    fn a_line_set_after_the_field_was_replaced_is_kept(cx: &mut gpui::TestAppContext) {
+        use gpui::AppContext as _;
+        cx.update(gpui_component::init);
+        let card = form_card();
+        let window = cx.update(|cx| {
+            cx.open_window(Default::default(), |window, cx| {
+                let view = cx.new(|_| Blank);
+                cx.new(|cx| gpui_base::Root::new(view, window, cx))
+            })
+            .unwrap()
+        });
+        let form = cx.new(|_| CardForm::new(&card, None));
+        window
+            .update(cx, |_, window, cx| {
+                form.update(cx, |f, cx| {
+                    f.set_line("start", "2026-11-10".into(), window, cx);
+                    f.use_new(&card, "start", cx);
+                    f.set_line("start", "2026-11-12".into(), window, cx);
+                });
+            })
+            .unwrap();
+        cx.run_until_parked();
+        cx.update(|cx| {
+            let values = form.read(cx).values(cx);
+            assert_eq!(
+                values.get("start"),
+                Some(&Val::Text("2026-11-12".to_string()))
+            );
+        });
     }
 
     #[test]
