@@ -1173,6 +1173,7 @@ impl SampleCards {
                         by: s.msg.author_id.clone(),
                         mode: ExpectMode::Live,
                         eta_ms: Some(2000),
+                        reason: None,
                     },
                 },
                 at: now,

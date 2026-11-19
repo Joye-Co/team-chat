@@ -65,6 +65,9 @@ pub fn cli_text(
 struct CardEnvelope<'a> {
     message_id: &'a str,
     rev: u32,
+    /// The card's rev now, when it is past `rev` (the rev the person saw); `block` is at this rev.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    current_rev: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     ask_id: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -147,6 +150,7 @@ pub fn answer_envelope(f: &RunAnswerFrame) -> String {
         &CardEnvelope {
             message_id,
             rev: *rev,
+            current_rev: None,
             ask_id: Some(ask_id),
             answer_id: Some(answer_id),
             event_id: f.event_id.as_deref(),
@@ -171,12 +175,14 @@ pub fn interaction_envelope(f: &RunInteractionFrame) -> String {
             block_id,
             action_id,
             rev,
+            current_rev,
         } => envelope(
             &f.input_id,
             "card.event",
             &CardEnvelope {
                 message_id,
                 rev: *rev,
+                current_rev: *current_rev,
                 ask_id: None,
                 answer_id: None,
                 event_id: f.event_id.as_deref(),
@@ -358,6 +364,7 @@ resolve, artifact data/reply) or with a short reply."
                 block_id: Some("check".into()),
                 action_id: None,
                 rev: 1,
+                current_rev: None,
             },
             event: "choice.change".into(),
             value: Some(

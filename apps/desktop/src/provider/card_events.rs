@@ -303,6 +303,7 @@ mod tests {
                 by: "bot".into(),
                 mode: ExpectMode::Live,
                 eta_ms: Some(2000),
+                reason: None,
             },
         }
     }
