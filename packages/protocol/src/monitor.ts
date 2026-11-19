@@ -65,6 +65,9 @@ export const MonitorRun = z.object({
   runId: RunId,
   /** The AI member the run belongs to, when the server knows it. */
   memberId: Id.optional(),
+  /** The 话题 the run works in, on runs the server has open on the machine. */
+  groupId: Id.optional(),
+  topicId: Id.optional(),
   /** "running" (在跑) | "waiting" (等你) | "booting" (起机中) | "paused" (接管) | "queued" (排队) */
   state: z.string().min(1).max(32),
   startedAt: Millis.optional(),

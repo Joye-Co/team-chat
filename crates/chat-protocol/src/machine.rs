@@ -575,7 +575,11 @@ pub enum RunInteractionSource {
         block_id: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         action_id: Option<String>,
+        /// The rev the person saw when they sent the event.
         rev: u32,
+        /// The card's rev now, when it is past `rev` (the card changed since).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        current_rev: Option<u32>,
     },
     #[serde(rename = "artifact", rename_all = "camelCase")]
     Artifact {
@@ -601,7 +605,7 @@ pub struct RunInteractionFrame {
     /// The interaction's event id, which `card.patch.cause` / `send.causeEventId` name.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub event_id: Option<String>,
-    /// Card events: the block (or the action) as it was at `source.rev`.
+    /// Card events: the block (or the action) as the card has it now (`current_rev`, else `rev`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub block: Option<Value>,
 }
@@ -613,6 +617,9 @@ pub struct RunOutputError {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
     pub message: String,
+    /// `rate_limited`: wait at least this long (ms), then send the same output again.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retry_after_ms: Option<u64>,
 }
 
 /// `run.output.result` (feature "output"): the answer to a RunEvent `output`.

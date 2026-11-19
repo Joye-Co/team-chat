@@ -23490,6 +23490,9 @@
           "type": "integer",
           "exclusiveMinimum": 0,
           "maximum": 9007199254740991
+        },
+        "keepData": {
+          "type": "boolean"
         }
       },
       "required": [
@@ -42300,6 +42303,14 @@
                 "type": "string",
                 "minLength": 1
               },
+              "groupId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "topicId": {
+                "type": "string",
+                "minLength": 1
+              },
               "state": {
                 "type": "string",
                 "minLength": 1,
@@ -46064,6 +46075,11 @@
                       "type": "integer",
                       "exclusiveMinimum": 0,
                       "maximum": 4294967295
+                    },
+                    "currentRev": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 4294967295
                     }
                   },
                   "required": [
@@ -46185,6 +46201,11 @@
                 },
                 "message": {
                   "type": "string"
+                },
+                "retryAfterMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
                 }
               },
               "required": [
@@ -56244,6 +56265,11 @@
               "type": "integer",
               "minimum": 0,
               "maximum": 9007199254740991
+            },
+            "reason": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             }
           },
           "required": [
@@ -65686,6 +65712,11 @@
               "type": "integer",
               "minimum": 0,
               "maximum": 9007199254740991
+            },
+            "reason": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             }
           },
           "required": [
@@ -65706,6 +65737,9 @@
           "type": "integer",
           "exclusiveMinimum": 0,
           "maximum": 9007199254740991
+        },
+        "duplicate": {
+          "type": "boolean"
         }
       },
       "required": [
@@ -65789,6 +65823,11 @@
         "cause": {
           "type": "string",
           "minLength": 1
+        },
+        "clientPushId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
         }
       },
       "required": [

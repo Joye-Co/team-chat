@@ -743,8 +743,11 @@ export const CARD_STYLE_KEYS = new Set([
   "icon",
 ]);
 
-/** A problem a write rule found: `reason` goes to `ack.error.reason`. */
-export type CardProblem = { reason: string; message: string };
+/**
+ * A problem a write rule found: `reason` goes to `ack.error.reason`. `path` is where it is in the
+ * card; absent = `blocks`.
+ */
+export type CardProblem = { reason: string; message: string; path?: string[] };
 
 function styleKeyIn(v: unknown, allow: Set<string>): string | undefined {
   if (Array.isArray(v)) {
@@ -805,6 +808,43 @@ export function childIds(b: AnyBlock): string[] {
       return b.options.flatMap((o) => o.children ?? []);
     case "tabs":
       return b.tabs.flatMap((t) => t.children);
+    default:
+      return [];
+  }
+}
+
+/** The live events a block can send: the server refuses any other (`card.undeclared_event`). */
+export function cardBlockEvents(b: AnyBlock): string[] {
+  switch (b.type) {
+    case "decision":
+    case "imageChoice":
+    case "slots":
+    case "poll":
+    case "confirm":
+      return ["choice.change", "choice.submit"];
+    case "rank":
+    case "matrix":
+    case "rating":
+    case "scale":
+      return ["input.change"];
+    case "input":
+      return b.kind === "text" || b.kind === "number" ? ["input.change", "input.submit"] : ["input.change"];
+    case "chart":
+      return ["chart.select", "chart.clear"];
+    case "metric":
+      return ["metric.press"];
+    case "table":
+      return ["table.rowSelect", "table.sort"];
+    case "buttons":
+      return ["button.press"];
+    case "draft":
+      return ["draft.edit"];
+    case "compare":
+      return ["compare.pick"];
+    case "tabs":
+      return ["tab.open"];
+    case "questionnaire":
+      return ["action.press"];
     default:
       return [];
   }
@@ -920,37 +960,49 @@ function leafProblem(b: AnyBlock): string | undefined {
   }
 }
 
+/** The ids that occur more than once in a list, each once. */
+function repeatedIds(ids: string[]): string[] {
+  const seen = new Set<string>();
+  const twice = new Set<string>();
+  for (const id of ids) (seen.has(id) ? twice : seen).add(id);
+  return [...twice];
+}
+
 /**
- * The first write rule a card breaks, or undefined (docs/protocol.md "Cards v2.1"): catalog,
- * ids, containers (children exist, one parent each, no cycle, depth, nesting, counts),
+ * Every write rule a card breaks, in the order of the rules (docs/protocol.md "Cards v2.1"):
+ * catalog, ids, containers (children exist, one parent each, no cycle, depth, nesting, counts),
  * limits, variants, `deliver`, decision surfaces, one primary action, diagrams.
  */
-export function cardV2Problem(card: z.infer<typeof CardV2Shape>): CardProblem | undefined {
-  const bad = (reason: string, message: string): CardProblem => ({ reason, message });
+export function* cardV2Problems(card: z.infer<typeof CardV2Shape>): Generator<CardProblem, void, undefined> {
+  const bad = (reason: string, message: string, path?: string[]): CardProblem => (path ? { reason, message, path } : { reason, message });
   const catalog = card.catalog ?? CARD_CATALOG_20;
-  if (!(CARD_CATALOGS as readonly string[]).includes(catalog)) return bad("card.unknown_catalog", `unknown catalog ${catalog}`);
+  if (!(CARD_CATALOGS as readonly string[]).includes(catalog)) yield bad("card.unknown_catalog", `unknown catalog ${catalog}`);
   const all = allBlocks(card);
-  if (all.length > MAX_CARD_V2_BLOCKS) return bad("card.limits", `at most ${MAX_CARD_V2_BLOCKS} blocks`);
+  if (all.length > MAX_CARD_V2_BLOCKS) yield bad("card.limits", `at most ${MAX_CARD_V2_BLOCKS} blocks`);
   const byId = new Map<string, AnyBlock>();
+  let namedRepeats = false;
   for (const b of all) {
-    if (byId.has(b.id)) return bad("card.limits", "block ids are unique");
-    if (b.id === "root" || b.id.startsWith("$")) return bad("card.limits", `block id ${b.id} is reserved`);
+    if (byId.has(b.id) && !namedRepeats) {
+      namedRepeats = true;
+      yield bad("card.limits", `block ids are unique (used twice: ${repeatedIds(all.map((x) => x.id)).join(", ")})`);
+    }
+    if (b.id === "root" || b.id.startsWith("$")) yield bad("card.limits", `block id ${b.id} is reserved`);
     byId.set(b.id, b);
   }
   for (const b of all) {
-    if (catalog === CARD_CATALOG_20 && CARD_21_TYPES.has(b.type)) return bad("card.unknown_block", `${b.type} needs catalog ${CARD_CATALOG_21}`);
-    if (NEEDS_FALLBACK.has(b.type) && b.fallbackText === undefined) return bad("card.limits", `${b.type} ${b.id} needs fallbackText`);
+    if (catalog === CARD_CATALOG_20 && CARD_21_TYPES.has(b.type)) yield bad("card.unknown_block", `${b.type} needs catalog ${CARD_CATALOG_21}`);
+    if (NEEDS_FALLBACK.has(b.type) && b.fallbackText === undefined) yield bad("card.limits", `${b.type} ${b.id} needs fallbackText`);
     const p = leafProblem(b);
-    if (p) return bad("card.limits", `${b.type} ${b.id}: ${p}`);
+    if (p) yield bad("card.limits", `${b.type} ${b.id}: ${p}`);
   }
   // Containers: children, parents, counts.
   const top = new Set(card.blocks.map((b) => b.id));
   const parent = new Map<string, string>();
   for (const b of card.blocks) {
     if (b.type === "group" && (b.blocks !== undefined) === (b.children !== undefined)) {
-      return bad("card.limits", `group ${b.id} has either blocks or children`);
+      yield bad("card.limits", `group ${b.id} has either blocks or children`);
     }
-    if (b.type === "group" && b.blocks !== undefined && b.blocks.length < 1) return bad("card.limits", `group ${b.id} needs 1..${MAX_GROUP_BLOCKS} blocks`);
+    if (b.type === "group" && b.blocks !== undefined && b.blocks.length < 1) yield bad("card.limits", `group ${b.id} needs 1..${MAX_GROUP_BLOCKS} blocks`);
     const kids = childIds(b);
     const count = (lo: number, hi: number, n: number, what: string) =>
       n < lo || n > hi ? bad("card.limits", `${b.type} ${b.id}: ${lo}..${hi} ${what}`) : undefined;
@@ -980,12 +1032,12 @@ export function cardV2Problem(card: z.infer<typeof CardV2Shape>): CardProblem | 
         if (!p && b.selected !== undefined && !b.tabs.some((t) => t.id === b.selected)) p = bad("card.limits", `tabs ${b.id}: selected names no tab`);
         break;
     }
-    if (p) return p;
+    if (p) yield p;
     for (const k of kids) {
-      if (!top.has(k)) return bad("card.limits", `${b.type} ${b.id} names no block ${k}`);
-      if (k === b.id) return bad("card.depth", `${b.id} contains itself`);
-      if (parent.has(k)) return bad("card.limits", `block ${k} has two parents`);
-      parent.set(k, b.id);
+      if (!top.has(k)) yield bad("card.limits", `${b.type} ${b.id} names no block ${k}`);
+      else if (k === b.id) yield bad("card.depth", `${b.id} contains itself`);
+      else if (parent.has(k)) yield bad("card.limits", `block ${k} has two parents`);
+      else parent.set(k, b.id);
     }
   }
   // Depth and nesting, walking down from the top-level blocks; a cycle is never reached.
@@ -995,41 +1047,44 @@ export function cardV2Problem(card: z.infer<typeof CardV2Shape>): CardProblem | 
   const stack: { id: string; d: number; up: string[] }[] = roots.map((b) => ({ id: b.id, d: 0, up: [] }));
   while (stack.length > 0) {
     const { id: bid, d, up } = stack.pop() as { id: string; d: number; up: string[] };
-    if (depth.has(bid)) continue;
+    const b = byId.get(bid);
+    // A child that does not exist is a problem of its own, found above.
+    if (depth.has(bid) || !b) continue;
     depth.set(bid, d);
     ancestors.set(bid, up);
-    const b = byId.get(bid) as AnyBlock;
-    if (CONTAINERS.has(b.type) && d > MAX_CONTAINER_DEPTH) return bad("card.depth", `${b.type} ${b.id} is nested too deep`);
-    if (b.type === "group" && b.blocks !== undefined && d + 1 > MAX_CONTAINER_DEPTH + 1) return bad("card.depth", `group ${b.id} is nested too deep`);
+    if (CONTAINERS.has(b.type) && d > MAX_CONTAINER_DEPTH) yield bad("card.depth", `${b.type} ${b.id} is nested too deep`);
+    if (b.type === "group" && b.blocks !== undefined && d + 1 > MAX_CONTAINER_DEPTH + 1) yield bad("card.depth", `group ${b.id} is nested too deep`);
     const upTypes = up.map((u) => (byId.get(u) as AnyBlock).type);
     const directParent = upTypes.at(-1);
-    if (b.type === "row" && directParent === "row") return bad("card.limits", `row ${b.id} is inside a row`);
-    if (b.type === "tabs" && upTypes.some((t) => t === "tabs" || t === "row" || t === "compare")) return bad("card.limits", `tabs ${b.id} is inside tabs, a row or a compare`);
-    if (b.type === "compare" && upTypes.some((t) => t === "row" || t === "compare")) return bad("card.limits", `compare ${b.id} is inside a row or a compare`);
-    if (directParent === "questionnaire" && CONTAINERS.has(b.type)) return bad("card.limits", `questionnaire children are leaves`);
+    if (b.type === "row" && directParent === "row") yield bad("card.limits", `row ${b.id} is inside a row`);
+    if (b.type === "tabs" && upTypes.some((t) => t === "tabs" || t === "row" || t === "compare")) yield bad("card.limits", `tabs ${b.id} is inside tabs, a row or a compare`);
+    if (b.type === "compare" && upTypes.some((t) => t === "row" || t === "compare")) yield bad("card.limits", `compare ${b.id} is inside a row or a compare`);
+    if (directParent === "questionnaire" && CONTAINERS.has(b.type)) yield bad("card.limits", `questionnaire children are leaves`);
     for (const k of childIds(b)) stack.push({ id: k, d: d + 1, up: [...up, bid] });
   }
-  for (const b of card.blocks) if (!depth.has(b.id)) return bad("card.depth", `block ${b.id} is in a cycle`);
+  for (const b of card.blocks) if (!depth.has(b.id)) yield bad("card.depth", `block ${b.id} is in a cycle`);
   // Counts over the card.
-  if (all.filter(takesInput).length > MAX_CARD_V2_INPUT_BLOCKS) return bad("card.limits", `at most ${MAX_CARD_V2_INPUT_BLOCKS} input blocks`);
-  if (all.filter((b) => (b.events?.length ?? 0) > 0).length > MAX_CARD_V2_EVENT_BLOCKS) return bad("card.limits", `at most ${MAX_CARD_V2_EVENT_BLOCKS} blocks with events`);
-  if (all.filter((b) => b.emphasis === "high").length > MAX_EMPHASIS_HIGH) return bad("card.limits", `at most ${MAX_EMPHASIS_HIGH} blocks with emphasis high`);
-  if (all.filter((b) => b.type === "diagram").length > MAX_DIAGRAM_BLOCKS) return bad("card.limits", `at most ${MAX_DIAGRAM_BLOCKS} diagrams`);
+  if (all.filter(takesInput).length > MAX_CARD_V2_INPUT_BLOCKS) yield bad("card.limits", `at most ${MAX_CARD_V2_INPUT_BLOCKS} input blocks`);
+  if (all.filter((b) => (b.events?.length ?? 0) > 0).length > MAX_CARD_V2_EVENT_BLOCKS) yield bad("card.limits", `at most ${MAX_CARD_V2_EVENT_BLOCKS} blocks with events`);
+  if (all.filter((b) => b.emphasis === "high").length > MAX_EMPHASIS_HIGH) yield bad("card.limits", `at most ${MAX_EMPHASIS_HIGH} blocks with emphasis high`);
+  if (all.filter((b) => b.type === "diagram").length > MAX_DIAGRAM_BLOCKS) yield bad("card.limits", `at most ${MAX_DIAGRAM_BLOCKS} diagrams`);
   for (const b of all) {
-    if (b.deliver !== undefined && !takesInput(b)) return bad("card.limits", `${b.id}: deliver is for input blocks`);
-    if (b.deliver === "immediate" && !immediateAllowed(b)) return bad("card.limits", `${b.id}: immediate is for single choices, confirm, compare, rating, scale and single-line inputs`);
+    if (b.deliver !== undefined && !takesInput(b)) yield bad("card.limits", `${b.id}: deliver is for input blocks`);
+    if (b.deliver === "immediate" && !immediateAllowed(b)) yield bad("card.limits", `${b.id}: immediate is for single choices, confirm, compare, rating, scale and single-line inputs`);
   }
   // Actions.
   const actions = card.actions ?? [];
-  if (new Set(actions.map((a) => a.id)).size !== actions.length) return bad("card.limits", "action ids are unique");
-  if (actions.filter((a) => a.style === "primary").length > 1) return bad("card.limits", "at most one primary action");
+  const twice = repeatedIds(actions.map((a) => a.id));
+  if (twice.length > 0) yield bad("card.limits", `action ids are unique (used twice: ${twice.join(", ")})`, ["actions"]);
+  const primary = actions.filter((a) => a.style === "primary").map((a) => a.id);
+  if (primary.length > 1) yield bad("card.limits", `at most one primary action (primary: ${primary.join(", ")})`, ["actions"]);
   for (const a of actions) {
-    if ((a.kind === "link") !== (a.target !== undefined)) return bad("card.limits", "a link action has a target, other actions have none");
+    if ((a.kind === "link") !== (a.target !== undefined)) yield bad("card.limits", "a link action has a target, other actions have none");
     if (a.inputs !== undefined) {
-      if (a.kind !== undefined && a.kind !== "submit" && a.kind !== "reject") return bad("card.limits", `action ${a.id}: only submit and reject take inputs`);
+      if (a.kind !== undefined && a.kind !== "submit" && a.kind !== "reject") yield bad("card.limits", `action ${a.id}: only submit and reject take inputs`);
       for (const i of a.inputs) {
         const b = byId.get(i);
-        if (!b || !takesInput(b)) return bad("card.limits", `action ${a.id} names no input block ${i}`);
+        if (!b || !takesInput(b)) yield bad("card.limits", `action ${a.id} names no input block ${i}`);
       }
     }
   }
@@ -1040,9 +1095,13 @@ export function cardV2Problem(card: z.infer<typeof CardV2Shape>): CardProblem | 
       if (b.type === "compare" || b.type === "questionnaire") surfaces += 1;
       else if (b.deliver === "immediate") surfaces += 1;
     }
-    if (surfaces > 1) return bad("card.decision_surfaces", "one decision surface per ask");
+    if (surfaces > 1) yield bad("card.decision_surfaces", "one decision surface per ask");
   }
-  return undefined;
+}
+
+/** The first write rule a card breaks, or undefined. */
+export function cardV2Problem(card: z.infer<typeof CardV2Shape>): CardProblem | undefined {
+  return cardV2Problems(card).next().value ?? undefined;
 }
 
 /** The card a member writes: shapes, no style keys, and every write rule (`cardV2Problem`). */
@@ -1053,8 +1112,7 @@ export const CardV2 = z.preprocess(
     return raw;
   },
   CardV2Shape.superRefine((c, ctx) => {
-    const p = cardV2Problem(c);
-    if (p) ctx.addIssue({ code: "custom", message: `${p.reason}: ${p.message}`, path: ["blocks"] });
+    for (const p of cardV2Problems(c)) ctx.addIssue({ code: "custom", message: `${p.reason}: ${p.message}`, path: p.path ?? ["blocks"] });
     if (utf8Bytes(JSON.stringify(c)) > MAX_CARD_V2_BYTES) ctx.addIssue({ code: "custom", message: "card exceeds 64 KiB" });
   }),
 );
@@ -1146,7 +1204,19 @@ export type CardEventFrame = z.infer<typeof CardEventFrame>;
 /** Who responds to an event, and how soon (the server's estimate). */
 export const ExpectMode = z.enum(["live", "run", "starting", "offline", "none"]);
 export type ExpectMode = z.infer<typeof ExpectMode>;
-export const Expect = z.object({ by: Id, mode: ExpectMode, etaMs: Count.optional() });
+export const Expect = z.object({
+  by: Id,
+  mode: ExpectMode,
+  etaMs: Count.optional(),
+  /**
+   * With mode "none": why nobody responds. "member.inactive" (the member was removed or turned
+   * off), "runner.off" (its runner is off), "run.external" (its run in the topic takes no
+   * events), "run.limit" (too many short runs this hour, or too many events waiting for this
+   * card), "run.failed" (a run could not start, or the run's computer no longer has it). Open:
+   * readers skip a value they do not know.
+   */
+  reason: z.string().min(1).max(64).optional(),
+});
 export type Expect = z.infer<typeof Expect>;
 /** ack.result of `card.event` (and `card.answer` from a 1.1 server). */
 export const CardEventAck = z.object({

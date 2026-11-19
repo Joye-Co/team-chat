@@ -1,0 +1,18 @@
+[
+  {
+    "name": "item.toggle",
+    "kind": "emit",
+    "label": "勾选一项",
+    "schema": {
+      "type": "object",
+      "properties": { "id": { "type": "string", "maxLength": 64 }, "done": { "type": "boolean" } },
+      "required": ["id", "done"]
+    }
+  },
+  {
+    "name": "item.add",
+    "kind": "ask",
+    "label": "加一项",
+    "schema": { "type": "object", "properties": { "text": { "type": "string", "maxLength": 80 } }, "required": ["text"] }
+  }
+]

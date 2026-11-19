@@ -204,10 +204,61 @@ ErrorCode = "unauthorized" | "forbidden" | "not_found" | "invalid" | "conflict"
 - Keepalive: the client sends `ping` every 30 s; the server answers `pong` without waking up the
   object. The client reconnects with exponential backoff (0.5 s to 30 s, with jitter).
 
+### Close codes
+
+When the server closes a socket itself, the WebSocket close code says why. It sends an `error`
+frame with the same meaning first.
+
+| Code | Close reason | When | What the client does |
+| --- | --- | --- | --- |
+| 4000 | `unsupported protocol` | `hello.protocol` is not this protocol (`error.code` `unsupported_protocol`) | does not reconnect: it needs an update |
+| 4001 | `unauthorized` | the token was revoked or the member deactivated (`error.code` `unauthorized`; at `hello` or later, for example after a sign-out) | does not reconnect with this token: signs in again |
+
+Any other code (1000, 1006, 1011, …) is a link that dropped: the client reconnects with
+backoff.
+
 ## HTTP API
 
 All requests send `Authorization: Bearer <token>` except `redeem` and `bootstrap`. Responses are
-JSON. Errors use HTTP status codes and the body `{ error: { code, message } }`.
+JSON. Errors use HTTP status codes and the body
+`{ error: { code, message, reason?, retryAfterMs?, memberIds? } }` (`ErrorBody`, the same object
+as in a failed `ack`).
+
+| `code` | HTTP status |
+| --- | --- |
+| `unauthorized` | 401 |
+| `forbidden` | 403 |
+| `not_found` | 404 |
+| `invalid` | 400 (405 for a wrong method, 426 for `GET /v1/ws` without a WebSocket upgrade) |
+| `conflict` | 409 |
+| `rate_limited` | 429 |
+| `too_large` | 413 |
+| `unsupported_protocol` | 400 |
+| `internal` | 500 |
+
+- Clients read `code`, not the status. `message` is English text for developers and logs: it may
+  change, so never match on it. `reason` names the specific rule when there is one (a stable
+  string such as `card.stale_rev`); `memberIds` (at most 20) are the members a reason is about.
+- A failure the server did not expect is 500 `internal` with the message `internal error`. The
+  detail is only in the server log; find it by the request's `cf-ray` header.
+- A path that exists under another method answers 405 with code `invalid`, the message
+  `method not allowed: use <methods>` and the methods in the `Allow` header. An unknown path is
+  404 `not_found`.
+- A 429 carries `retryAfterMs` when the server knows the wait (the per-credential post limits,
+  the sign-in attempt limits, the once-per-second card presses and answers, and the card, 产出
+  page and run update limits), and then also the `Retry-After` header in whole seconds, rounded
+  up. Without the field (the hourly upload quotas), back off on your own.
+- A body that fails its schema is `invalid` with `invalid body: <field path> <rule>`; a query
+  string, `invalid query: <parameter> <rule>`. Only the first problem is named, never a value.
+- The sign-in attempt limits (invite codes, passwords, email codes, sign-in codes and requests)
+  count per fixed window; the message says which one (`too many password attempts, try again in
+  42 s`) and `retryAfterMs` is the time until the window ends.
+- The `X-Admin-Secret` routes answer `unauthorized` with reason `admin.secret_missing` on a
+  server whose Worker secret `ADMIN_SECRET` is not set, and plain `unauthorized` for a wrong
+  value.
+- A member id that names no active member (`POST /v1/groups`, `POST /v1/groups/:id/members`,
+  `POST /v1/dms`) or no member at all (`PUT /v1/integrations/github/logins`) is `invalid` with reason `member.unknown` and those ids
+  in `memberIds`. A group has at most 99 members when it is made.
 
 | Method and path | Who | Body | Response |
 | --- | --- | --- | --- |
@@ -756,6 +807,12 @@ Rules:
 - `secret` is `whk_` + 43 base64url characters, shown only in the create response. Because GitHub
   signs with the raw secret, the server stores it encrypted with a Worker secret, not as a digest.
   Comparisons are constant-time. A wrong secret or signature is `unauthorized`.
+- Without that Worker secret (`HOOK_SECRET_KEY`, at least 16 characters) `POST /v1/hooks`, `/in`
+  and `/github` answer `internal` with reason `hooks.secret_missing` and a message that names
+  the secret. A hook made under another value of it cannot be read any more: `/in` and `/github`
+  answer `internal` with reason `hooks.secret_unreadable` (delete the hook and make it again).
+  The server logs both with the hook id, because the sender of `/in` or `/github` is an outside
+  system that cannot fix them.
 - `/in` topic choice: `topicId` (a topic of the hook's group); else `topicKey` (the first post
   with a new key starts a topic titled `title`, later posts go to that topic; keys are per hook);
   else the hook's `topicId`; else a new topic. `clientMsgId` dedupes per hook as for `send`.
@@ -1033,7 +1090,9 @@ who took what.
   `run.input` to the giver's active run (`inputId` `desk-part-…`), or else as a follow-up run.
 - **Limits**: hand-overs chain at most 3 deep (`delegation.too_deep`). One piece of work gives out
   at most 8 parts (`delegation.too_many`). A member that is already working in the topic refuses
-  (`delegation.refused`).
+  (`delegation.refused`). Between the two desks the refusal is `conflict` with reason
+  `delegation.busy` (it already works in that topic) or `delegation.unavailable` (deactivated,
+  out of the group or without a runner); the giving run always hears `delegation.refused`.
 - Usable: limits count per chain, with new reasons; see "Participants, chains and relays".
 
 ### Front desk
@@ -1330,7 +1389,7 @@ MachineMonitor = {
   queue: { count, oldestAt? },      // runs of every runner bot waiting for a machine (排队)
   today: { finished, succeeded, failed, finishedYesterday, tokens },
   clis: { runtime, kind, available, version?, login: "logged_in" | "logged_out" | "unknown", failedToday }[],
-  runs: { runId, memberId?, state, startedAt?, bootMs?, cpuCores?, memBytes?, scratchBytes? }[],
+  runs: { runId, memberId?, groupId?, topicId?, state, startedAt?, bootMs?, cpuCores?, memBytes?, scratchBytes? }[],
   members: { memberId, running, waiting, queued, cpuCores, memBytes, tokensToday, finishedToday }[],
   lastFailure?: { runId, memberId, at, title? },
 }
@@ -1344,7 +1403,9 @@ MachineMonitor = {
   member of its run. `state` is `booting` (起机中), `paused` (接管), `waiting` (等你: the run's
   BotDesk status is `waiting`), else `running` (在跑); queued runs (排队) of every runner bot follow
   with `state: "queued"`. A daemon without metrics gives the server's open runs on the machine
-  instead. Clients read an unknown `state` as `running`.
+  instead. Clients read an unknown `state` as `running`. `groupId` and `topicId` name the 话题 of
+  a run the server has open on the machine, so 等你 can lead to where the reply goes; a VM the
+  server does not know and a queued run have neither.
 - **Capacity**: `slots` is the daemon's `vmSlots`, else `maxParallelRuns`. `canTake` is the free
   slots, and no more than fit in the available memory above `reserveBytes` (a fifth of the host,
   at least 2 GiB) at the average memory of the running VMs.
@@ -1411,7 +1472,7 @@ The server also writes events it notices itself (`audit_id` 0, no actor but the 
 | `machine` | `machine.offline` | the machine stayed disconnected 5 minutes; `at` is when it dropped, so brief reconnects write nothing |
 | `machine` | `machine.online` | it connected again after a `machine.offline`; `details { offlineMs }` |
 | `budget` | `budget.reached` | an AI member's spend this week (Monday 00:00 in the team's time zone, estimates included) reached its `weeklyBudgetCents`, once a week; `details { budgetCents, spentCents }` |
-| `budget` | `budget.paused` | a new run of an AI member at or over its budget was held for the owners (到了预算先停下来问); `actorId` the AI member, `details { runId, topicId, budgetCents /* with this week's extra */, spentCents, title? }` |
+| `budget` | `budget.paused` | a new run of an AI member at or over its budget was held for the owners (到了预算先停下来问); `actorId` the AI member, `details { runId, groupId? /* newer events */, topicId, budgetCents /* with this week's extra */, spentCents, title? }` |
 | `budget` | `budget.raised` | an owner chose 这周再加: `actorId` the owner, `target` the AI member, `details { extraCents, runId }` |
 | `budget` | `budget.stopped` | an owner chose 先停: the held run is cancelled; `details { runId, topicId, title? }` |
 
@@ -1792,7 +1853,7 @@ ArtifactPreview = { title? /* 1..200 */, summary? /* 1..500 */,
 ArtifactEventDecl = { name /* 1..128; writes: [a-z][A-Za-z0-9_.-]{0,63}, unique */, label? /* <= 200 */,
                       kind?: "emit" | "ask" /* default emit */, schema?: TcSchema }
 CreateArtifactRequest += { events?, runId?, media?: MediaInfo, data?: JSON /* <= 256 KiB */, preview? }
-AddArtifactVersionRequest += { events?, runId?, media?, data?, preview? }
+AddArtifactVersionRequest += { events?, runId?, media?, data?, preview?, keepData?: boolean }
 { t: "artifact.event", rid, groupId, artifactId, version, clientEventId?, name, kind?, payload?: JSON /* <= 16 KiB */ }
    // ack.result (1.1 server) = ArtifactEventAck { eventId, duplicate?, expect: Expect }
 ```
@@ -1820,6 +1881,12 @@ Rules:
   first and scrape the HTML only when a version has none.
 - `events` and `runId` are accepted from bot members only; `runId` must be a run of the caller
   in the 产出's topic (else it is dropped). Other callers' values are dropped.
+- Data of a new version: a version without `data` starts empty (`dataRev` 0, `GET …/data` gives
+  `data: null`); what people did on the version before is not carried over. With `keepData: true`
+  and no `data`, the version starts with the snapshot of its parent version (`parentVersion`,
+  else the current one) as `dataRev` 1, when the same bot member made both versions and the
+  parent has a snapshot; otherwise it starts empty. `data` wins over `keepData`. `keepData` is
+  accepted from bot members only, like `data`.
 - `TcSchema` is a subset of JSON Schema: `type properties required enum items maxItems minimum
   maximum maxLength pattern (<= 200) description`, depth <= 4, no `$ref`. The server checks a
   `pattern` in linear time (no backtracking), so it refuses one with a backreference (`\1`,
@@ -1830,7 +1897,8 @@ Rules:
 - `artifact.event`: a human member of the group; the version exists (`not_found`), its creator is
   a bot member of the group that is not deactivated (`forbidden`, reason `artifact.no_bridge`),
   and it declares `name` with that `kind` (`invalid`, reason `artifact.undeclared_event`); the
-  payload fits the schema. At most 5 events per member per second. The event goes to the version's
+  payload fits the schema. At most 5 events a second with bursts of 10, and 300 an hour, per
+  member and version (`rate_limited` with `retryAfterMs`). The event goes to the version's
   creator: transient `artifact.event` (SDK bots) or `run.interaction` / `run.input` (runner bots).
 - The desktop gives a page `emit`/`ask` only when its version was made by a bot of the group and
   declares events of that kind. Page events never approve anything: a bot that needs a decision
@@ -1908,7 +1976,18 @@ ErrorBody += { reason?: string /* 1..64, e.g. "card.already_answered" */ }
   `card.stale_rev`, `card.superseded`, `card.already_answered`, `card.expired`,
   `card.retract_closed`, `card.rev_limit`, `interact.bot_emitter`, `interact.no_responder`,
   `interact.bad_cause`, `artifact.no_bridge`, `artifact.undeclared_event`, `artifact.stale_data`,
-  `artifact.reply_closed`.
+  `artifact.reply_closed`, `artifact.bad_payload` (`invalid`: the event's payload breaks the
+  schema the page declared; the message says where), `artifact.not_ask` (`invalid`: a reply to an
+  event that is not an ask) and `artifact.preview_ready` (`conflict`: another member sets the
+  preview of a version that already has one).
+- Run outputs (machine-protocol.md, `run.output.result`) add `report.invalid` (`invalid`: a
+  `run.report` body that is not a `RunReport`) and `output.not_supported` (`invalid`: an output
+  op this server does not take yet).
+- A refused frame or card names every problem in `message`, `; ` between them: the problems that
+  name a rule first, at most five, then `and N more`. `reason` is the first problem's. A shape
+  problem hides the write rules until the shape is right, so a second try can find more. Repeated
+  block and action ids and several primary actions are named (`block ids are unique (used twice:
+  a, b)`, `at most one primary action (primary: go, send)`).
 - A card that breaks a count or range limit of its shape (blocks, children, options, series,
   points, rows, columns, embed height, rating max, poll voters) gets `card.limits`, the same on
   the server and in the Rust pre-check (`CardV2::problem`). A limit inside a union field (poll
@@ -1970,7 +2049,8 @@ Readers keep unknown event names and an unknown `diagram.syntax` (show the sourc
 { t: "card.answer", ..., clientEventId?, contentHash? }        // short form of card.event action.press
 { t: "card.answer.retract", rid, groupId, messageId, answerId }   // short form of card.event answer.retract
 ack.result = CardEventAck { eventId, stored, answerId?, duplicate?, expect: Expect }
-Expect = { by: memberId, mode: "live" | "run" | "starting" | "offline" | "none", etaMs? }
+Expect = { by: memberId, mode: "live" | "run" | "starting" | "offline" | "none", etaMs?,
+           reason? /* 1..64, with "none": "member.inactive" | "runner.off" | "run.external" | "run.limit" | "run.failed" */ }
 
 card.answered (stored) data += { answerId?, askId?, eventId?, event?, blockId?, value? }   // actionId absent for an immediate commit
 card.retracted (stored) data: { messageId, answerId, askId?, eventId? }                     // actorId = the answerer
@@ -1990,6 +2070,59 @@ other part kinds, have no `part` (`invalid`). A live event goes to
 the card's author only (transient `card.event`, audit action `card.event`); answers are stored.
 Members never write `cardState` or `cause`.
 
+`expect` says who responds to the event and how soon: `live` (an SDK member connected with
+`interact/1`), `run` (a runner member's run in the topic takes it), `starting` (a run starts for
+it), `offline` (the SDK member is not connected: the event is not delivered) and `none` (nobody
+will respond; show no waiting state). With `none`, `reason` says why when the server knows:
+`member.inactive` (the author was removed or turned off), `runner.off` (its runner is off),
+`run.external` (its run in the topic takes no events), `run.limit` and `run.failed` (a run could
+not start, or the run's computer no longer has it). Clients skip a `reason` they do not know. A live event to a runner member with no
+run in the topic starts a short run for it: one per card at a time (later events join it), at
+most 6 an hour per card and 30 an hour per member; a run takes at most 20 waiting events per
+card. Past either limit the ack is `none`, `run.limit`. A stored answer always starts a run.
+An event whose ack said `run` or `starting` and that no run takes after all (the run ended
+before it took the event, or the event still waited and no other run could take it) is resolved
+for the emitter with `interaction.resolved {result: "failed"}`; it never comes for an event
+whose ack said `none`.
+
+What an event's `value` holds. A block sends only the events of its row (`cardBlockEvents` in
+`packages/protocol`), and only those it declares in `events` (`card.undeclared_event` otherwise).
+Committing needs no declaration: `choice.submit`, `input.submit` and `compare.pick` of an
+`immediate` block, a `confirm`, a `compare` or a `poll`, and `action.press` of a `questionnaire`.
+A `value` of another shape is `invalid`:
+
+| Event | Block | `value` |
+| --- | --- | --- |
+| `choice.change`, `choice.submit` | `decision`, `imageChoice`, `slots`, `poll` | `{ value: optionId }`; several `{ values: optionId[] }`; the other option of a `decision` `{ value: "other", other: text /* 1..60 */ }`. 2.0 clients may send the bare id or id list |
+| `choice.change`, `choice.submit` | `confirm` | `{ value: boolean }` or the bare boolean |
+| `input.change`, `input.submit` | `input` (`input.submit`: kinds `text` and `number` only) | `{ value }`: text for `text`, `textarea`, `date`; a number for `number`, `slider`; a boolean for `switch`; an option id for `select`. `chips`: `{ values: string[] }` |
+| `input.change` | `rank` | `{ order: itemId[] }` |
+| `input.change` | `matrix` | `{ rows: { [rowId]: columnId } }` |
+| `input.change` | `rating`, `scale` | `{ value: integer }`, 1..5 or `min..max` |
+| `compare.pick` | `compare` | `{ value: optionId, note? }` |
+| `chart.select` | `chart` | `{ series, x, y, index }`; `series` is the series id, or its name without one |
+| `chart.clear` | `chart` | none |
+| `metric.press` | `metric` | none |
+| `table.rowSelect` | `table` | `{ values: rowKey[] }` (`rowKeys`, else the row index as text) |
+| `table.sort` | `table` | `{ column, dir: "asc" \| "desc" }` |
+| `button.press` | `buttons` | `{ buttonId }` |
+| `tab.open` | `tabs` | `{ tabId }` |
+| `draft.edit` | `draft` | `{ fieldId, value }` |
+| `action.press` | a footer action, `questionnaire` | none; the values go in `inputs`, by block id |
+| `answer.retract` | none | `{ answerId }` |
+
+The answerer can take an answer back (`answer.retract`) for 10 minutes after it was stored,
+while the card is still at the rev it had then, its author has posted nothing newer in the topic
+and the author has not started acting on the answer. After that: `conflict`, `card.retract_closed`.
+
+Rates (`rate_limited`, with `retryAfterMs`; the limits are per server location, so a client
+may see a little more): one answer per member and message a second; live events 5 a second
+with bursts of 10 per member and message, and 120 a minute per member and group; `card.patch`
+1 a second with bursts of 3 per message. `clientEventId` and `clientPatchId` make a repeat
+within 24 hours the same event or patch (`duplicate: true`); after that the id is free again.
+An event to a card whose author was removed or deactivated is `forbidden`,
+`interact.no_responder`.
+
 Draft answers: an answer that submits `draft` blocks (a footer action whose inputs name them,
 or a 2.0 submit) stores `contentHash` in its `CardAnswer`: the sha256 (lowercase hex of the
 UTF-8 bytes) of the draft texts it approves, in card order, each the edited text when edited,
@@ -2001,6 +2134,16 @@ retract or an expiry of a card ask; a ref whose source was deleted) has no `card
 `cardState` or `blockRefs`. Its `editedAt` is the stored `editedAt`, or `createdAt` for a message
 that was never edited. It is not an edit: a 1.1 client keeps its stored `editedAt` (no edited
 mark), and so does a restore. (1.0.x clients copy `editedAt` and show the mark.)
+
+Who answers an ask: `ask.from` lists member ids, `"owners"` and `"requester"`; the server stores
+the resolved member ids in `cardState.ask.from`. Only people answer, so a send, an edit or a
+patch that opens a new ask round or changes `ask.from` must name at least one person of the
+group who is not deactivated: ids that name none (a name in place of an id, only AI members)
+are `invalid`, `card.limits`, and the message lists them. `"owners"` or `"requester"` that
+resolve to no person (a run that nobody asked) are stored as the group's owners; when no owner
+is in the group either, the write is `invalid`, `card.limits`. A round whose
+people left the group later is kept; its author closes it or it expires. (Poll voters come
+from the poll's `voters`, people only.)
 
 Topic status with blocking asks: while a blocking ask in the topic is open, the topic is
 `waiting_answer` and `waitingOn` is the union of the open asks' `from` and the people of a
@@ -2045,6 +2188,11 @@ send += { causeEventId?, blockRefs? }      edit += { baseRev?, causeEventId? }
 transient interaction.resolved: { groupId, eventId, result: "ignored"|"failed"|"patched"|"posted"|"replied", messageId?, note? }
 ```
 
+`replace` swaps the whole block and `set` merges props into it. When either leaves a container
+naming fewer children, the children it no longer names are removed with their own children, as
+`remove` does, unless an op of the same patch gives them a place (another container names them,
+or they are inserted again).
+
 A cause (`card.patch.cause`, `send`/`edit` `causeEventId`) and `interaction.resolve` name an
 event of the last 30 minutes that the sender received: a card event on one of its cards, or a
 page event of one of its 产出 versions (`Cause.event` is the page event's name; the card's
@@ -2054,15 +2202,29 @@ page event of one of its 产出 versions (`Cause.event` is the page event's name
 
 ### 产出 bridge
 
+What a page itself can call (`window.teamchat`, its errors and limits) is in
+[docs/bots.md, "The page side: `window.teamchat`"](bots.md#the-page-side-windowteamchat).
+
 ```ts
-{ t: "artifact.data", rid, groupId, artifactId, version, data /* <= 256 KiB */, baseDataRev?, cause?, clientPushId? }   // ack.result { dataRev }
+{ t: "artifact.data", rid, groupId, artifactId, version, data /* <= 256 KiB */, baseDataRev?, cause?, clientPushId? }   // ack.result ArtifactDataAck { dataRev, duplicate? }
 { t: "artifact.reply", rid, groupId, eventId, ok, payload? /* <= 64 KiB, ok: true */, error? { code: "declined"|"failed", message, reason? } }
 transient artifact.event: { groupId, topicId, artifactId, version, eventId, name, kind, payload?, actorId, at }   // to the version's creator
 transient artifact.data:  { groupId, artifactId, version, dataRev, data? /* inline when <= 64 KiB */, cause? }    // to every member
 transient artifact.reply: { groupId, eventId, ok, payload?, error? }                                               // to the asker only
 GET /v1/artifacts/:id/versions/:v/data  -> ArtifactDataResponse { data: JSON | null, dataRev, updatedAt }
-PUT /v1/artifacts/:id/versions/:v/data  PutArtifactDataRequest { data, baseDataRev?, cause? } -> ArtifactDataAck { dataRev }
+PUT /v1/artifacts/:id/versions/:v/data  PutArtifactDataRequest { data, baseDataRev?, cause?, clientPushId? /* 1..64 */ } -> ArtifactDataAck { dataRev, duplicate? }
 ```
+
+`clientPushId` makes a data push safe to send again after a lost answer: the server keeps the
+ids of a version's last 16 pushes, and a push with one of them is not applied again (not even
+when newer pushes followed it). Its answer is `{ dataRev: <the rev that push made>, duplicate:
+true }`, and no transient is sent. The checks of `baseDataRev`, `cause` and the rate apply to
+new pushes only.
+
+Rates: `artifact.data` 2 a second with bursts of 4 per version (`rate_limited` with
+`retryAfterMs`; push the newest data after the wait). `artifact.reply` is accepted within 120 s
+of its ask (`conflict`, `artifact.reply_closed` after that: push the result with
+`artifact.data`).
 
 A page `ask` that no run of the version's runner member will answer (the run ended and none is
 open in the topic) gets `artifact.reply` from that member at once: `ok: false`, `error { code:
@@ -2687,7 +2849,7 @@ Rules:
   recently started a run in the topic, and a follow-up without an @ goes to it. Clients show who
   works from `participants` and no longer show one responsible member.
 - A relay starts from a person's message in a topic (not a 群聊) whose first line is `@A note →
-  @B note → @C note` (`→`, `->` or `=>`): 2 to 6 steps, the goal on the second line or after the
+  @B note → @C note` (`→`, `->`, `=>`, `-》` or `=》`): 2 to 6 steps, the goal on the second line or after the
   last @. The message does not go to each mentioned member; the room wakes one step after the
   other. `send` (and `POST /v1/groups/:id/messages`) refuses such a message with `invalid` and
   reason `relay.bad_steps` (a broken arrow line) or `relay.member_unavailable` (with `memberIds`:
@@ -2802,6 +2964,20 @@ Rules:
 - A held run (`paused`, `taken_over`) is never moved or ended because its machine is away; it
   keeps its phase, with `waitingFor: "offline"`. Commands run one at a time, at most 10 minutes
   each, in the run's work folder.
+- A `conflict` refusal of pause, take over, hand back and commands carries a `reason`. Clients
+  decide by the reason, not by the message:
+
+  | `reason` | When |
+  | --- | --- |
+  | `run.ended` | the run has ended |
+  | `run.no_machine` | the run has no machine (it waits for one, or it is an external run), or it is not open on its machine |
+  | `run.not_ready` | pause or take over while the run's computer is not ready yet (the run has not started working) |
+  | `run.held` | pause on a run that is already paused or taken over; take over a run someone else has taken over |
+  | `run.not_held` | hand back on a run nobody has paused or taken over; a command on a run that is not taken over (a run someone else holds answers `forbidden`) |
+  | `run.no_pause` | the machine's daemon cannot pause runs (no feature `pause`) |
+  | `run.no_takeover` | the machine cannot be taken over (`takeover: "none"`) |
+  | `hand.busy` | a command while another command of the run is running |
+  | `hand.offline` | a command, or its cancel, while the run's machine is offline (never queued) |
 - `GET /v1/runs/:id/events` carries the run events `hand.command`, `hand.result` and
   `hand.summary` to everyone who may read the run, and `hand.output` only to the person holding
   it and admins. They are not the AI member's progress.
