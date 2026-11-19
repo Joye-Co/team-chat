@@ -752,6 +752,13 @@ pub const SCENES: &[Scene] = &[
         open: open_main,
     },
     Scene {
+        name: "process-failed-log",
+        about: "The 过程 tab of a failed bot run after 查看日志: the developer view, at the raw events",
+        start: Start::SignedIn,
+        setup: crate::views::process::preview::open_failed_log,
+        open: open_main,
+    },
+    Scene {
         name: "process-dev",
         about: "The 过程 tab with the developer view on: ids and raw events",
         start: Start::SignedIn,
@@ -774,8 +781,8 @@ pub const SCENES: &[Scene] = &[
     },
     Scene {
         name: "panel-plan",
-        about: "The side panel of the sample-card 话题: a plan list from a card",
-        start: Start::SignedIn,
+        about: "The side panel of a 话题 whose run works on a plan: the thread's working card carries the steps, the panel does not repeat them",
+        start: Start::V2,
         setup: crate::views::process::preview::open_plan_details,
         open: open_main,
     },

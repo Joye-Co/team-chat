@@ -123,6 +123,17 @@ pub fn stop_run(services: &Services, run: &BotRunSummary, cx: &mut App) {
     let _ = window.update(cx, |_, window, cx| confirm_stop(&s, &r, window, cx));
 }
 
+/// `run_id` is the current step of a running 按顺序做: stopping the run holds the order at
+/// that step, and 重试 goes on from it.
+fn is_live_relay_step(relay: Option<&crate::data::TopicRelay>, run_id: &str) -> bool {
+    relay.is_some_and(|r| {
+        r.state == "running"
+            && r.steps
+                .get(r.current as usize)
+                .is_some_and(|s| s.run_id.as_deref() == Some(run_id))
+    })
+}
+
 /// The 停止 alert in `window`.
 pub fn confirm_stop(services: &Services, run: &BotRunSummary, window: &mut Window, cx: &mut App) {
     let name = services
@@ -130,11 +141,16 @@ pub fn confirm_stop(services: &Services, run: &BotRunSummary, window: &mut Windo
         .member(&run.bot_id)
         .map(|m| m.name)
         .unwrap_or_default();
+    let mut message = fill(o::STOP_MESSAGE, &[("name", &name)]);
+    let topic = services.provider.topic(&run.group_id, &run.topic_id);
+    if topic.is_some_and(|t| is_live_relay_step(t.relay.as_ref(), &run.id)) {
+        message = format!("{message}\n{}", o::STOP_MESSAGE_RELAY_STEP);
+    }
     let (s, r) = (services.clone(), run.clone());
     crate::views::nav::dialogs::destructive_alert(
         "stop-run",
         fill(o::STOP_TITLE, &[("name", &name)]),
-        fill(o::STOP_MESSAGE, &[("name", &name)]),
+        message,
         o::STOP_OK,
         move |_, cx| stop_run_now(&s, &r, cx),
         window,
@@ -218,6 +234,13 @@ pub struct ProcessView {
     titled: bool,
     /// 全部记录 shows every run, not only the newest [`RUNS_FOLDED`].
     runs_expanded: bool,
+    /// The run whose 重试 waits for its answer: the button shows its spinner and takes no
+    /// second press.
+    retrying: Option<String>,
+    /// The body's scroll position, moved by 查看日志.
+    scroll: gpui::ScrollHandle,
+    /// 查看日志 was pressed: the next frame scrolls to the raw events at the end.
+    reveal_log: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -257,6 +280,9 @@ impl ProcessView {
             raw_open: Default::default(),
             titled: true,
             runs_expanded: false,
+            retrying: None,
+            scroll: gpui::ScrollHandle::new(),
+            reveal_log: preview::take_reveal_log(),
             _subscriptions: subscriptions,
         };
         this.open_topic(open, cx);
@@ -488,7 +514,7 @@ impl ProcessView {
                         div()
                             .n_body()
                             .text_color(n.label)
-                            .when(selected, |el| el.font_weight(gpui::FontWeight::MEDIUM))
+                            .when(selected, |el| el.font_weight(crate::theme::MEDIUM_WEIGHT))
                             .one_line()
                             .child(bot.map(|b| b.name).unwrap_or_default()),
                     )
@@ -603,6 +629,10 @@ impl ProcessView {
                 }
             )
         });
+        // After 停止 is pressed the run is 停止中: the card keeps its line and
+        // says 停在 the step, as the thread's working card does, so the log
+        // below does not jump.
+        let stopping = self.services.provider.run_stopping(&run.id);
         let progress = run
             .status
             .is_active()
@@ -611,8 +641,14 @@ impl ProcessView {
         let about = if progress.is_some() {
             None
         } else if run.status.is_active() {
-            steps::live_action(&self.process.steps)
-                .map(|step| fill(crate::copy::timeline::PLAN_DOING, &[("step", &step)]))
+            let template = if stopping {
+                crate::copy::timeline::PLAN_HELD
+            } else {
+                crate::copy::timeline::PLAN_DOING
+            };
+            steps::live_action(&self.process.steps).map(|step| fill(template, &[("step", &step)]))
+        } else if stopping {
+            None
         } else {
             run.summary
                 .as_deref()
@@ -826,10 +862,33 @@ impl ProcessView {
                 PushSize::Regular,
                 cx,
             )
-            .on_click(cx.listener(move |this, _, _, cx| {
+            .loading(self.retrying.as_deref() == Some(run.id.as_str()))
+            .on_click(cx.listener(move |this, _, window, cx| {
+                if this.retrying.is_some() {
+                    return;
+                }
+                // A new run with the same request. A refusal blocks: an alert, as on the
+                // run's row in the 话题.
                 let rx = this.services.provider.retry_member_problem(&bot, &id);
-                cx.spawn(async move |_, _| {
-                    let _ = rx.await;
+                this.retrying = Some(id.clone());
+                let handle = window.window_handle();
+                cx.spawn(async move |this, cx| {
+                    let result = rx.await.unwrap_or(Err(crate::data::AdminError::Other));
+                    let _ = this.update(cx, |this, cx| {
+                        this.retrying = None;
+                        cx.notify();
+                    });
+                    if let Err(e) = result {
+                        let _ = handle.update(cx, |_, window, cx| {
+                            crate::views::nav::dialogs::error_alert(
+                                crate::copy::timeline::RUN_RETRY_REFUSED,
+                                crate::views::settings::widgets::error_text(e),
+                                |_, _| {},
+                                window,
+                                cx,
+                            )
+                        });
+                    }
                 })
                 .detach();
                 cx.notify();
@@ -838,16 +897,14 @@ impl ProcessView {
         let log = (!developer).then(|| {
             push_button(
                 "process-run-log",
+                // §2.15: 重试 over 查看日志. Here it opens the raw record (the
+                // developer view), the log the alert above points at.
                 crate::copy::timeline::RUN_VIEW_LOG,
                 PushStyle::Outline,
                 PushSize::Regular,
                 cx,
             )
-            .on_click(cx.listener(|this, _, _, cx| {
-                this.services
-                    .nav
-                    .update(cx, |nav, cx| nav.set_developer_view(true, cx));
-            }))
+            .on_click(cx.listener(|this, _, _, cx| this.open_log(cx)))
         });
         let n = native_colors(cx);
         Some(
@@ -864,6 +921,16 @@ impl ProcessView {
                 .children(log.map(|b| b.w_full()))
                 .into_any_element(),
         )
+    }
+
+    /// 查看日志: the developer view, scrolled to the raw events at its end (the
+    /// newest is last, so the failure is in view).
+    fn open_log(&mut self, cx: &mut Context<Self>) {
+        self.reveal_log = true;
+        self.services
+            .nav
+            .update(cx, |nav, cx| nav.set_developer_view(true, cx));
+        cx.notify();
     }
 
     fn render_developer_tail(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -1003,18 +1070,15 @@ fn developer_panel(rows: Vec<(&'static str, String)>, cx: &App) -> AnyElement {
         .collect::<Vec<_>>()
         .join("\n");
     // R2-07, F4: no inner inset, so its values share the one value x of
-    // the facts above; a rule above its header sets it apart.
+    // the facts above. No rules around its header: it is a labelled group
+    // like 步骤 under it, not a table head.
     div()
         .mt(space::S4)
-        .border_t_1()
-        .border_color(n.separator)
         .child(
             div()
                 .h(ui::native::tokens::height::FOOTER_ROW)
                 .flex()
                 .items_center()
-                .border_b_1()
-                .border_color(n.separator)
                 .child(
                     div()
                         .flex_1()
@@ -1031,7 +1095,7 @@ fn developer_panel(rows: Vec<(&'static str, String)>, cx: &App) -> AnyElement {
                         cx,
                     )
                     .on_click(move |_, _, cx| {
-                        cx.write_to_clipboard(gpui::ClipboardItem::new_string(text.clone()))
+                        crate::views::media::parts::copy_text(text.clone(), p::COPIED, cx)
                     }),
                 ),
         )
@@ -1086,6 +1150,9 @@ impl Render for ProcessView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = theme::colors(cx);
         let developer = self.services.nav.read(cx).developer_view;
+        if developer && std::mem::take(&mut self.reveal_log) {
+            self.scroll.scroll_to_bottom();
+        }
         let section = |title: &'static str, cx: &App| {
             div()
                 .pt(space::S16)
@@ -1098,6 +1165,7 @@ impl Render for ProcessView {
             .flex_1()
             .min_h(px(0.))
             .overflow_y_scroll()
+            .track_scroll(&self.scroll)
             .px(space::S16)
             .pb(space::S24);
         if self.runs.is_empty() {
@@ -1292,6 +1360,33 @@ impl Render for ProcessView {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Only the run an order is waiting on holds the order when it stops.
+    #[test]
+    fn only_the_current_step_of_a_running_order_counts() {
+        let step = |run: Option<&str>| crate::data::TopicRelayStep {
+            member_id: "b".into(),
+            note: None,
+            state: "working".into(),
+            run_id: run.map(Into::into),
+        };
+        let mut relay = crate::data::TopicRelay {
+            id: "o".into(),
+            started_by: "me".into(),
+            goal: "g".into(),
+            current: 1,
+            state: "running".into(),
+            reason: None,
+            stopped_by: None,
+            updated_at: 0,
+            steps: vec![step(Some("r1")), step(Some("r2"))],
+        };
+        assert!(is_live_relay_step(Some(&relay), "r2"));
+        assert!(!is_live_relay_step(Some(&relay), "r1"));
+        assert!(!is_live_relay_step(None, "r2"));
+        relay.state = "paused".into();
+        assert!(!is_live_relay_step(Some(&relay), "r2"));
+    }
 
     #[test]
     fn durations_read_naturally() {

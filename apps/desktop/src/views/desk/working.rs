@@ -49,7 +49,7 @@ pub fn render(
         .flex_none()
         .h(metrics::TOOLBAR_ROW)
         .pl(metrics::INSPECTOR_PAD)
-        .pr(tsp::S8)
+        .pr(metrics::TOOLBAR_TRAILING)
         .border_b_1()
         .border_color(k.separator)
         .flex()
@@ -65,7 +65,7 @@ pub fn render(
                 .child(
                     div()
                         .n_title3()
-                        .font_weight(gpui::FontWeight::MEDIUM)
+                        .font_weight(crate::theme::MEDIUM_WEIGHT)
                         .text_color(k.label)
                         .child(c::DESK_RAIL_TITLE),
                 )
@@ -97,7 +97,7 @@ pub fn render(
     if loading {
         week = week.row(page::skeleton_rows(
             "desk-w-sk",
-            SkeletonKind::Compact,
+            SkeletonKind::DescRow,
             3,
             cx,
         ));
@@ -160,7 +160,8 @@ pub fn render(
     let mut times = times.into_iter();
     for (i, q) in snap.queue.iter().enumerate().filter(|_| !failed) {
         let member = snap.member(&q.member_id);
-        let full = format!("{} {}", snap.name_by_avatar(&q.member_id), q.title);
+        let name = snap.name_by_avatar(&q.member_id);
+        let full = format!("{name} {}", q.title);
         queue = queue.row(
             div()
                 .id(SharedString::from(format!("desk-queue-{i}")))
@@ -171,7 +172,16 @@ pub fn render(
                 .gap(tsp::S8)
                 .n_body()
                 .child(MemberAvatar::new(member.as_ref(), tsp::S16))
-                .child(line(full.clone()).flex_1().text_color(k.label))
+                // The 话题 title is the row's text; the member's name is a
+                // quiet word after it, not the first word of the title.
+                .child(line(q.title.clone()).flex_1().text_color(k.label))
+                .child(
+                    div()
+                        .flex_none()
+                        .n_subheadline()
+                        .text_color(k.secondary)
+                        .child(name),
+                )
                 .children(q.at.and_then(|_| times.next()).map(|t| {
                     div()
                         .flex_none()
@@ -214,11 +224,9 @@ pub fn render(
     }
     let now = services.provider.clock_now();
     for (_, a) in recent.into_iter().take(4) {
-        let glyph = match a.kind {
-            crate::data::ArtifactKind::Image => Sym::Image,
-            crate::data::ArtifactKind::File => Sym::File,
-            _ => Sym::Document,
-        };
+        // One kind, one symbol: the mapping of the 产出 page and the switcher.
+        let glyph =
+            crate::views::artifact_page::list::ListKind::of(services.provider.as_ref(), &a).sym();
         // X-01: no leading emoji in a meta line either.
         let who = crate::ui::avatar::name_beside_avatar(&crate::views::shell::member_name(
             services,
