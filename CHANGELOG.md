@@ -3,7 +3,7 @@
 Each release is tagged `v<version>` and has a GitHub Release with the DMG, the machine daemon
 and the Windows installer; GitHub shows each file's SHA-256. Release notes for the team are in Chinese in `docs/releases/`.
 
-## 1.4.0 (unreleased)
+## 1.4.0 (2026-11-19)
 
 Notes: [docs/releases/1.4.0.md](docs/releases/1.4.0.md). D1 migrations `0020_hide_delete` and
 `0021_machine_limits` (new columns only). Protocol: additive (hide and delete, `hide-delete/1`;
