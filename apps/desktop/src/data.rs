@@ -1919,8 +1919,11 @@ pub trait ChatProvider: Send + Sync + 'static {
     fn rename_group(&self, _group_id: &str, _name: String) -> AdminReply<()> {
         reply_now(Err(AdminError::Unsupported))
     }
-    /// Leaves a group (`DELETE /v1/groups/:id/members/<me>`). Emits `Change::Groups`.
-    fn leave_group(&self, _group_id: &str) {}
+    /// Leaves a group (`DELETE /v1/groups/:id/members/<me>`). Emits `Change::Groups`. The
+    /// answer says whether the server took it, so a refusal can be shown.
+    fn leave_group(&self, _group_id: &str) -> AdminReply<()> {
+        reply_now(Ok(()))
+    }
     /// My mute preference of a group (`GroupSummary.muted`).
     fn group_muted(&self, _group_id: &str) -> bool {
         false

@@ -46,6 +46,8 @@ gpui::actions!(
         ToggleSidebar,
         NewTopic,
         MentionInComposer,
+        // 添加文件 of a thread-start block: the composer's file picker.
+        AttachInComposer,
         // 开个话题: the caret into the composer of the 话题 just opened.
         FocusComposer,
         FocusNext,
@@ -912,6 +914,12 @@ impl RootView {
             ),
             cx.observe(&services.nav, |_, _, cx| cx.notify()),
         ];
+        // Alt+Tab is not a tap of Alt (the menus' key, WINDOWS.md §2), and neither is the
+        // Alt that GPUI presses to bring this window to the front.
+        #[cfg(not(target_os = "macos"))]
+        subscriptions.push(cx.observe_window_activation(window, |_, _, cx| {
+            crate::views::nav::menus::window_activation_changed(cx)
+        }));
         // App-level banners (connection, update).
         let banner = cx.new(|cx| ConnectionBanner::new(services.clone(), cx));
         let update_banner = cx.new(crate::updater::banner::UpdateBanner::new);
@@ -1212,11 +1220,15 @@ impl Render for RootView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let body = self.window_body(window, cx).into_any_element();
         use crate::ui::native::window_chrome;
-        if self.show_inactive {
+        let framed = if self.show_inactive {
             window_chrome::framed_main_inactive(env!("PRODUCT_NAME"), body, window, cx)
         } else {
             window_chrome::framed_main(env!("PRODUCT_NAME"), body, window, cx)
-        }
+        };
+        // A tap of Alt opens the menus of the title bar (WINDOWS.md §2).
+        #[cfg(not(target_os = "macos"))]
+        let framed = crate::views::nav::menus::with_menu_bar_key(framed);
+        framed
     }
 }
 
@@ -1287,6 +1299,24 @@ impl RootView {
                         .update(cx, |nav, cx| nav.toggle_sidebar(cx));
                 }))
                 .on_action(cx.listener(|this, _: &NewTopic, window, cx| {
+                    if crate::views::rail::model::cannot_create(&this.services) {
+                        return;
+                    }
+                    // A 话题 lives in a 群. With none to pick (a new team, or
+                    // only 私聊) the 新话题 sheet could never start one: the
+                    // 新建群 sheet opens instead.
+                    if crate::views::rail::model::groups(this.services.provider.as_ref()).is_empty()
+                    {
+                        use gpui_component::WindowExt as _;
+                        if !window.has_active_dialog(cx) {
+                            crate::views::nav::dialogs::open_new_group(
+                                this.services.clone(),
+                                window,
+                                cx,
+                            );
+                        }
+                        return;
+                    }
                     // v12/overlays: ⌘N opens the 新话题 sheet (NATIVE.md §7.1).
                     let group = this.services.nav.read(cx).current_group();
                     crate::views::nav::new_topic::open_new_topic(
@@ -1299,6 +1329,10 @@ impl RootView {
                 .on_action(cx.listener(|this, _: &MentionInComposer, window, cx| {
                     this.composer
                         .update(cx, |composer, cx| composer.insert_text("@", window, cx));
+                }))
+                .on_action(cx.listener(|this, _: &AttachInComposer, _, cx| {
+                    this.composer
+                        .update(cx, |composer, cx| composer.pick_files(cx));
                 }))
                 .on_action(cx.listener(|this, _: &FocusComposer, window, cx| {
                     this.composer
@@ -1446,7 +1480,7 @@ impl RootView {
             .render(page, &pane, leading, active, &self.services, window, cx);
         let pane_el = if floats || right >= 1. {
             self.panes
-                .render(&drawn_pane, full_pane_w, floats, cx)
+                .render(&drawn_pane, full_pane_w, floats, active, cx)
                 .map(|el| {
                     if right < 1. {
                         div().opacity(right).child(el).into_any_element()
@@ -1457,7 +1491,7 @@ impl RootView {
         } else {
             // The column clips the pane at its full width while it slides.
             self.panes
-                .render(&drawn_pane, full_pane_w, false, cx)
+                .render(&drawn_pane, full_pane_w, false, active, cx)
                 .map(|el| {
                     div()
                         .flex_none()

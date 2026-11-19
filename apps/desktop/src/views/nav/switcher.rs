@@ -69,11 +69,16 @@ pub fn bind_keys(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new("up", SelectPrevious, Some(CONTEXT)),
         KeyBinding::new("down", SelectNext, Some(CONTEXT)),
-        KeyBinding::new("ctrl-p", SelectPrevious, Some(CONTEXT)),
-        KeyBinding::new("ctrl-n", SelectNext, Some(CONTEXT)),
         KeyBinding::new("enter", OpenSelected, Some(CONTEXT)),
         // Inside the switcher Cmd+F scopes it to the current 群.
         KeyBinding::new(crate::secondary!("f"), ScopeToGroup, Some(CONTEXT)),
+    ]);
+    // ⌃P and ⌃N move a line on the Mac only, as in the ask palette (`views::ask`): on
+    // Windows Ctrl is the command key, Ctrl+N is 新话题 and Ctrl+P prints.
+    #[cfg(target_os = "macos")]
+    cx.bind_keys([
+        KeyBinding::new("ctrl-p", SelectPrevious, Some(CONTEXT)),
+        KeyBinding::new("ctrl-n", SelectNext, Some(CONTEXT)),
     ]);
 }
 
@@ -108,11 +113,20 @@ pub fn grouped(
             (nav::SECTION_TOPICS, MAX_PER_GROUP)
         };
         let topics: Vec<Entry> = topics.into_iter().take(take).collect();
-        return if topics.is_empty() {
+        // A search in a 群 also finds the 产出 made there.
+        let artifacts: Vec<Entry> = if query.trim().is_empty() {
             Vec::new()
         } else {
-            vec![(label, topics)]
+            get(Section::Artifacts)
+                .into_iter()
+                .filter(|e| matches!(&e.target, Target::Artifact(g, _) if g == scope))
+                .take(MAX_PER_GROUP)
+                .collect()
         };
+        return [(label, topics), (search_copy::SECTION_ARTIFACTS, artifacts)]
+            .into_iter()
+            .filter(|(_, e)| !e.is_empty())
+            .collect();
     }
     let groups: Vec<(&'static str, Vec<Entry>)> = if query.trim().is_empty() {
         vec![
@@ -126,6 +140,7 @@ pub fn grouped(
     } else {
         [
             (nav::SECTION_TOPICS, Section::Topics),
+            (search_copy::SECTION_ARTIFACTS, Section::Artifacts),
             (nav::GROUPS, Section::Groups),
             (nav::DMS, Section::Dms),
             (nav::SECTION_MEMBERS, Section::Members),
@@ -144,6 +159,8 @@ pub enum Target {
     Topic(GroupId, TopicId),
     /// Opens the DM with this member, creating it when needed.
     Member(MemberId),
+    /// Opens a 产出 (its 群, its id) at its current version.
+    Artifact(GroupId, String),
 }
 
 #[derive(Clone, Debug)]
@@ -157,6 +174,10 @@ pub struct Entry {
     pub member: Option<Member>,
     /// For topics: the topic, for its status chip and time.
     pub topic: Option<Topic>,
+    /// For 产出: the symbol of its kind and when it was last updated.
+    pub artifact: Option<(Sym, crate::data::Millis)>,
+    /// More text a search matches besides the label (a 产出's 话题 and maker).
+    pub also: Vec<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -165,6 +186,9 @@ pub enum Section {
     Dms,
     Topics,
     Members,
+    /// 产出, by name, 话题 and maker. Only what this client has loaded: the
+    /// 产出 of the 话题 it knows.
+    Artifacts,
 }
 
 /// The switcher's entries in display order; empty sections are left out.
@@ -188,6 +212,8 @@ pub fn entries(provider: &dyn ChatProvider, me: Option<&str>) -> Vec<(Section, V
             },
             member: g.dm_peer.as_deref().and_then(find),
             topic: None,
+            artifact: None,
+            also: Vec::new(),
         };
         match g.kind {
             GroupKind::Group => group_entries.push(entry),
@@ -200,6 +226,8 @@ pub fn entries(provider: &dyn ChatProvider, me: Option<&str>) -> Vec<(Section, V
                 detail: Some(g.name.clone()),
                 member: None,
                 topic: Some(t),
+                artifact: None,
+                also: Vec::new(),
             });
         }
     }
@@ -222,6 +250,39 @@ pub fn entries(provider: &dyn ChatProvider, me: Option<&str>) -> Vec<(Section, V
             detail: m.role.clone(),
             member: Some(m.clone()),
             topic: None,
+            artifact: None,
+            also: Vec::new(),
+        })
+        .collect();
+    // 产出, newest first: the row reads `name  v3 · 话题` with its kind's symbol.
+    let artifact_entries: Vec<Entry> = provider
+        .all_artifacts()
+        .into_iter()
+        .map(|(group_id, a)| {
+            let topic = provider
+                .topic(&group_id, &a.topic_id)
+                .map(|t| topic_line(&t.title))
+                .filter(|t| !t.is_empty());
+            let maker = find(&a.created_by).map(|m| m.name);
+            let version = fill(
+                search_copy::ARTIFACT_VERSION,
+                &[("v", &a.version.to_string())],
+            );
+            Entry {
+                label: a.title.clone(),
+                detail: Some(match &topic {
+                    Some(topic) => format!("{version} · {topic}"),
+                    None => version,
+                }),
+                member: None,
+                topic: None,
+                artifact: Some((
+                    crate::views::artifact_page::list::ListKind::of(provider, &a).sym(),
+                    a.updated_at,
+                )),
+                also: topic.into_iter().chain(maker).collect(),
+                target: Target::Artifact(group_id, a.id),
+            }
         })
         .collect();
     [
@@ -229,6 +290,7 @@ pub fn entries(provider: &dyn ChatProvider, me: Option<&str>) -> Vec<(Section, V
         (Section::Dms, dm_entries),
         (Section::Topics, topic_entries),
         (Section::Members, member_entries),
+        (Section::Artifacts, artifact_entries),
     ]
     .into_iter()
     .filter(|(_, e)| !e.is_empty())
@@ -239,7 +301,12 @@ pub fn entries(provider: &dyn ChatProvider, me: Option<&str>) -> Vec<(Section, V
 /// case-insensitive substring of the label.
 pub fn matches(entry: &Entry, query: &str) -> bool {
     let query = query.trim().to_lowercase();
-    query.is_empty() || entry.label.to_lowercase().contains(&query)
+    query.is_empty()
+        || entry.label.to_lowercase().contains(&query)
+        || entry
+            .also
+            .iter()
+            .any(|text| text.to_lowercase().contains(&query))
 }
 
 /// Opens what an entry points at.
@@ -259,6 +326,12 @@ pub fn go(services: &Services, target: &Target, cx: &mut App) {
             });
         }
         Target::Member(m) => super::open_dm_with(m.clone(), cx),
+        Target::Artifact(_, id) => {
+            let id = id.clone();
+            services
+                .nav
+                .update(cx, |nav, cx| nav.open_artifact(id, None, cx));
+        }
     }
 }
 
@@ -277,6 +350,17 @@ fn split_match(label: &str, query: &str) -> Option<(String, String, String)> {
     let at = lower.windows(q.len()).position(|w| w == q.as_slice())?;
     let s = |r: std::ops::Range<usize>| chars[r].iter().collect::<String>();
     Some((s(0..at), s(at..at + q.len()), s(at + q.len()..chars.len())))
+}
+
+/// Where `query` matches in `text`, in the char indices `weighted` takes.
+fn match_ranges(text: &str, query: &str) -> Vec<std::ops::Range<usize>> {
+    split_match(text, query)
+        .map(|(pre, hit, _)| {
+            let start = pre.chars().count();
+            start..start + hit.chars().count()
+        })
+        .into_iter()
+        .collect()
 }
 
 /// The leading symbol of a 话题 row (§6): needs you `amber`, live work a
@@ -572,6 +656,9 @@ impl Switcher {
         // StatusBadge at the right, never into a colored icon.
         let lead = match (&e.target, &e.member) {
             (Target::Topic(..), _) => palette::kind_icon(Sym::Topic, cx),
+            (Target::Artifact(..), _) => {
+                palette::kind_icon(e.artifact.map_or(Sym::File, |(sym, _)| sym), cx)
+            }
             (_, Some(m)) => div()
                 .flex_none()
                 .size(spot::SLOT)
@@ -589,14 +676,7 @@ impl Switcher {
             }
             None => (e.label.clone(), false),
         };
-        let ranges: Vec<std::ops::Range<usize>> = split_match(&label, query)
-            .map(|(pre, hit, _)| {
-                // `weighted` takes char indices.
-                let start = pre.chars().count();
-                start..start + hit.chars().count()
-            })
-            .into_iter()
-            .collect();
+        let ranges = match_ranges(&label, query);
         // A 群's member count never truncates; a 话题's 群 and a person's
         // 岗位 give way before the title.
         let (meta, count) = match (&self.scope, &e.target) {
@@ -607,9 +687,9 @@ impl Switcher {
         let (time, status) = match &e.topic {
             Some(t) => (
                 Some(palette::time_text(t.last_activity_at)),
-                palette::topic_status(self.services.provider.as_ref(), me.as_deref(), t),
+                palette::topic_status(self.services.provider.as_ref(), me.as_deref(), t, active),
             ),
-            None => (None, None),
+            None => (e.artifact.map(|(_, at)| palette::time_text(at)), None),
         };
         spotlight_row(
             ElementId::NamedInteger("switcher-row".into(), ix as u64),
@@ -626,7 +706,10 @@ impl Switcher {
             )
             .when(untitled, |el| el.text_color(ink2)),
         )
-        .children(meta.map(|d| palette::meta(d, ink2)))
+        .children(meta.map(|d| {
+            let ranges = match_ranges(&d, query);
+            palette::marked_meta(&d, &ranges, ink2)
+        }))
         .children(count.map(|c| palette::count(c, ink2)))
         .child(div().flex_1())
         .child(palette::trailing(status, time, active, ink2))
@@ -695,6 +778,7 @@ impl Render for Switcher {
         let query = self.text(cx);
         let mut children: Vec<AnyElement> = Vec::new();
         let mut heights: Vec<(Pixels, bool)> = Vec::new();
+        let mut state_block = false;
         let mut active_child = 0;
         let mut ix = 0;
         let groups = self.groups.clone();
@@ -728,11 +812,13 @@ impl Render for Switcher {
                 ix += 1;
             }
         } else if self.searching {
+            state_block = true;
             for (el, h) in palette::loading_rows("switcher-loading", cx) {
                 children.push(el);
                 heights.push((h, true));
             }
         } else if let Some(e) = failed {
+            state_block = true;
             let (title, why) = if e == SearchError::Offline {
                 (
                     search_copy::SEARCH_OFFLINE,
@@ -765,7 +851,12 @@ impl Render for Switcher {
             - spot::FIELD
             - palette::FOOTER
             - palette::LIST_PAD * 2.;
-        let list_h = palette::list_height(&heights, room);
+        // A loading or failed search keeps its block whole under the hits.
+        let list_h = if state_block {
+            palette::state_block_height(&heights, room)
+        } else {
+            palette::list_height(&heights, room)
+        };
         // The 群 a search is scoped to (⌘F): a token before the text; click
         // or ⌫ in an empty field removes it. Its tooltip names the whole 群.
         let scope_token = self.scope.as_ref().map(|(_, name)| {
@@ -1039,7 +1130,7 @@ pub mod palette {
             .overflow_hidden()
             .whitespace_nowrap()
             .text_ellipsis()
-            .when(active, |d| d.font_weight(gpui::FontWeight::MEDIUM))
+            .when(active, |d| d.font_weight(crate::theme::MEDIUM_WEIGHT))
             .tooltip(move |window, cx| {
                 gpui_component::tooltip::Tooltip::new(tip.clone()).build(window, cx)
             })
@@ -1049,6 +1140,16 @@ pub mod palette {
     /// The 14 muted meta after the title: it takes only the room the title
     /// leaves (no flex basis), so it gives way before the title.
     pub fn meta(text: impl Into<SharedString>, ink2: Hsla) -> gpui::Div {
+        meta_slot(ink2).child(text.into())
+    }
+
+    /// [`meta`] with the matched ranges in 600, as in the title; the ink
+    /// stays muted, so the title still leads.
+    pub fn marked_meta(text: &str, ranges: &[std::ops::Range<usize>], ink2: Hsla) -> gpui::Div {
+        meta_slot(ink2).child(weighted(text, ranges))
+    }
+
+    fn meta_slot(ink2: Hsla) -> gpui::Div {
         div()
             .flex_basis(gpui::Pixels::ZERO)
             .flex_grow(1000.)
@@ -1058,7 +1159,6 @@ pub mod palette {
             .whitespace_nowrap()
             .text_ellipsis()
             .text_color(ink2)
-            .child(text.into())
     }
 
     /// A count after the title and meta (`13 位成员`): never truncated.
@@ -1128,6 +1228,7 @@ pub mod palette {
         p: &dyn ChatProvider,
         me: Option<&str>,
         topic: &Topic,
+        active: bool,
     ) -> Option<AnyElement> {
         // The one state mapping of a 话题 (§2.12, `topic_state`) in the
         // sidebar's words: 等你审 / 等你回答, 在做 n/m, 正在合并, 失败, 已暂停,
@@ -1145,6 +1246,8 @@ pub mod palette {
         Some(
             StatusBadge::new(badge, text)
                 .max_w(STATUS_MAX)
+                // The highlighted row has the badge's own fill.
+                .on_fill(active)
                 .into_any_element(),
         )
     }
@@ -1176,6 +1279,14 @@ pub mod palette {
             top += h;
         }
         cut.unwrap_or_else(|| super::whole_rows_height(heights, max - PEEK) + PEEK)
+    }
+
+    /// The list height while it ends in a state block (the loading rows, a
+    /// failed search): the whole block shows, however much sits above it,
+    /// so it is never cut like a row that hints at more.
+    pub fn state_block_height(heights: &[(Pixels, bool)], room: Pixels) -> Pixels {
+        let total: Pixels = heights.iter().map(|(h, _)| *h).sum();
+        total.min(room.max(spot::ROW * 3.))
     }
 
     /// One key hint of the footer: its Kbd caps, then the word.
@@ -1288,12 +1399,16 @@ pub mod palette {
                 .mx(spot::INSET)
                 .flex()
                 .items_center()
-                .child(page_alert(
-                    id,
-                    AlertKind::Error,
-                    title,
-                    Some(description.into()),
-                    retry,
+                // The palette is a card surface: the alert takes its fill.
+                .child(crate::ui::native::page::on_card(
+                    page_alert(
+                        id,
+                        AlertKind::Error,
+                        title,
+                        Some(description.into()),
+                        retry,
+                        cx,
+                    ),
                     cx,
                 ))
                 .into_any_element(),
@@ -1308,6 +1423,63 @@ pub mod palette {
 mod tests {
     use super::*;
     use crate::fake::{FakeProvider, ME};
+
+    #[test]
+    fn a_state_block_under_other_rows_stays_whole() {
+        let mut heights = vec![(spot::ROW, true); 6];
+        heights.push((spot::ROW * 3., true));
+        let room = spot::ROW * 20.;
+        assert_eq!(
+            palette::state_block_height(&heights, room),
+            spot::ROW * 9.,
+            "all 6 rows and the 3-row block"
+        );
+        assert!(palette::list_height(&heights, room) < spot::ROW * 9.);
+        // A short window still caps it.
+        assert_eq!(
+            palette::state_block_height(&heights, spot::ROW * 4.),
+            spot::ROW * 4.
+        );
+    }
+
+    #[test]
+    fn a_search_finds_a_产出_by_name_topic_and_maker() {
+        use crate::fake::v2::{self, V2Samples};
+        let p = V2Samples::new();
+        let sections = entries(p.as_ref(), Some(v2::ME));
+        let found = |query: &str, scope: Option<&str>| -> Vec<Target> {
+            grouped(&sections, query, scope)
+                .into_iter()
+                .filter(|(label, _)| *label == search_copy::SECTION_ARTIFACTS)
+                .flat_map(|(_, e)| e)
+                .map(|e| e.target)
+                .collect()
+        };
+        let report = Target::Artifact(v2::GROWTH.into(), v2::ART_REPORT.into());
+        // No query: the switcher stays 最近, 群, 私聊.
+        assert!(found("", None).is_empty());
+        // By its name, in any case.
+        assert_eq!(found("数据月报", None), vec![report.clone()]);
+        // By who made it.
+        let ledger = p.member(v2::LEDGER).unwrap().name;
+        assert!(found(&ledger.to_uppercase(), None).contains(&report));
+        // By its 话题.
+        let topic = p.topic(v2::DEV, v2::T_RECONNECT).unwrap().title;
+        assert!(
+            found(&topic, None)
+                .contains(&Target::Artifact(v2::DEV.into(), v2::ART_RECONNECT.into()))
+        );
+        // Scoped to a 群: only what was made there.
+        assert_eq!(found("数据月报", Some(v2::GROWTH)), vec![report]);
+        assert!(found("数据月报", Some(v2::DEV)).is_empty());
+        let row = sections
+            .iter()
+            .filter(|(s, _)| *s == Section::Artifacts)
+            .flat_map(|(_, e)| e)
+            .find(|e| e.label == "10 月数据月报")
+            .unwrap();
+        assert!(row.detail.as_deref().unwrap().starts_with("v3 · "));
+    }
 
     fn search(p: &FakeProvider, q: &str) -> Vec<Target> {
         entries(p, Some(ME))

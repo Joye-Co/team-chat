@@ -1,6 +1,6 @@
 //! Screenshot scenes of the update (`desktop --screenshot <dir> --scenes update,...`).
 //! The download shows in Settings › 通用, so `update`, `update-dl` and
-//! `update-manual` open that pane; `update-ready` is the 重启安装 sheet over the main
+//! `update-manual` open that pane; `update-ready` is the 安装更新 sheet over the main
 //! window. The scene's window gets an [`Updater`] with a fixed phase and no client; the
 //! global is removed right after the window opens so later scenes do not see it.
 
@@ -83,7 +83,7 @@ fn set_phase(phase: Phase, cx: &mut App) {
 
 /// `desktop --fake` with `UPDATE_PREVIEW=available|downloading|ready|failed|manual|whats-new`:
 /// an updater without a server in that state, so the sidebar card, the notes and
-/// 已更新到 can be tried by hand. 更新 plays a short download, 重启安装 a short install.
+/// 已更新到 can be tried by hand. 更新 plays a short download, 安装更新 a short install.
 pub fn install_for_fake(cx: &mut App) {
     let Ok(want) = std::env::var("UPDATE_PREVIEW") else {
         return;
@@ -191,7 +191,7 @@ pub fn open_available(
     open_settings_with(Phase::Available(sample()), services, cx)
 }
 
-/// The 重启安装 sheet over the main window.
+/// The 安装更新 sheet over the main window.
 pub fn open_ready(
     services: Services,
     content: Size<Pixels>,

@@ -36,9 +36,17 @@ pub struct Fit {
     /// Bumped per new target, so a running resize stops when a newer one
     /// starts.
     generation: std::rc::Rc<Cell<u64>>,
+    /// A resize is on its way: what is cut now may still fit.
+    resizing: std::rc::Rc<Cell<bool>>,
 }
 
 impl Fit {
+    /// The window has the height it can get, at the 760 limit or at a shorter
+    /// screen's: a pane still cut now scrolls for good.
+    pub fn settled(&self) -> bool {
+        !self.resizing.get()
+    }
+
     /// The pane laid out at `wanted` (toolbar plus pane). Changes the window
     /// height after this frame when it differs from the window's.
     pub fn measured(
@@ -70,6 +78,8 @@ impl Fit {
         let generation = self.generation.clone();
         let run = generation.get() + 1;
         generation.set(run);
+        let resizing = self.resizing.clone();
+        resizing.set(true);
         cx.spawn(async move |cx| {
             let Ok(Some((ns_window, now))) = handle.update(cx, |_, window, _| {
                 ns_window(window).map(|w| (w, window.viewport_size().height))
@@ -96,17 +106,22 @@ impl Fit {
                     };
                     set_height(ns_window, cur, px(h), false, false);
                     if t >= 1. {
-                        return;
+                        break;
                     }
                     cx.background_executor().timer(FRAME).await;
                 }
+            } else {
+                set_height(ns_window, now, px(target), false, first);
+                // The window was transparent until it had its own height, so it
+                // never shows the opening size and then jumps (the flicker).
+                if first {
+                    reveal(ns_window);
+                }
             }
-            set_height(ns_window, now, px(target), false, first);
-            // The window was transparent until it had its own height, so it
-            // never shows the opening size and then jumps (the flicker).
-            if first {
-                reveal(ns_window);
-            }
+            // A screen too short for the height leaves the frame as it was,
+            // and nothing else would draw the page again.
+            resizing.set(false);
+            let _ = handle.update(cx, |_, window, _| window.refresh());
         })
         .detach();
     }
@@ -368,6 +383,41 @@ pub fn dim_window_buttons(window: &Window) {
         }
     }
 }
+
+/// The traffic lights drawn for a dark surface while `dark` (the image viewer's black bar
+/// in a light window), else as the window's own appearance says. Only the three buttons
+/// change: the window's appearance is what the System theme follows.
+#[cfg(target_os = "macos")]
+pub fn window_buttons_on_dark(window: &Window, dark: bool) {
+    use objc2::{class, msg_send, runtime::AnyObject};
+    let Some(ns_window) = ns_window(window) else {
+        return;
+    };
+    // SAFETY: a live NSWindow on the main thread; every object may be nil and a nil
+    // appearance is the documented "inherit".
+    unsafe {
+        let appearance: *mut AnyObject = if dark {
+            let name: *mut AnyObject = msg_send![
+                class!(NSString),
+                stringWithUTF8String: c"NSAppearanceNameDarkAqua".as_ptr()
+            ];
+            msg_send![class!(NSAppearance), appearanceNamed: name]
+        } else {
+            std::ptr::null_mut()
+        };
+        // NSWindowCloseButton = 0, NSWindowMiniaturizeButton = 1, NSWindowZoomButton = 2.
+        for kind in [0usize, 1, 2] {
+            let button: *mut AnyObject = msg_send![ns_window, standardWindowButton: kind];
+            if !button.is_null() {
+                let _: () = msg_send![button, setAppearance: appearance];
+            }
+        }
+    }
+}
+
+/// Other systems draw their window buttons themselves.
+#[cfg(not(target_os = "macos"))]
+pub fn window_buttons_on_dark(_window: &Window, _dark: bool) {}
 
 /// Windows: the window loses its minimize and maximize boxes (and with them maximize on
 /// a double click of the title bar and Snap's maximize).

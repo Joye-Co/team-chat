@@ -272,6 +272,13 @@ pub fn hover_button(id: &str, target: Rc<dyn Fn(&App) -> PartTarget>, cx: &App) 
         .into_any_element()
 }
 
+/// The pointer is over a part that can be asked about: Alt held there marks the part
+/// (⌥ click asks), so on Windows that Alt is not the menus' key (`nav::menus`).
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+pub fn pointer_on_part(cx: &App) -> bool {
+    hub_of(cx).is_some_and(|h| h.read(cx).hover.is_some())
+}
+
 /// The hover state of `id` for renderers that draw the button themselves.
 pub fn hover_state(id: &str, cx: &App) -> (bool, bool) {
     hub_of(cx).map_or((false, false), |h| {

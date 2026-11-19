@@ -53,7 +53,6 @@ pub mod settings;
 pub mod timeline;
 pub mod update;
 // v2 areas (1.1.0): one file per feature track, registered once here.
-pub mod appearance;
 pub mod artifact_page;
 pub mod cards_v2;
 // --- inc-cards21 ---
@@ -280,11 +279,6 @@ pub const SECTIONS: &[Section] = &[
     Section {
         name: "artifact_page",
         entries: artifact_page::ENTRIES,
-        developer: false,
-    },
-    Section {
-        name: "appearance",
-        entries: appearance::ENTRIES,
         developer: false,
     },
     Section {

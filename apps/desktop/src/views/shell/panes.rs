@@ -93,6 +93,7 @@ impl Panes {
         pane: &RightPane,
         width: Pixels,
         floats: bool,
+        active: bool,
         cx: &App,
     ) -> Option<AnyElement> {
         let view = self.view(pane)?;
@@ -119,7 +120,7 @@ impl Panes {
                 .size_full()
                 .flex()
                 .flex_col()
-                .child(pane_header(title, self.nav.clone(), cx))
+                .child(pane_header(title, self.nav.clone(), active, cx))
                 .child(div().flex_1().min_h(gpui::px(0.)).child(view))
         } else {
             div().size_full().child(view)
@@ -176,7 +177,12 @@ fn pane_title(pane: &RightPane) -> &'static str {
 
 /// The header band of a right pane (§2.2): h52, px 16, the pane name 16
 /// medium, a 32 ghost close button at the far right.
-fn pane_header(title: &'static str, nav: Entity<crate::app::Navigation>, cx: &App) -> AnyElement {
+fn pane_header(
+    title: &'static str,
+    nav: Entity<crate::app::Navigation>,
+    active: bool,
+    cx: &App,
+) -> AnyElement {
     use crate::ui::native::{IconSize, NativeType as _, icon_button_sym};
     let k = super::chrome::colors(cx);
     div()
@@ -192,7 +198,8 @@ fn pane_header(title: &'static str, nav: Entity<crate::app::Navigation>, cx: &Ap
                 .flex_1()
                 .min_w(gpui::px(0.))
                 .n_title3()
-                .text_color(k.label)
+                // As the toolbar title: secondary in a window that is not key.
+                .text_color(if active { k.label } else { k.secondary })
                 .overflow_hidden()
                 .whitespace_nowrap()
                 .text_ellipsis()

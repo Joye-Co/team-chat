@@ -234,7 +234,7 @@ impl ChatProvider for Shaped {
     fn rename_group(&self, group_id: &str, name: String) -> AdminReply<()> {
         self.inner.rename_group(group_id, name)
     }
-    fn leave_group(&self, group_id: &str) {
+    fn leave_group(&self, group_id: &str) -> crate::data::AdminReply<()> {
         self.inner.leave_group(group_id)
     }
     fn group_muted(&self, group_id: &str) -> bool {

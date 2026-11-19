@@ -49,7 +49,8 @@ pub fn form_field_width(width: SheetWidth) -> gpui::Pixels {
 }
 
 /// A sheet form (2.8 GroupBox): one group, radius 10, a 1 px border, the
-/// group fill; its rows are separated by 1 px lines inset to the label x.
+/// group fill; its rows are separated by 1 px lines inset 16 on both sides,
+/// like every grouped form.
 pub fn sheet_form() -> SheetForm {
     SheetForm::default()
 }
@@ -57,12 +58,23 @@ pub fn sheet_form() -> SheetForm {
 /// The group of a [`sheet_form`]; children are its rows.
 #[derive(IntoElement, Default)]
 pub struct SheetForm {
-    rows: Vec<gpui::AnyElement>,
+    /// Each row with the inset of the line under it.
+    rows: Vec<(gpui::AnyElement, gpui::Pixels)>,
+}
+
+impl SheetForm {
+    /// A row whose line starts at `inset`: a row with media insets it to the
+    /// title (2.8).
+    pub fn child_with_inset(mut self, row: impl IntoElement, inset: gpui::Pixels) -> Self {
+        self.rows.push((row.into_any_element(), inset));
+        self
+    }
 }
 
 impl ParentElement for SheetForm {
     fn extend(&mut self, elements: impl IntoIterator<Item = gpui::AnyElement>) {
-        self.rows.extend(elements);
+        self.rows
+            .extend(elements.into_iter().map(|e| (e, metrics::FORM_ROW_INSET)));
     }
 }
 
@@ -76,12 +88,13 @@ impl gpui::RenderOnce for SheetForm {
             .bg(k.group)
             .flex()
             .flex_col();
-        for (ix, row) in self.rows.into_iter().enumerate() {
+        for (ix, (row, inset)) in self.rows.into_iter().enumerate() {
             group = group.child(row);
             if ix + 1 < n {
                 group = group.child(
                     div()
-                        .ml(metrics::FORM_ROW_INSET)
+                        .ml(inset)
+                        .mr(metrics::FORM_ROW_INSET)
                         .h(crate::ui::native::tokens::layout::HAIRLINE)
                         .bg(k.separator),
                 );
@@ -109,6 +122,53 @@ pub fn sheet_form_row_top(
     cx: &App,
 ) -> gpui::Div {
     form_row(label.into(), control.into_any_element(), true, cx)
+}
+
+/// A row whose control wraps to several lines (a set of buttons): the label
+/// stays in its column on the center line of the first line, `line` high.
+pub fn sheet_form_row_wrap(
+    label: impl Into<gpui::SharedString>,
+    line: gpui::Pixels,
+    control: impl IntoElement,
+    cx: &App,
+) -> gpui::Div {
+    let k = native_colors(cx);
+    // The pair sits on the row's center line as one block, top-aligned
+    // inside, so one line of buttons looks like any other row.
+    let pair = div()
+        .w_full()
+        .flex()
+        .items_start()
+        .gap(FORM_GAP)
+        .child(
+            div()
+                .flex_none()
+                .w(FORM_LABEL)
+                .h(line)
+                .flex()
+                .items_center()
+                .n_body()
+                .text_color(k.label)
+                .overflow_hidden()
+                .whitespace_nowrap()
+                .text_ellipsis()
+                .child(label.into()),
+        )
+        .child(
+            div()
+                .flex_1()
+                .min_w(gpui::Pixels::ZERO)
+                .flex()
+                .child(control.into_any_element()),
+        );
+    div()
+        .w_full()
+        .min_h(metrics::FORM_ROW)
+        .px(metrics::FORM_ROW_INSET)
+        .py(crate::ui::native::tokens::space::S6)
+        .flex()
+        .items_center()
+        .child(pair)
 }
 
 fn form_row(
@@ -257,6 +317,8 @@ pub struct MemberPicker {
     empty: gpui::SharedString,
     /// The list's focus (a Tab stop with the 3 px ring), when it takes keys.
     list_focus: Option<gpui::FocusHandle>,
+    /// A row holds the keyboard's ring, so the list box draws none.
+    row_ring: bool,
 }
 
 impl MemberPicker {
@@ -274,7 +336,14 @@ impl MemberPicker {
             rows,
             empty: empty.into(),
             list_focus: None,
+            row_ring: false,
         }
+    }
+
+    /// A row holds the keyboard's ring: the list box leaves its own off.
+    pub fn row_ring(mut self, on: bool) -> Self {
+        self.row_ring = on;
+        self
     }
 
     /// Makes the list a Tab stop that takes the picker's keys
@@ -298,20 +367,21 @@ impl MemberPicker {
         Self::row_highlighted(id, m, mode, chosen, false, cx)
     }
 
-    /// [`MemberPicker::row`] with the keyboard highlight of a multi-select
-    /// list: the muted row fill (the checkbox shows what is chosen).
+    /// [`MemberPicker::row`] with the keyboard's mark on a row of a
+    /// multi-select list: the focus ring, a line and never a fill, so the row
+    /// Space will toggle does not look hovered or selected.
     pub fn row_highlighted(
         id: gpui::SharedString,
         m: &Member,
         mode: PickMode,
         chosen: bool,
-        highlighted: bool,
+        ring: bool,
         cx: &App,
     ) -> gpui::Stateful<gpui::Div> {
         use crate::ui::native::tokens::{icon, radius, space};
         let k = native_colors(cx);
-        let filled = highlighted || (chosen && mode == PickMode::One);
-        let surface = if filled { k.selection } else { k.content };
+        let filled = chosen && mode == PickMode::One;
+        let surface = if filled { k.selection } else { k.sheet };
         // Beside the avatar a leading emoji is left out (X-01).
         let name: gpui::SharedString = ui::avatar::name_beside_avatar(&m.name).to_string().into();
         let tip = name.clone();
@@ -330,6 +400,9 @@ impl MemberPicker {
                 } else {
                     d.hover(|s| s.bg(k.fill.opacity(0.5)))
                 }
+            })
+            .when(ring, |d| {
+                d.shadow(crate::ui::native::focus::row_focus_ring(cx))
             })
             .when(mode == PickMode::Many, |d| {
                 d.child(NativeCheckbox::new(
@@ -401,7 +474,8 @@ impl gpui::RenderOnce for MemberPicker {
         let focused = self
             .list_focus
             .as_ref()
-            .is_some_and(|f| f.is_focused(window));
+            .is_some_and(|f| f.is_focused(window))
+            && !self.row_ring;
         div()
             .w_full()
             .flex()
@@ -424,13 +498,12 @@ impl gpui::RenderOnce for MemberPicker {
                     .w_full()
                     .h(list_h)
                     .rounded(metrics::GROUP_RADIUS)
-                    .bg(k.content)
+                    .bg(k.sheet)
                     .border_1()
                     .border_color(k.separator)
                     .when_some(self.list_focus.as_ref(), |d, f| {
                         d.key_context(PICK_LIST_CONTEXT).track_focus(f)
                     })
-                    .when(focused, |d| d.shadow(k.focus_ring()))
                     .overflow_hidden()
                     .child(
                         div()
@@ -466,7 +539,29 @@ impl gpui::RenderOnce for MemberPicker {
                                 gpui_component::scroll::Scrollbar::vertical(&self.scroll)
                                     .mode(gpui_component::scroll::ScrollbarMode::Always),
                             ),
-                    ),
+                    )
+                    // The ring is drawn inside the frame, so a focused list
+                    // keeps the sheet's one content column (2.9). The frame's
+                    // 1 pt border sits outside this layer's containing box.
+                    .when(focused, |d| {
+                        let edge = -metrics::HAIRLINE;
+                        let mut ring = div()
+                            .absolute()
+                            .top(edge)
+                            .right(edge)
+                            .bottom(edge)
+                            .left(edge)
+                            .rounded(metrics::GROUP_RADIUS)
+                            .border_color(k.focus);
+                        let width = Some(metrics::FOCUS_RING.into());
+                        ring.style().border_widths = gpui::EdgesRefinement {
+                            top: width,
+                            right: width,
+                            bottom: width,
+                            left: width,
+                        };
+                        d.child(ring)
+                    }),
             )
     }
 }
@@ -599,6 +694,8 @@ pub struct NewGroupForm {
     list_focus: gpui::FocusHandle,
     /// The keyboard highlight, an index into the shown rows.
     active: Option<usize>,
+    /// Draws the keyboard's ring without a key press (a screenshot scene).
+    ring_shown: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -666,6 +763,7 @@ impl NewGroupForm {
             refusal: None,
             list_focus: cx.focus_handle().tab_stop(true),
             active: None,
+            ring_shown: false,
             _subscriptions: subscriptions,
         }
     }
@@ -798,6 +896,8 @@ impl Render for NewGroupForm {
         let new_group = self.mode == FormMode::NewGroup;
         // The highlight shows only while the list has the keyboard.
         let highlight = self.active.filter(|_| self.list_focus.is_focused(window));
+        // The ring follows the keys: a click on a row marks nothing (focus.rs).
+        let row_ring = highlight.is_some() && (self.ring_shown || window.last_input_was_keyboard());
         let typed = self.name.read(cx).value().to_string();
         // A field problem (a name that is too long) turns the default button
         // off and marks the field; an empty name only turns it off.
@@ -824,7 +924,7 @@ impl Render for NewGroupForm {
                     m,
                     PickMode::Many,
                     checked,
-                    highlight == Some(ix),
+                    row_ring && highlight == Some(ix),
                     cx,
                 )
                 .on_click(cx.listener(move |this, _, _, cx| {
@@ -883,7 +983,8 @@ impl Render for NewGroupForm {
                 nav::NO_MEMBERS_MATCH
             },
         )
-        .list_focus(&self.list_focus);
+        .list_focus(&self.list_focus)
+        .row_ring(row_ring);
         // The footer's left slot (2.9): the count, or the error.
         let status = if error {
             crate::ui::native::sheet::sheet_status_error(line, cx).into_any_element()
@@ -983,6 +1084,7 @@ pub fn open_new_group_keyboard(services: Services, window: &mut Window, cx: &mut
     let form = cx.new(|cx| {
         let mut f = NewGroupForm::new(services, FormMode::NewGroup, window, cx);
         f.active = Some(1);
+        f.ring_shown = true;
         f.toggle_active(cx);
         f
     });
@@ -1022,7 +1124,8 @@ pub struct DmPicker {
     filter: Entity<InputState>,
     focus: gpui::FocusHandle,
     members: Vec<Member>,
-    active: usize,
+    /// The chosen row: none until a click, an arrow key or a search.
+    active: Option<usize>,
     scroll: gpui::ScrollHandle,
     _subscriptions: Vec<Subscription>,
 }
@@ -1043,7 +1146,9 @@ impl DmPicker {
             window,
             |this, _, event: &InputEvent, window, cx| match event {
                 InputEvent::Change => {
-                    this.active = 0;
+                    // A search chooses its top match, so type-then-Return opens it.
+                    let searching = !this.filter.read(cx).value().trim().is_empty();
+                    this.active = searching.then_some(0);
                     cx.notify();
                 }
                 InputEvent::PressEnter { .. } => this.confirm(window, cx),
@@ -1054,7 +1159,7 @@ impl DmPicker {
             filter,
             focus: cx.focus_handle().tab_stop(true),
             members,
-            active: 0,
+            active: None,
             scroll: gpui::ScrollHandle::new(),
             _subscriptions: subscriptions,
         }
@@ -1072,14 +1177,16 @@ impl DmPicker {
     /// ↑/↓ stop at the ends, as in every member picker (§2.9 one
     /// component, review 3 K-08).
     fn select(&mut self, delta: isize, cx: &mut Context<Self>) {
-        if let Some(ix) = pick_step(Some(self.active), delta, self.shown(cx).len()) {
-            self.active = ix;
+        if let Some(ix) = pick_step(self.active, delta, self.shown(cx).len()) {
+            self.active = Some(ix);
             cx.notify();
         }
     }
 
     fn confirm(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let member = self.shown(cx).get(self.active).map(|m| m.id.clone());
+        let member = self
+            .active
+            .and_then(|ix| self.shown(cx).get(ix).map(|m| m.id.clone()));
         if let Some(id) = member {
             window.close_dialog(cx);
             super::open_dm_with(id, cx);
@@ -1090,17 +1197,15 @@ impl DmPicker {
 impl Render for DmPicker {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let shown = self.shown(cx);
-        if self.active >= shown.len() {
-            self.active = 0;
-        }
-        if !shown.is_empty() {
-            self.scroll.scroll_to_item(self.active);
+        self.active = self.active.filter(|ix| *ix < shown.len());
+        if let Some(ix) = self.active {
+            self.scroll.scroll_to_item(ix);
         }
         let rows: Vec<_> = shown
             .iter()
             .enumerate()
             .map(|(ix, m)| {
-                let active = ix == self.active;
+                let active = self.active == Some(ix);
                 MemberPicker::row(
                     gpui::SharedString::from(format!("dm-row-{}", m.id)),
                     m,
@@ -1109,7 +1214,7 @@ impl Render for DmPicker {
                     cx,
                 )
                 .on_click(cx.listener(move |this, e: &gpui::ClickEvent, window, cx| {
-                    this.active = ix;
+                    this.active = Some(ix);
                     if e.click_count() > 1 {
                         this.confirm(window, cx)
                     } else {
@@ -1119,10 +1224,9 @@ impl Render for DmPicker {
                 .into_any_element()
             })
             .collect();
-        let empty = rows.is_empty();
         let [cancel, open] = sheet_buttons("start-dm", common::CANCEL, o::START_DM_OPEN, cx);
         let cancel = cancel.on_click(|_, window, cx| window.close_dialog(cx));
-        let open = disabled_push(open, empty, cx)
+        let open = disabled_push(open, self.active.is_none(), cx)
             .on_click(cx.listener(|this, _, window, cx| this.confirm(window, cx)));
         // The picker's keys (one set for every member picker): ↑↓ move the
         // chosen row from the search field or the list, ↩ opens it.
@@ -1240,8 +1344,8 @@ pub fn confirm_leave(
 ) {
     destructive_alert(
         "leave-group",
-        fill(nav::LEAVE_CONFIRM_TITLE, &[("name", &short_name(&name))]),
-        nav::LEAVE_CONFIRM_BODY.to_string(),
+        nav::LEAVE_CONFIRM_TITLE.to_string(),
+        fill(nav::LEAVE_CONFIRM_BODY, &[("name", &name)]),
         nav::LEAVE_OK,
         move |_, cx| leave(&services, &group_id, cx),
         window,
@@ -1249,32 +1353,19 @@ pub fn confirm_leave(
     );
 }
 
-/// Display units an alert title holds for a name: CJK and other wide
-/// characters take 2, the rest 1 (2.10: the title fits one line).
-const TITLE_NAME_UNITS: usize = 20;
-
-/// `name` cut at the end with "…" to fit an alert title on one line.
-pub fn short_name(name: &str) -> String {
-    let units = |c: char| if c.is_ascii() { 1 } else { 2 };
-    if name.chars().map(units).sum::<usize>() <= TITLE_NAME_UNITS {
-        return name.to_string();
-    }
-    let mut used = 0;
-    let mut out = String::new();
-    for c in name.chars() {
-        if used + units(c) > TITLE_NAME_UNITS - 1 {
-            break;
-        }
-        used += units(c);
-        out.push(c);
-    }
-    out.push('…');
-    out
-}
-
+/// Leaves the 群 and, once the server took it, moves away from it. A refusal (offline, not
+/// allowed) shows an alert and the window stays where it was.
 fn leave(services: &Services, group_id: &str, cx: &mut App) {
-    move_away_from(services, group_id, cx);
-    services.provider.leave_group(group_id);
+    let reply = services.provider.leave_group(group_id);
+    let (services, group_id) = (services.clone(), group_id.to_string());
+    cx.spawn(async move |cx: &mut gpui::AsyncApp| {
+        let result = reply.await.unwrap_or(Err(crate::data::AdminError::Other));
+        cx.update(|cx| match result {
+            Ok(()) => move_away_from(&services, &group_id, cx),
+            Err(e) => super::hide_delete::refused(nav::LEAVE_REFUSED, e, cx),
+        });
+    })
+    .detach();
 }
 
 /// When the main window shows `group_id` (its page, its 群聊 or one of its 话题), opens
@@ -1357,14 +1448,6 @@ mod tests {
         assert_eq!(pick_step(Some(0), -1, 3), Some(0));
         // A filter that shrinks the list keeps the highlight on a row.
         assert_eq!(pick_step(Some(7), 1, 3), Some(2));
-    }
-
-    #[test]
-    fn alert_titles_cut_long_names() {
-        assert_eq!(short_name("设计"), "设计");
-        let cut = short_name(&"产品设计与前端体验改进讨论组".repeat(2));
-        assert!(cut.ends_with('…'));
-        assert!(cut.chars().count() <= 11);
     }
 
     #[test]

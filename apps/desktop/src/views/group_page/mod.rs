@@ -24,7 +24,6 @@ use gpui::{
 };
 use gpui_component::menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenuItem};
 
-use crate::ui::native::tokens::space as tsp;
 use crate::{
     app::{Place, RightPane, Services},
     copy::{fill, group_page as c, nav as nav_copy},
@@ -34,7 +33,7 @@ use crate::{
             PushSize, PushStyle, ToolbarGroup, ToolbarItemKind, ToolbarRow, emphasized,
             native_colors,
             page::{self, PageLoad, Status},
-            push_button, toolbar_item,
+            push_button, toolbar_item, toolbar_labeled_item,
         },
         sf_symbols::{Sf, Sym},
     },
@@ -326,10 +325,9 @@ impl GroupPage {
                 PushSize::Regular,
                 cx,
             )
-            .icon(crate::ui::button_glyph(
+            .icon(crate::ui::icons::labeled_button_sym(
                 Sym::Plus,
-                crate::theme::icon::HEADER,
-                crate::theme::size::ICON_BUTTON,
+                crate::ui::SymSize::INLINE,
             )),
             !ready,
             cx,
@@ -342,11 +340,15 @@ impl GroupPage {
                 ToolbarRow::new(snap.name.clone())
                     .subtitle(subtitle)
                     .leading_inset(rows::toolbar_leading(&self.services, cx))
-                    .group(ToolbarGroup::new([toolbar_item(
+                    // The bar ends in the filled 新话题: on the list's gutter.
+                    .trailing_inset(crate::ui::native::tokens::layout::CONTENT_GUTTER)
+                    // D20: a toolbar item carries its word.
+                    .group(ToolbarGroup::new([toolbar_labeled_item(
                         "group-chat",
-                        Sf::ChevronLeft,
+                        Sf::Chat,
+                        c::GROUP_PAGE_CHAT,
                         c::GROUP_PAGE_BACK_TO_CHAT,
-                        ToolbarItemKind::Plain,
+                        false,
                         active,
                         window,
                         cx,
@@ -355,11 +357,12 @@ impl GroupPage {
                         let g = chat_group.clone();
                         chat_nav.update(cx, |n, cx| n.open_group_chat(g, cx))
                     })]))
-                    .group(ToolbarGroup::new([toolbar_item(
+                    .group(ToolbarGroup::new([toolbar_labeled_item(
                         "group-outputs",
                         Sf::Outputs,
                         c::GROUP_PAGE_OUTPUTS,
-                        ToolbarItemKind::Plain,
+                        c::GROUP_PAGE_OUTPUTS,
+                        false,
                         active,
                         window,
                         cx,
@@ -762,7 +765,9 @@ impl Render for GroupPage {
                         .map(|row| self.topic_row(row, cx))
                         .collect();
                     let slug = st.slug();
-                    let footer = if total > ACTIVE_ROWS {
+                    // The count is in the section header; a footer only when the
+                    // list is cut (§2.6).
+                    let footer = (total > ACTIVE_ROWS).then(|| {
                         let text = if self.show_all {
                             c::GROUP_PAGE_SHOW_LESS.to_string()
                         } else {
@@ -778,23 +783,17 @@ impl Render for GroupPage {
                             this.show_all = !this.show_all;
                             cx.notify();
                         }))
-                    } else {
-                        page::list_footer(
-                            SharedString::from(format!("group-count-{slug}")),
-                            fill(c::GROUP_PAGE_COUNT, &[("n", &total.to_string())]),
-                            None,
-                            cx,
-                        )
-                    };
+                    });
                     let body = if total > 0 {
-                        page::frame(cx).children(topic_rows).child(footer)
+                        page::list_frame(cx).children(topic_rows).children(footer)
                     } else {
-                        page::frame(cx).child(div().px(tsp::S16).child(page::compact_empty(
+                        // On the page's content edge, where the rows' media lands.
+                        page::frame(cx).child(page::compact_empty(
                             Sym::Topic,
                             c::GROUP_PAGE_ACTIVE_EMPTY,
                             None,
                             cx,
-                        )))
+                        ))
                     };
                     content = content.child(section(
                         page::section_header(st.title(), Some(total), None, None, cx),
@@ -802,23 +801,17 @@ impl Render for GroupPage {
                         false,
                     ));
                 }
-                // 最近完成 always shows (an Empty when nothing is done); its
-                // frame hugs its rows and footer.
+                // 最近完成 always shows; with nothing done it has the same
+                // compact line as an empty 在做, and its frame hugs its rows.
                 let done_body = if done.is_empty() {
-                    page::frame(cx).child(page::page_empty(
-                        Sym::Done,
+                    page::frame(cx).child(page::compact_empty(
+                        Sym::Topic,
                         c::GROUP_PAGE_DONE_EMPTY,
-                        c::GROUP_PAGE_DONE_EMPTY_BODY,
-                        Vec::new(),
-                        cx,
-                    ))
-                } else {
-                    page::frame(cx).children(done).child(page::list_footer(
-                        "group-count-done",
-                        fill(c::GROUP_PAGE_COUNT, &[("n", &done_total.to_string())]),
                         None,
                         cx,
                     ))
+                } else {
+                    page::list_frame(cx).children(done)
                 };
                 content = content.child(section(
                     page::section_header(
@@ -898,7 +891,7 @@ impl Render for GroupPage {
 /// The 群 commands of the toolbar's `ellipsis` pull-down: the same items as
 /// the 群's context menu in the sidebar (§7.3: every context-menu item also
 /// exists in the main UI). 静音 or 取消静音 and the 提醒 submenu; for a 群
-/// also 重命名群…, 添加成员… and, apart, 离开群… (it asks first).
+/// also 重命名…, 添加成员… and, apart, 离开群… (it asks first).
 fn group_menu(
     menu: gpui_component::menu::PopupMenu,
     services: &Services,
@@ -955,7 +948,8 @@ fn group_menu(
             }),
         )
         .separator();
-    let menu = nav_views::hide_delete::hide_group_item(menu, services, &hide);
+    // 隐藏 changes nothing for others: the red items sit apart from it.
+    let menu = nav_views::hide_delete::hide_group_item(menu, services, &hide).separator();
     // A destructive item reads in the destructive color (§2.11, T4-14).
     let menu = menu.item(
         PopupMenuItem::element(|_, cx: &mut App| {
