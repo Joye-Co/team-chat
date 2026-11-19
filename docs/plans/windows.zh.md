@@ -324,9 +324,12 @@ CI（`windows-2025`，没有显卡和声卡）上确认过的：H.264 的 MP4 �
 - 已完成：字体。界面 Segoe UI Variable → Segoe UI，中文 Microsoft YaHei UI，等宽 Cascadia Mono → Consolas，
   字号不变（`theme.rs`）。只编译过。
 - 待做：线条没有对齐到整像素，100 % 缩放下 1 px 的线可能发虚，要在真机或 Windows CI 截图上确认。
-- 待做：`views/settings` 里两处直接用 `theme::MONO_FONT_FAMILY`（Windows 上是 Consolas），改成
-  `theme::mono_font_family()`；内嵌网页的 CSS 字体栈（`ui/web_embed.rs`、`diagrams`、`views/artifacts`、
-  `views/media`）加上 Windows 字体。
+- 已完成：`views/settings` 和 `views/admin` 里三处直接用 `theme::MONO_FONT_FAMILY`（Windows 上是 Consolas）的
+  代码框改成了 `theme::mono_font_family()`，这个常量现在是 `theme.rs` 私有的。只编译过。
+- 待做：内嵌网页（`ui/web_embed.rs`、`diagrams`、`views/artifacts`、`views/media`）的 CSS 把苹果的字体名写在
+  前面，Windows 上由 `crates/artifact-view/src/win.rs` 的 `PAGE_LOOK_CSS` 把这些名字指到 Segoe UI Variable
+  Text → Segoe UI 和 Cascadia Mono → Consolas。`local()` 在 WebView2 里能不能找到前两个还没确认，要在
+  Windows 电脑上截图看（`scripts/windows-screenshots.sh`）。
 - 截图自测移植到 Windows，浅色深色都截；每个页面过 COMPLETENESS.md §4 清单。
 
 ### 机器
