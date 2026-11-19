@@ -1,12 +1,8 @@
 import { SELF, env, runInDurableObject } from "cloudflare:test";
-import { afterAll, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { ArtifactResponse, ArtifactVersionResponse, FileMeta, UpdateInfo } from "@chat/protocol";
 import { downloadPlatform } from "../src/files/ops";
-import { BASE, Client, api, clientMsgId, createGroup, createMember, protocolViolations, type TestMember } from "./helpers";
-
-afterAll(() => {
-  expect(protocolViolations).toEqual([]);
-});
+import { BASE, Client, api, clientMsgId, createGroup, createMember, type TestMember } from "./helpers";
 
 const enc = new TextEncoder();
 

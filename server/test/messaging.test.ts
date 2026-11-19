@@ -1,11 +1,5 @@
-import { afterAll, describe, expect, it } from "vitest";
-import { Client, api, clientMsgId, createGroup, createMember, protocolViolations, waitUntil } from "./helpers";
-
-afterAll(async () => {
-  // Let close handlers (presence fan-out) finish before the runtime shuts down.
-  await new Promise((r) => setTimeout(r, 300));
-  expect(protocolViolations).toEqual([]);
-});
+import { describe, expect, it } from "vitest";
+import { Client, api, clientMsgId, createGroup, createMember, waitUntil } from "./helpers";
 
 async function setup(n = 3) {
   const members = await Promise.all(Array.from({ length: n }, (_, i) => createMember({ name: `M${i}` })));

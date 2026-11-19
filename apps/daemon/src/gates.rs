@@ -828,10 +828,15 @@ impl Gates {
             let what: Vec<String> = self.kinds.iter().map(|k| action(&k.name)).collect();
             format!(
                 "Team rule: commands for {} need a person's approval. When you run one, the \
-machine asks the approver and the command waits for the answer; do not ask for it in the topic \
-yourself. If a person declines, the command does not run and you are told so: do not run it \
-again or work around it, do the rest another way or say in your answer what is left for a person.",
-                what.join(", ")
+machine asks the approver itself: do not ask for it in the topic. The command ends in one of \
+three ways, and you are told which. Approved: it runs. Declined: it does not run; never run it \
+again or work around it, do the rest another way or say in your answer what is left for a \
+person. Still waiting (no answer after about {} seconds): it did not run yet; go on with other \
+work and run the very same command again later, it then runs without a new question once it is \
+approved. Do not end the run as done while it still waits: say so with `chat-run report --state \
+waiting --text <one line>`.",
+                what.join(", "),
+                SHIM_WAIT.as_secs()
             )
         })
     }
@@ -1429,6 +1434,19 @@ mod tests {
         assert_eq!(gates.matches("ship-it now"), Some("deployProd"));
         assert!(Gates::new(&[]).is_empty());
         assert!(Gates::new(&[]).note().is_none());
+        // The note names the three ways a gated command ends: "still waiting" is the one where
+        // running the same command again is right, unlike after a decline.
+        let note = gates.note().unwrap();
+        for part in [
+            "Approved: it runs.",
+            "Declined: it does not run; never run it again or work around it",
+            "Still waiting (no answer after about 90 seconds): it did not run yet",
+            "run the very same command again later",
+            "chat-run report --state waiting",
+        ] {
+            assert!(note.contains(part), "{part}: {note}");
+        }
+        assert!(!note.contains("waits for the answer"), "{note}");
     }
 
     #[test]

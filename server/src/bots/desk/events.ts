@@ -197,6 +197,8 @@ export abstract class DeskEvents extends DeskRuns {
           break;
         case "input.accepted": {
           const taken = this.sql.exec("UPDATE inputs SET accepted = 1 WHERE id = ? AND run_id = ?", String(ev.inputId), r.id).rowsWritten;
+          // A live event the run took is the run's to answer (desk/interact.ts settles the rest).
+          this.sql.exec("DELETE FROM interact_sent WHERE input_id = ? AND run_id = ?", String(ev.inputId), r.id);
           // 接 4.2: a person's message reached the run after its report: that report no longer
           // says how the work ends (the run reports again, or ends normally as done).
           if (taken > 0 && r.report) {

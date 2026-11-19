@@ -557,6 +557,24 @@ export abstract class DeskCore extends DurableObject<BotsEnv> {
           `,
         },
         {
+          // Interaction loop: a live event the run was given and has not taken yet
+          // (`input.accepted` removes it; a run that ends first resolves it as failed), and the
+          // event a waiting row stands for, so it can go to another run. Old waiting rows: NULL
+          // (read from their frame).
+          name: "desk-interact-sent",
+          up: `
+            ALTER TABLE interact_pending ADD COLUMN x TEXT;
+            CREATE TABLE interact_sent (
+              input_id TEXT PRIMARY KEY,
+              run_id TEXT NOT NULL,
+              event_id TEXT NOT NULL,
+              ask INTEGER NOT NULL DEFAULT 0,
+              at INTEGER NOT NULL
+            );
+            CREATE INDEX interact_sent_run ON interact_sent(run_id);
+          `,
+        },
+        {
           name: "desk-nudge-sent",
           up: `ALTER TABLE runs ADD COLUMN nudge_sent INTEGER NOT NULL DEFAULT 0;`,
         },

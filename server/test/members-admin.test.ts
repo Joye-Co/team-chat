@@ -1,11 +1,6 @@
-import { afterAll, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { env } from "cloudflare:test";
-import { Client, api, clientMsgId, createGroup, createMember, protocolViolations, waitUntil } from "./helpers";
-
-afterAll(async () => {
-  await new Promise((r) => setTimeout(r, 300));
-  expect(protocolViolations).toEqual([]);
-});
+import { Client, api, clientMsgId, createGroup, createMember, waitUntil } from "./helpers";
 
 describe("PATCH /v1/members/:id", () => {
   it("let members change their own name and role only", async () => {

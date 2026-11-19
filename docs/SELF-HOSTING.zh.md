@@ -55,14 +55,10 @@ exec "$SHELL" -l      # 开一个新 shell，让 bun 进 PATH
 git clone https://github.com/Joye-Co/team-chat.git
 cd team-chat
 git checkout "$(git describe --tags --abbrev=0 origin/main)"   # 最新的发布标签 v<版本号>
-[ -x scripts/setup-server.sh ] || git checkout main             # v1.2.7 及更早的发布没有它
 bun install --frozen-lockfile
 ```
 
-`scripts/setup-server.sh` 从 v1.2.7 之后的下一个发布版开始才有。那个版本发布前，第二行让你留在 `main` 上；
-应用照样装最新的发布版。
-
-检查：`git describe --tags` 输出 `v<版本号>`（在 `main` 上是 `v<版本号>-<n>-g<提交>`）；`ls server/node_modules/.bin/wrangler` 能找到 wrangler。
+检查：`git describe --tags` 输出 `v<版本号>`；`ls server/node_modules/.bin/wrangler` 能找到 wrangler。
 部署后服务器在 `/v1/health` 报告的就是这个版本。
 
 ### 3. 准备 Cloudflare 账号
@@ -169,7 +165,6 @@ AI 成员在你自己的电脑上推代码、开 PR，用的是你在这台电�
 cd team-chat
 git fetch --tags origin
 git checkout "$(git describe --tags --abbrev=0 origin/main)"
-[ -x scripts/setup-server.sh ] || { git checkout main && git pull --ff-only; }
 bun install --frozen-lockfile
 scripts/setup-server.sh production
 ```
@@ -243,7 +238,8 @@ AI 成员。
    ```
 
    它装好系统包、Docker、Firecracker 和 jailer（对照 SHA-256 校验）、`runner` 用户（在 kvm 和 docker 组里，
-   开了 linger）、放镜像和虚拟机的 `/srv/runner`、IP 转发、NFS 服务、虚拟机的防火墙（`runner-vm-net.service`），
+   开了 linger）、给这个用户装的最新发布版 daemon（`scripts/runner/install-daemon.sh`，对照发布版的 SHA-256 校验，
+   放在 `~runner/.local/bin/team-chat-daemon`）、放镜像和虚拟机的 `/srv/runner`、IP 转发、NFS 服务、虚拟机的防火墙（`runner-vm-net.service`），
    以及 daemon 能用 sudo 运行的 root 助手 `/usr/local/sbin/runner-vm`。它把 root 的 SSH 公钥复制给 `runner`
    用户。可以重复运行。
 2. **虚拟机内核。** daemon 启动的是 `/srv/runner/kernels/vmlinux`：一个未压缩的内核，要有 virtio 块设备、
@@ -253,23 +249,32 @@ AI 成员。
 3. **基础镜像**，用 root：`bash scripts/runner/build-base-image.sh`。它把
    `scripts/runner/base-image/Dockerfile`（带 git、Node、Claude Code、Codex、gh 等的 Ubuntu）做成
    `/srv/runner/images/base-<日期>.ext4`，并让 `base.ext4` 指向它。
-4. **daemon**，用 runner（`ssh runner@<主机>`；第二部分剩下的步骤除非写了 root，都用 runner）。现在要在主机上
-   从源码编译：
+4. **daemon 和 runner 自己的代码**，用 runner（`ssh runner@<主机>`；第二部分剩下的步骤除非写了 root，都用
+   runner）。第 1 步已经把 daemon 装在 `~/.local/bin/team-chat-daemon`。取一份代码（后面几步要用里面的脚本），
+   再确认 daemon 能运行：
+
+   ```sh
+   git clone https://github.com/Joye-Co/team-chat.git ~/team-chat
+   cd ~/team-chat && git checkout v<版本号>      # 和服务器同一版本，或 main
+   ~/.local/bin/team-chat-daemon example-config | head -n 3   # 检查：能运行，打印出示例配置
+   ```
+
+   第 1 步装的是最新的发布版。要装别的版本，运行
+   `bash ~/team-chat/scripts/runner/install-daemon.sh --version <x.y.z>`：它下载那个发布版的 Linux daemon，
+   对照 SHA-256 校验，放到同一个位置。
+
+   只有发布版里没有 Linux daemon（1.3.0 之前的版本）或者主机不是 x86_64 时，第 1 步才会警告 daemon 没装上。
+   这时在主机上从源码编译：
 
    ```sh
    curl --proto '=https' -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal
    . "$HOME/.cargo/env"
-   git clone https://github.com/Joye-Co/team-chat.git ~/team-chat
-   cd ~/team-chat && git checkout v<版本号>      # 和服务器同一版本，或 main
+   cd ~/team-chat
    out="$(scripts/build-daemon.sh)"   # rustup 会装 rust-toolchain.toml 指定的工具链
    mkdir -p ~/.local/bin
    install -m 755 "$out" ~/.local/bin/team-chat-daemon.new
    mv -f ~/.local/bin/team-chat-daemon.new ~/.local/bin/team-chat-daemon
    ```
-
-   <!-- RELEASED DAEMON: when releases carry a Linux daemon, replace the commands above with the
-        download of that asset and its SHA-256 check, and describe its self-update here. -->
-   **发布版 daemon：** 等发布物里有了 Linux 的 daemon，这一步改成从发布页下载；在那之前用上面的命令。
 5. **启动检查**：`bash ~/team-chat/scripts/runner/boot-test.sh`。应该看到 `vm-init: ready`、每个工具一行版本号，
    以及几秒后的 `firecracker exited after`。内核缺东西的话，会在这里出现 kernel panic。
 6. **把主机登记成团队的电脑。** 在第一部分那台 Ubuntu 机器上：
@@ -365,7 +370,7 @@ runner 身份从主机的 `gh` 读出来。提交记在 AI 成员名下；PR 正
 - `systemctl --user status team-chat-daemon` 是 `active (running)`；日志在
   `~/.local/state/team-chat-daemon/daemon.log`。
 - 在第一部分那台 Ubuntu 机器上，`bun server/scripts/admin.ts machines --env production` 显示这台主机
-  `healthy`；应用的 设置 › 机器 里它在线。
+  `healthy`；应用的 设置 › 电脑 里它在线。
 - 让一个 AI 成员在这台主机上干活（在应用里能选 AI 成员电脑的地方选它，或者在 Ubuntu 机器上运行
   `bun server/scripts/admin.ts runner --env production --bot <成员 id> --runtime claude --labels vm`），
   在话题里 @ 它。它跑完第一个任务后，用 runner 检查虚拟机的网络：
@@ -373,15 +378,19 @@ runner 身份从主机的 `gh` 读出来。提交记在 AI 成员名下；PR 正
 
 ### 更新
 
-- **daemon**：用 runner，`cd ~/team-chat && git fetch --tags && git checkout v<新版本号>`，再执行第 4 步从
-  `out="$(scripts/build-daemon.sh)"` 起的最后四行。不要停服务：daemon 发现程序文件换了，等手上没有任务时自己退出，systemd 启动新版本。
-  等发布物里有了 Linux 的 daemon，这里改成它的自动更新。
+- **daemon**：它自己更新。大约每小时问一次你的服务器有没有更新的发布版，下载 Linux daemon，核对大小和
+  SHA-256，等手上没有任务时把文件换上并退出，systemd 启动新版本（`daemon.toml` 里写 `self_update = false`
+  可以关掉）。只有把某个发布版的 Linux daemon 上传到了你的服务器，服务器才提供它；`release.sh --reupload`
+  只上传 DMG 和 Windows 安装包。否则手动更新，用 runner：
+  `cd ~/team-chat && git fetch --tags && git checkout v<新版本号> && bash scripts/runner/install-daemon.sh --version <新版本号>`。
+  不要停服务：daemon 发现程序文件换了，等手上没有任务时自己换到新版本。从源码编译的 daemon，再执行一遍第 4 步的
+  编译命令来更新。
 - **基础镜像**：用 root，在 `/root/team-chat` 里 `git checkout` 新版本，再运行一次
   `bash scripts/runner/build-base-image.sh`。已经开始的任务继续用旧镜像。
 - **主机**：`unattended-upgrades` 自动装安全更新；`git checkout` 新版本后可以再跑一遍 `host-setup.sh`。
   `scripts/runner/runner-vm` 或 `runner-vm.nft` 有改动时一定要再跑一遍（重装 root 辅助脚本、重载防火墙）；
   话题的工作目录和仓库缓存会保留。
-- **缓存**：用 runner，`~/.local/bin/team-chat-daemon caches` 列出每个仓库的缓存（key、仓库、大小、最近使用）；
+- **缓存**：用 runner，`~/.local/bin/team-chat-daemon caches` 列出每个仓库的缓存（key、大小、最近使用、仓库）；
   `team-chat-daemon caches clear <key>`（或 `all`）删掉一个，比如工具链或工具坏了的时候；正在被任务用的缓存
   会拒绝。`work_root` 剩余空间低于 `min_free_gb` 时，daemon 自己先删最久没用的缓存。
 - **从有 AI 成员家目录的版本升级**（`/srv/runner/homes`，1.2.7 及以前）：daemon 从 1.3.0 起不再保留家目录。
@@ -408,4 +417,5 @@ runner 身份从主机的 `gh` 读出来。提交记在 AI 成员名下；PR 正
   建 D1 和 R2、第一次部署、从 wrangler 的输出里读 `workers.dev` 地址、对新 Worker 的 `wrangler secret list`
   和 `secret put`。
 - 发布版应用登录自己部署的服务器、对它点「用这台电脑」、在 Ubuntu 上运行 `scripts/release.sh --reupload`。
-- 第二部分从一台全新的主机开始：虚拟机内核、在主机上编译 daemon、CLI 登录和上面的配置。
+- 第二部分从一台全新的主机开始：虚拟机内核、`host-setup.sh` 从发布版装的 daemon 以及它对着自建服务器的自动更新、
+  CLI 登录和上面的配置。

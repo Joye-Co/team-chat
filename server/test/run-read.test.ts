@@ -4,16 +4,10 @@
 // another group.
 import type { CardV2 } from "@chat/protocol";
 import { SELF, env } from "cloudflare:test";
-import { afterAll, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { membersText, topicStateText } from "../src/context/read";
-import { Daemon, downViolations, world } from "./daemon";
-import { BASE, Client, type TestMember, api, clientMsgId, createGroup, protocolViolations } from "./helpers";
-
-afterAll(async () => {
-  await new Promise((r) => setTimeout(r, 300));
-  expect(protocolViolations).toEqual([]);
-  expect(downViolations).toEqual([]);
-});
+import { Daemon, world } from "./daemon";
+import { BASE, Client, type TestMember, api, clientMsgId, createGroup } from "./helpers";
 
 async function sha(bytes: Uint8Array): Promise<string> {
   const d = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));

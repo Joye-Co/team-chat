@@ -254,11 +254,11 @@ shape. The text inside every control is Body 13 pt unless noted.
 | Open elsewhere | `arrow.up.forward` |
 | Alert in a row (quiet) | `exclamationmark.circle` in `secondary`; outlined warning `exclamationmark.triangle` |
 | Failed | `xmark.circle.fill` in `red` |
-| Not started | `circle.dashed`; stopped `nosign`; hourglass `hourglass` |
+| Not started | `circle.dashed`; stopped `nosign`; paused `pause.fill`; hourglass `hourglass` |
 | Offline | `wifi.slash` |
 | Muted / notify badge | `bell.slash` / `bell.badge` |
 | Branch / merge | `arrow.triangle.branch` / `arrow.triangle.merge` |
-| Document, file, code file, missing file | `doc.text`, `doc`, `doc.plaintext`, `doc.questionmark` |
+| Document, file, code file, PDF, missing file | `doc.text`, `doc`, `doc.plaintext`, `list.bullet.rectangle.portrait`, `doc.questionmark` |
 | Diff | `plus.forwardslash.minus` |
 | Image, images | `photo`, `photo.on.rectangle` |
 | Copy | `doc.on.doc` |
@@ -274,10 +274,14 @@ shape. The text inside every control is Body 13 pt unless noted.
 | New chat | `plus.bubble` |
 | Info / help | `info.circle` / `questionmark.circle` |
 | Return key | `return` |
+| Wrap long lines (the code viewer) | `arrow.turn.down.left` |
+| Send to a 话题 (a viewer's tool) | `paperplane` |
 | Reply | `arrowshape.turn.up.left`; indented reply `arrow.turn.down.right` |
 | Arrows | `arrow.up`, `arrow.down`, `arrow.right`; sort `arrow.up.arrow.down` |
 | Terminal | `terminal` |
 | Retry / refresh / undo | `arrow.counterclockwise` / `arrow.clockwise` / `arrow.uturn.backward` |
+| Skip back / forward 15 seconds | `gobackward.15` / `goforward.15` |
+| Random pick | `dice` |
 | Link / code | `link` / `chevron.left.forwardslash.chevron.right` |
 | Mention | `at` |
 | Text format | `textformat`, `bold`, `italic`, `strikethrough`, `text.alignleft` |
@@ -334,7 +338,7 @@ shape. The text inside every control is Body 13 pt unless noted.
   只有 @我, off while muted, a footnote says muted 群 still remind on @我). The 话题 inspector
   has a 通知 section after 状态: 关注 and 静音 (switches) and a footnote. The same commands are
   in the context menus: a 群 or 私聊 row and the 群 page's ⋯ menu carry 静音 / 取消静音 and
-  a 提醒 submenu; a 话题 row carries 关注 / 取消关注 and 静音话题 / 取消静音. A muted 群,
+  a 提醒 submenu; a 话题 row carries one 提醒 submenu (关注 / 默认 / 静音, the level checked). A muted 群,
   私聊 or 话题 shows `bell.slash` (11 pt, `secondary`) after its name in the sidebar. The
   settings window holds only what applies everywhere.
 - Popovers: radius 12, `sheet` fill, `float` shadow, an arrow pointing at the control; close on
@@ -345,9 +349,9 @@ shape. The text inside every control is Body 13 pt unless noted.
 - Inline status in the place it changed (a row shows 已发送 / 没有发出 · 重试), a sidebar count, or a
   system notification when the app is in the background. Errors that block use an alert.
 - Product updates (owner decision, 2026-11-08): a found update shows as one quiet card at the
-  bottom of the sidebar, above the account footer (新版本 → 正在下载 → 已经下载好了, plus 没能更新
+  bottom of the sidebar, above the account footer (新版本 → 正在下载 → 已下载好, plus 没能更新
   and 需要手动安装); only its 16 pt icon carries a state color. The one alert of the flow is
-  重启安装, once per downloaded version. 改了什么 opens 「{version} 更新内容」; after an update the
+  安装更新, once per downloaded version. 改了什么 opens 「{version} 更新内容」; after an update the
   first start shows 「已更新到 {version}」 once (设置 › 通用 can turn it off); 设置 › 通用 › 更新记录
   lists every version, read from `docs/releases/*.md` bundled at build time.
 
@@ -417,7 +421,7 @@ Panes:
   it is available).
 
 ### 9.3 Inspector (topic)
-- Sections in this order: 负责, 计划, 改动, 产出, 用到的决定, 在哪干活, 用时和成本.
+- Sections in this order: 负责, 计划, 改动, 产出, 用到的决定, 在哪干活, 用时和花费.
 - Header: Section style with a disclosure chevron; content rows Body 13 pt; label `secondary`
   left, value `label` right, or one value per row. `label_value` gives the label a fixed 72 pt
   column, keeps at least 8 pt before the value and cuts both at the tail: a long value never
@@ -440,7 +444,7 @@ Panes:
   name Large title, 岗位 and who they report to `secondary`, a row of push buttons (`交代…`
   default, `单独问`, `暂停`), then grouped sections with label/value rows: 现在在做, 这周 (完成的
   话题 6 · 平均 38 分钟; 产出 4; 成本 ¥132 / 上限 ¥300 with a 4 pt bar), 最近交付 (rows),
-  在哪干活, 需要你批准的事, 能用的工具, 用到的决定. No stat tiles, no terminal preview tile.
+  在哪干活, 要先批准的事, 能用的工具, 用到的决定. No stat tiles, no terminal preview tile.
 
 ### 9.6 产出
 - Finder-like: toolbar segmented `square.grid.2x2` / `list.bullet`, a sort pop-up, search.

@@ -61,6 +61,7 @@ export class StreamWriter {
   get text(): string {
     return this.textSoFar;
   }
+  /** True once `finish()` was called (or the message was already final): the writer takes no more text. */
   get done(): boolean {
     return this.finished;
   }

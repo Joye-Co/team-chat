@@ -205,7 +205,7 @@
 
 | 项 | Mac | Windows | 状态 | 做法 |
 | --- | --- | --- | --- | --- |
-| 截图自测 | `screencapture -l` | `PrintWindow`，全部场景 CI 上都能跑 | 一样 | CI 默认只跑 24 个主要场景（`scripts/windows-screenshots.sh` 的 `main_screens`），`windows_scenes=all` 手动跑全部 |
+| 截图自测 | `screencapture -l` | `PrintWindow`，全部场景都能跑 | 一样 | 移植期间由 CI 截图；现在 CI 不再截图（只编译和跑单测），要看就在 Windows 电脑上跑 `scripts/windows-screenshots.sh <输出目录>`：默认截主要场景（脚本里的 `main_screens`），`SCENES=all` 截全部（见 [windows.zh.md](../windows.zh.md)「怎么看 Windows 界面」） |
 | 截图时输入框显示光标（`draw_as_key`） | 窗口当作 key window 画 | 空实现，输入框按非活动窗口画 | 已修（#156） | Windows 上自测把窗口真的激活（CI 上没有人在用） |
 | 截图前核对窗口大小（`frame_size`、`undo_clamp`） | 撤销 AppKit 把窗口限制在屏幕内 | 空实现 | 没有对应 | AppKit 的这个限制 Windows 没有；CI 把屏幕设成 1920×1080，每张 PNG 的尺寸写在 `selftest.log` 里，这次 540 张都和 Mac 的点数一致 |
 | `views/media/poster.rs` 的视频封面测试 | 断言 | 不断言 | 已修（#167） | Windows 上也断言有封面和时长 |

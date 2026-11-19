@@ -3,9 +3,10 @@
 import { SELF } from "cloudflare:test";
 import { MachineDownFrame } from "@chat/protocol";
 import { expect } from "vitest";
-import { BASE, Client, type TestMember, api, clientMsgId, createGroup, createMember, waitUntil } from "./helpers";
+import { BASE, Client, type TestMember, api, clientMsgId, createGroup, createMember, sockets, waitUntil } from "./helpers";
 
-/** Down frames that do not match the protocol; tests expect it empty at the end. */
+/** Down frames that do not match the protocol. The afterAll of setup.ts expects it empty in
+ *  every test file. */
 export const downViolations: unknown[] = [];
 
 // ---------------------------------------------------------------------------
@@ -19,6 +20,7 @@ export class Daemon {
   closed: { code: number } | null = null;
   seq = new Map<string, number>();
   constructor(readonly ws: WebSocket) {
+    sockets.opened += 1;
     ws.addEventListener("message", (e) => {
       const f = JSON.parse(e.data as string);
       const check = MachineDownFrame.safeParse(f);

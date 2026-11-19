@@ -9,6 +9,7 @@ import {
   AcceptanceItem,
   type ArtifactRef,
   type ArtifactVersion,
+  type ArtifactVersionResponse,
   type BlockRef,
   type BlockRefInput,
   type BotRun,
@@ -40,8 +41,9 @@ import {
   type TransientEvent,
 } from "@chat/protocol";
 import { answeredCard, checkCardV2, type DoneCardOptions, doneCard, failedV1Card } from "./cards.ts";
-import { ChatError } from "./errors.ts";
-import { HttpClient, normalizeBaseUrl, type UploadInput } from "./http.ts";
+import { ChatError, errorDetails } from "./errors.ts";
+import { type EventValueReaders, eventValueReaders } from "./events.ts";
+import { checkArtifactData, HttpClient, normalizeBaseUrl, type PublishHtmlInput, type UploadInput } from "./http.ts";
 import { opsFit, opsOf, type PatchInput } from "./interact.ts";
 import { findBlock as findRefBlock, findPart, stripRefPrefix } from "./refs.ts";
 import { consoleLogger, type Logger, type LogLevel } from "./log.ts";
@@ -50,6 +52,7 @@ import {
   type BotStateData,
   type CardRef,
   emptyState,
+  expandHome,
   FileStateStore,
   MAX_REMEMBERED_CARDS,
   MAX_REMEMBERED_REFS,
@@ -63,7 +66,7 @@ export const SDK_VERSION = "1.1.0";
 /** The reaction `ack()` adds by default: "I saw it and work on it" (the same one runner runs use). */
 export { ACK_EMOJI };
 
-/** A WebSocket constructor that accepts `{ headers }` (Bun, and Node 22+ through undici). */
+/** A WebSocket constructor that accepts `{ headers }` (Bun, and Node 22 and later through undici). */
 export type WebSocketCtor = new (url: string, opts?: { headers?: Record<string, string> }) => WebSocket;
 
 export interface BotOptions {
@@ -71,9 +74,12 @@ export interface BotOptions {
   url: string;
   /** The bot token. Prefer `tokenFile`. */
   token?: string;
-  /** File that holds the bot token (mode 600). */
+  /** File that holds the bot token (mode 600). A leading `~` is the home folder. */
   tokenFile?: string;
-  /** Cursor and follow state file. Without it, state lives in memory and a restart starts at the newest events. */
+  /**
+   * Cursor and follow state file. Without it, state lives in memory and a restart starts at the
+   * newest events. A leading `~` is the home folder.
+   */
   stateFile?: string;
   /** Custom state store (instead of `stateFile`). */
   stateStore?: StateStore;
@@ -91,7 +97,7 @@ export interface BotOptions {
   markRead?: boolean;
   /** How long a request waits (connection included) before it fails with `timeout`. Default 60 s. */
   requestTimeoutMs?: number;
-  /** How long `stop()` waits for running handlers. Default 10 s. */
+  /** How long `stop()` waits for running handlers, and then again for the streams it finishes. Default 10 s. */
   stopTimeoutMs?: number;
   /**
    * Client-side pacing of write frames (send, edit, delete, topic.update, cards, page bridge).
@@ -162,6 +168,12 @@ export interface TopicChange {
   ownerId?: string | null;
 }
 
+/** `publishPage`: what `HttpClient.publishHtml` takes, without the topic (the context or target gives it). */
+export type PublishPageInput = Omit<PublishHtmlInput, "groupId" | "topicId">;
+
+/** Which live card events a handler gets: an event name, or a name and/or a block id. */
+export type CardEventFilter = string | { name?: string; block?: string };
+
 export interface MessageContext {
   bot: Bot;
   event: EventOf<"message.created">;
@@ -172,7 +184,11 @@ export interface MessageContext {
   catchUp: boolean;
   /** Posts in the same topic. Retries after a restart reuse the same clientMsgId, so no duplicate. */
   reply(input: string | SendInput): Promise<SendResult>;
-  /** Starts a streaming reply in the same topic. */
+  /**
+   * Starts a streaming reply in the same topic. Call `finish()` before the handler returns: a
+   * writer that is still open when the handler returns or throws is finished by the SDK with the
+   * text it has (and a warning in the log), so the message never stays "streaming".
+   */
   stream(input?: string | (SendInput & StreamOptions)): Promise<StreamWriter>;
   /** Changes this topic's status, waitingOn, owner or title. */
   updateTopic(change: TopicChange): Promise<Topic>;
@@ -189,6 +205,13 @@ export interface MessageContext {
   ack(emoji?: string): Promise<boolean>;
   /** Posts a Card v2 (an ask, usually) in this topic. */
   ask(card: CardV2, input?: Omit<SendInput, "card" | "cardV2">): Promise<SendResult>;
+  /** Posts a Card v2 in this topic: the same call as `ask`, for a card that asks nothing (a report, an embedded page). */
+  postCard(card: CardV2, input?: Omit<SendInput, "card" | "cardV2">): Promise<SendResult>;
+  /**
+   * Publishes an HTML page as a 产出 of this topic (or a new version with `artifactId`), made by
+   * this bot's current run here. See `Bot.publishPage`.
+   */
+  publishPage(input: PublishPageInput): Promise<ArtifactVersionResponse>;
   /**
    * Posts the result card (Card v2, intent "done") in this topic and ends this bot's current run
    * there: `failed` ends it as failed. See `Bot.done`.
@@ -239,9 +262,11 @@ export type AnswerValue = string | number | boolean | null | AnswerValue[] | { [
 /**
  * An interaction with one of my v2 cards (2.1): a live event (transient `card.event`, only
  * while connected) or a stored answer (`card.answered`, also on catch-up). `value` and
- * `inputs` come from the client: check them before you act on them.
+ * `inputs` come from the client: check them before you act on them. The readers (`choice()`,
+ * `button()`, `rows()`, `tab()`, `point()`, `sort()`) read `value` and give undefined or [] when
+ * it has another shape; docs/bots.md, "Live events", has the value of each event.
  */
-export interface CardEventContext {
+export interface CardEventContext extends EventValueReaders {
   bot: Bot;
   groupId: string;
   topicId: string;
@@ -294,6 +319,23 @@ export interface CardEventContext {
    */
   resolve(result: "ignored" | "failed", note?: string): Promise<void>;
   updateTopic(change: TopicChange): Promise<Topic>;
+  /**
+   * Publishes an HTML page as a 产出 of the card's topic (see `Bot.publishPage`). It does not
+   * answer the event: patch the card (an `embed` of the new version) or post one.
+   */
+  publishPage(input: PublishPageInput): Promise<ArtifactVersionResponse>;
+  /**
+   * Posts the result card (Card v2, intent "done") in the card's topic as the answer to this
+   * event and ends this bot's current run there: `failed` ends it as failed. A handler that runs
+   * again after a crash posts with the same clientMsgId, so the card is not posted twice.
+   */
+  done(card: CardV2 | DoneCardOptions): Promise<DoneResult>;
+  /** Sets the plan of this bot's current run in the card's topic (see `Bot.setPlan`). */
+  setPlan(plan: RunPlanItem[]): Promise<BotRun>;
+  /** Ends this bot's current run in the card's topic (see `Bot.endRun`). */
+  endRun(status: "done" | "failed" | "cancelled", summary?: string): Promise<BotRun | null>;
+  /** Replaces the 验收标准 of this bot's current run in the card's topic (see `Bot.setAcceptance`). */
+  setAcceptance(items: AcceptanceItem[]): Promise<BotRun>;
 }
 
 /**
@@ -313,9 +355,9 @@ export interface CardAnswerContext<I extends Record<string, unknown> = Record<st
   action?: CardV2Action;
   /** The answer is a cancel or a reject (or the ids "cancel" and "deny" when the action is not in the card). */
   cancelled: boolean;
-  /** Chosen option ids of a choice block (default id "choice"); [] when none. */
+  /** Chosen option ids of a choice block, read from `inputs` (default id "choice"); [] when none. */
   choices(blockId?: string): string[];
-  /** The first chosen option id of a choice block (default id "choice"). */
+  /** The first chosen option id of a choice block, read from `inputs` (default id "choice"). */
   choice(blockId?: string): string | undefined;
   /** An input as text (numbers and booleans are turned into text). */
   text(blockId: string): string | undefined;
@@ -359,7 +401,16 @@ export interface ArtifactEventContext {
   reply(payload: unknown): Promise<void>;
   /** Declines an `ask` (once); the page's promise rejects with `declined`. */
   decline(message: string): Promise<void>;
-  /** Replaces the version's data snapshot; every viewer's page gets it. `cause` is this event. */
+  /**
+   * The version's current data snapshot, read from the server (`data` is null and `dataRev` 0
+   * when it has none). Use it instead of state in process memory: it survives a restart.
+   */
+  data(): Promise<{ data: unknown; dataRev: number }>;
+  /**
+   * Replaces the version's data snapshot; every viewer's page gets it. `cause` is this event.
+   * With `baseDataRev` (the `dataRev` of `data()`) the server refuses the push with `conflict`
+   * when another push came in between: read again and retry.
+   */
   pushData(data: unknown, opts?: { baseDataRev?: number }): Promise<{ dataRev: number }>;
   /** Posts a message in the 产出's topic as the answer to this event. */
   postMessage(input: string | SendInput): Promise<SendResult>;
@@ -567,13 +618,31 @@ function wsUrl(base: string): string {
   return u.toString();
 }
 
+/** A URL for log lines: without user name and password. */
+function withoutUserInfo(url: string): string {
+  const u = new URL(url);
+  u.username = "";
+  u.password = "";
+  return u.toString();
+}
+
 function readToken(opts: BotOptions, log: Logger): string {
   if (opts.token) return opts.token.trim();
-  if (!opts.tokenFile) throw new Error("pass token or tokenFile");
-  const mode = statSync(opts.tokenFile).mode & 0o077;
-  if (mode !== 0) log.warn("token file can be read by other users; run chmod 600 on it", { file: opts.tokenFile });
-  const token = readFileSync(opts.tokenFile, "utf8").trim();
-  if (!token) throw new Error(`token file is empty: ${opts.tokenFile}`);
+  if (!opts.tokenFile) throw new ChatError("invalid", "pass token or tokenFile");
+  const file = expandHome(opts.tokenFile);
+  let mode: number;
+  let token: string;
+  try {
+    mode = statSync(file).mode & 0o077;
+    token = readFileSync(file, "utf8").trim();
+  } catch (err) {
+    if ((err as { code?: string }).code === "ENOENT") {
+      throw new ChatError("invalid", `token file not found: ${file} (docs/bots.md, section 1, shows how to make one)`);
+    }
+    throw new ChatError("invalid", `cannot read the token file ${file}: ${(err as Error).message}`);
+  }
+  if (mode !== 0) log.warn("token file can be read by other users; run chmod 600 on it", { file });
+  if (!token) throw new ChatError("invalid", `token file is empty: ${file}`);
   return token;
 }
 
@@ -605,6 +674,8 @@ export class Bot {
   private readonly groups = new Map<string, GroupState>();
   private readonly topics = new Map<string, TopicInfo>();
   private readonly streams = new Set<StreamWriter>();
+  /** The writers each message context opened, so the SDK can finish what a handler leaves open. */
+  private readonly contextStreams = new WeakMap<MessageContext, StreamWriter[]>();
   /** This bot's active run per topic, from `startRun` answers and `run.updated` events. */
   private readonly currentRuns = new Map<string, string>();
   private readonly running = new Set<Promise<unknown>>();
@@ -620,8 +691,8 @@ export class Bot {
   private readonly messageHandlers: Handler<MessageContext>[] = [];
   private readonly cardHandlers: Handler<CardActionContext>[] = [];
   private readonly answerHandlers: Handler<CardAnswerContext>[] = [];
-  private readonly artifactEventHandlers: Handler<ArtifactEventContext>[] = [];
-  private readonly cardEventHandlers: Handler<CardEventContext>[] = [];
+  private readonly artifactEventHandlers: { name?: string; run: Handler<ArtifactEventContext> }[] = [];
+  private readonly cardEventHandlers: { name?: string; block?: string; run: Handler<CardEventContext> }[] = [];
   private readonly asideHandlers: Handler<AsideContext>[] = [];
   /** v2 cards of my messages that this process saw, newest last (at most MAX_CACHED_CARDS). */
   private readonly cardCache = new Map<string, CardV2>();
@@ -652,7 +723,7 @@ export class Bot {
     this.token = readToken(opts, this.log);
     this.http = new HttpClient({ url: this.url, token: this.token, fetch: opts.fetch });
     const WS = opts.WebSocket ?? (globalThis.WebSocket as unknown as WebSocketCtor | undefined);
-    if (!WS) throw new Error("no WebSocket implementation: use Bun or Node 22+, or pass the WebSocket option");
+    if (!WS) throw new ChatError("invalid", "no WebSocket implementation: use Bun or Node 22.18+, or pass the WebSocket option");
     this.WS = WS;
     this.store = opts.stateStore ?? (opts.stateFile ? new FileStateStore(opts.stateFile) : new MemoryStateStore());
     const loaded = this.store.load();
@@ -692,8 +763,13 @@ export class Bot {
    * handler that does not answer makes the SDK answer for it: an `emit` gets `ignored`
    * (`failed` when it throws), an `ask` gets a decline.
    */
-  onArtifactEvent(h: Handler<ArtifactEventContext>): this {
-    this.artifactEventHandlers.push(h);
+  onArtifactEvent(h: Handler<ArtifactEventContext>): this;
+  /** Only the page events with this declared name (`onArtifactEvent("signup.join", h)`). */
+  onArtifactEvent(name: string, h: Handler<ArtifactEventContext>): this;
+  onArtifactEvent(a: string | Handler<ArtifactEventContext>, b?: Handler<ArtifactEventContext>): this {
+    if (typeof a === "function") this.artifactEventHandlers.push({ run: a });
+    else if (typeof b === "function") this.artifactEventHandlers.push({ name: a, run: b });
+    else throw new ChatError("invalid", "onArtifactEvent takes a handler, or an event name and a handler");
     return this;
   }
   /**
@@ -702,8 +778,17 @@ export class Bot {
    * connected. Respond with `ctx.patch`, `ctx.reply`, `ctx.postCard` or `ctx.resolve`; without
    * one the SDK sends `ignored` (or `failed` when the handler throws).
    */
-  onCardEvent(h: Handler<CardEventContext>): this {
-    this.cardEventHandlers.push(h);
+  onCardEvent(h: Handler<CardEventContext>): this;
+  /**
+   * Only the live events that match: an event name (`onCardEvent("button.press", h)`), or a
+   * name and/or a block id (`onCardEvent({ block: "check" }, h)`). An event no handler matches
+   * is resolved `ignored`.
+   */
+  onCardEvent(filter: CardEventFilter, h: Handler<CardEventContext>): this;
+  onCardEvent(a: CardEventFilter | Handler<CardEventContext>, b?: Handler<CardEventContext>): this {
+    if (typeof a === "function") this.cardEventHandlers.push({ run: a });
+    else if (typeof b === "function") this.cardEventHandlers.push({ ...(typeof a === "string" ? { name: a } : { name: a.name, block: a.block }), run: b });
+    else throw new ChatError("invalid", "onCardEvent takes a handler, or a filter and a handler");
     return this;
   }
   /**
@@ -750,7 +835,10 @@ export class Bot {
     return p;
   }
 
-  /** Closes the connection, waits for running handlers (up to stopTimeoutMs) and saves state. */
+  /**
+   * Waits for running handlers (up to stopTimeoutMs), finishes streams that are still open (up to
+   * stopTimeoutMs again), closes the connection and saves state.
+   */
   async stop(): Promise<void> {
     if (this.stopped) return;
     // Let running handlers finish while the connection is still up.
@@ -763,6 +851,19 @@ export class Bot {
     ]);
     clearTimeout(waitTimer);
     if (this.stopped) return;
+    // Streams still open (a handler cut off above, or a `bot.stream()` writer nobody finished)
+    // would show as streaming for good: end them while the connection can still carry the edit.
+    if (this.ready && this.streams.size > 0) {
+      let streamTimer: ReturnType<typeof setTimeout> | undefined;
+      await Promise.race([
+        this.finishOpenStreams(this.streams, "stream still open at stop; finished it"),
+        new Promise((r) => {
+          streamTimer = setTimeout(r, this.opts.stopTimeoutMs ?? 10_000);
+        }),
+      ]);
+      clearTimeout(streamTimer);
+      if (this.stopped) return;
+    }
     this.stopped = true;
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     this.reconnectTimer = null;
@@ -791,6 +892,7 @@ export class Bot {
     this.dropSocket("reconnect requested");
   }
 
+  /** True between a welcome and the next disconnect. Writes made while false wait for the connection. */
   get connected(): boolean {
     return this.ready;
   }
@@ -800,12 +902,14 @@ export class Bot {
   }
   /** My member record (after the first welcome). */
   get me(): Member {
-    if (!this.meMember) throw new ChatError("invalid", "not connected yet");
+    if (!this.meMember) throw new ChatError("invalid", "bot.me is set after the first welcome: await bot.start() first");
     return this.meMember;
   }
+  /** Every member of the team, from the last welcome and directory frames. */
   get members(): Member[] {
     return [...this.memberMap.values()];
   }
+  /** One member by id, when known. */
   member(id: string): Member | undefined {
     return this.memberMap.get(id);
   }
@@ -813,6 +917,7 @@ export class Bot {
   get groupSummaries(): GroupSummary[] {
     return [...this.summaryMap.values()];
   }
+  /** Whether the bot follows a topic: `onMessage` runs only for topics it follows. */
   isFollowing(groupId: string, topicId: string): boolean {
     return this.state.following[groupId]?.includes(topicId) ?? false;
   }
@@ -960,6 +1065,7 @@ export class Bot {
     data: unknown,
     opts: { baseDataRev?: number; cause?: string; clientPushId?: string } = {},
   ): Promise<{ dataRev: number }> {
+    checkArtifactData(data);
     const frame: Record<string, unknown> & { t: string } = {
       t: "artifact.data",
       groupId,
@@ -971,6 +1077,19 @@ export class Bot {
     if (opts.baseDataRev !== undefined) frame.baseDataRev = opts.baseDataRev;
     if (opts.cause) frame.cause = opts.cause;
     return (await this.request(frame)) as { dataRev: number };
+  }
+
+  /**
+   * Publishes one HTML page as a 产出 of a topic (1.1), or a new version of `artifactId`:
+   * `HttpClient.publishHtml` with the topic filled in and `runId` set to this bot's current run
+   * there, so the version shows as made by that run. `events` declares what the page may send
+   * back (`onArtifactEvent`), `data` is the first snapshot its `teamchat.onData` gets, `preview`
+   * the text and figures of its preview card. Show the page in the topic with a card that has
+   * `blocks.embed({ artifactId, version })`, or with `artifactRefs` on a message.
+   */
+  publishPage(target: Required<Target>, input: PublishPageInput): Promise<ArtifactVersionResponse> {
+    const runId = input.runId ?? this.currentRuns.get(target.topicId);
+    return this.http.publishHtml({ ...input, groupId: target.groupId, topicId: target.topicId, ...(runId ? { runId } : {}) });
   }
 
   /** Answers a page `ask` (1.1, `artifact.reply`): once, within 120 s, private to the asker. */
@@ -1081,7 +1200,11 @@ export class Bot {
     return this.react(groupId, messageId, emoji);
   }
 
-  /** Starts a streaming message; append text to the writer, then call `finish()`. */
+  /**
+   * Starts a streaming message; append text to the writer, then call `finish()`. The server
+   * keeps the message "streaming" until then: `stop()` finishes the writers that are still open,
+   * and `ctx.stream()` writers are also finished when their handler ends.
+   */
   async stream(target: Target, input: string | (SendInput & StreamOptions) = {}): Promise<StreamWriter> {
     const i = typeof input === "string" ? { body: input } : input;
     const r = await this.send(target, { ...i, streaming: true });
@@ -1092,6 +1215,10 @@ export class Bot {
     return w;
   }
 
+  /**
+   * Edits one of my messages: `body` replaces the whole body; cards, attachments and 产出
+   * references are replaced only when given. For cards prefer `updateCardV2` or `patchCard`.
+   */
   edit(groupId: string, messageId: string, input: EditInput): Promise<{ message: Message }> {
     const frame: Record<string, unknown> & { t: string } = { t: "edit", groupId, messageId, body: input.body };
     if (input.streaming !== undefined) frame.streaming = input.streaming;
@@ -1104,6 +1231,7 @@ export class Bot {
     return this.request(frame) as Promise<{ message: Message }>;
   }
 
+  /** Deletes one of my messages. */
   async deleteMessage(groupId: string, messageId: string): Promise<void> {
     await this.request({ t: "delete", groupId, messageId });
   }
@@ -1187,6 +1315,7 @@ export class Bot {
     return r.changed;
   }
 
+  /** Shows "typing" in a topic for a few seconds. Not sent (and not queued) while disconnected. */
   typing(groupId: string, topicId: string): void {
     this.sendRaw({ t: "typing", groupId, topicId });
   }
@@ -1205,7 +1334,7 @@ export class Bot {
   }
 
   /** Uploads a file over HTTP; put the result in `attachments`. */
-  uploadFile(input: UploadInput) {
+  uploadFile(input: UploadInput): Promise<FileRef> {
     return this.http.uploadFile(input);
   }
 
@@ -1215,13 +1344,16 @@ export class Bot {
 
   private connect(): void {
     if (this.stopped) return;
+    const target = wsUrl(this.url);
+    // What log lines name: the endpoint without credentials.
+    const endpoint = withoutUserInfo(target);
     let ws: WebSocket;
     try {
-      ws = new this.WS(wsUrl(this.url), {
+      ws = new this.WS(target, {
         headers: { authorization: `Bearer ${this.token}`, "user-agent": `chat-bot-sdk/${SDK_VERSION}` },
       });
     } catch (err) {
-      this.log.warn("websocket create failed", { err: String(err) });
+      this.log.warn("websocket create failed", { url: endpoint, err: String(err) });
       this.scheduleReconnect();
       return;
     }
@@ -1277,16 +1409,23 @@ export class Bot {
       this.stopPing();
       const wasReady = this.ready;
       this.setReady(false);
-      this.log.info("disconnected", { code: ev.code, reason: ev.reason, wasReady });
+      this.log.info("disconnected", { url: endpoint, code: ev.code, reason: ev.reason, wasReady });
       if (ev.code === 4001 || ev.code === 4000) {
         this.fail(new ChatError(ev.code === 4001 ? "unauthorized" : "unsupported_protocol", ev.reason || "closed by server"));
         return;
       }
       if (!opened) {
         // A rejected upgrade looks like a network error; ask over HTTP whether the token is bad.
-        void this.checkToken().then((bad) => {
-          if (bad) this.fail(new ChatError("unauthorized", "the server rejected the bot token"));
-          else this.scheduleReconnect();
+        void this.checkToken().then((check) => {
+          if (check.unauthorized) {
+            this.fail(new ChatError("unauthorized", "the server rejected the bot token"));
+            return;
+          }
+          const delay = this.scheduleReconnect();
+          // Before the first welcome `start()` still waits: say why, once per try.
+          if (!this.everConnected && delay !== null) {
+            this.log.warn(`cannot reach ${endpoint} (${check.problem}), retrying in ${(delay / 1000).toFixed(1)} s`, { url: endpoint, attempt: this.attempt });
+          }
         });
         return;
       }
@@ -1297,12 +1436,13 @@ export class Bot {
     };
   }
 
-  private async checkToken(): Promise<boolean> {
+  /** Asks over HTTP why the WebSocket did not open: a bad token, or what else went wrong. */
+  private async checkToken(): Promise<{ unauthorized: boolean; problem: string }> {
     try {
       await this.http.me();
-      return false;
+      return { unauthorized: false, problem: "HTTP works, but the WebSocket did not open" };
     } catch (err) {
-      return err instanceof ChatError && err.code === "unauthorized";
+      return { unauthorized: err instanceof ChatError && err.code === "unauthorized", problem: err instanceof Error ? err.message : String(err) };
     }
   }
 
@@ -1335,8 +1475,9 @@ export class Bot {
     this.scheduleReconnect();
   }
 
-  private scheduleReconnect(): void {
-    if (this.stopped || this.reconnectTimer) return;
+  /** Plans the next connection try; returns its delay, or null when none was planned. */
+  private scheduleReconnect(): number | null {
+    if (this.stopped || this.reconnectTimer) return null;
     const base = Math.min(BACKOFF_MAX_MS, BACKOFF_MIN_MS * 2 ** this.attempt);
     const delay = Math.round(base / 2 + Math.random() * (base / 2));
     this.attempt++;
@@ -1345,6 +1486,7 @@ export class Bot {
       this.reconnectTimer = null;
       this.connect();
     }, delay);
+    return delay;
   }
 
   private startPing(ws: WebSocket): void {
@@ -1482,7 +1624,7 @@ export class Bot {
       }
       this.pending.delete(rid);
       clearTimeout(p.timer);
-      p.reject(new ChatError(e.code, e.message, undefined, typeof e.reason === "string" ? e.reason : undefined));
+      p.reject(new ChatError(e.code, e.message, undefined, typeof e.reason === "string" ? e.reason : undefined, errorDetails(e)));
       return;
     }
     this.pending.delete(rid);
@@ -1794,13 +1936,13 @@ export class Bot {
           if (aside && aside.dmGroupId === event.groupId) {
             // A side chat message is addressed to me, @ or not.
             this.follow(event.groupId, m.topicId);
-            if (this.asideHandlers.length > 0) for (const h of this.asideHandlers) jobs.push(() => h(this.asideContext(event, aside, catchUp)));
-            else for (const h of this.mentionHandlers) jobs.push(() => h(ctx()));
+            if (this.asideHandlers.length > 0) for (const h of this.asideHandlers) jobs.push(() => this.runMessageHandler(h, this.asideContext(event, aside, catchUp)));
+            else for (const h of this.mentionHandlers) jobs.push(() => this.runMessageHandler(h, ctx()));
           } else if (m.mentions.includes(me)) {
             this.follow(event.groupId, m.topicId);
-            for (const h of this.mentionHandlers) jobs.push(() => h(ctx()));
+            for (const h of this.mentionHandlers) jobs.push(() => this.runMessageHandler(h, ctx()));
           } else if (this.isFollowing(event.groupId, m.topicId)) {
-            for (const h of this.messageHandlers) jobs.push(() => h(ctx()));
+            for (const h of this.messageHandlers) jobs.push(() => this.runMessageHandler(h, ctx()));
           }
           this.scheduleRead(event.groupId);
           break;
@@ -1910,7 +2052,8 @@ export class Bot {
       if (!i.clientMsgId) i.clientMsgId = nextId();
       return i;
     };
-    return {
+    const opened: StreamWriter[] = [];
+    const ctx: MessageContext = {
       bot: this,
       event,
       message: m,
@@ -1918,13 +2061,19 @@ export class Bot {
       topicId: m.topicId,
       catchUp,
       reply: (input) => this.send(target, withId(input)),
-      stream: (input = {}) => this.stream(target, withId(input) as SendInput & StreamOptions),
+      stream: async (input = {}) => {
+        const w = await this.stream(target, withId(input) as SendInput & StreamOptions);
+        opened.push(w);
+        return w;
+      },
       updateTopic: (change) => this.updateTopic(m.groupId, m.topicId, change),
       typing: () => this.typing(m.groupId, m.topicId),
       setPlan: (plan) => this.setPlan({ groupId: m.groupId, topicId: m.topicId }, plan),
       endRun: (status, summary) => this.endRun({ groupId: m.groupId, topicId: m.topicId }, status, summary),
       ack: (emoji) => this.ack(m.groupId, m.id, emoji),
       ask: (card, input = {}) => this.postCardV2(target, card, withId(input)),
+      postCard: (card, input = {}) => this.postCardV2(target, card, withId(input)),
+      publishPage: (input) => this.publishPage(target, input),
       done: (card) => this.done(target, card, withId({})),
       setAcceptance: (items) => this.setAcceptance(target, items),
       aside: this.asideOf(m.groupId, m.topicId),
@@ -1932,6 +2081,38 @@ export class Bot {
       question: stripRefPrefix(m.body, m.blockRefs),
       resolveRef: (ref) => this.resolveRef(ref, m.groupId),
     };
+    this.contextStreams.set(ctx, opened);
+    return ctx;
+  }
+
+  /**
+   * Runs a message handler, then finishes the streams its context opened and the handler left
+   * open (it returned or threw before `finish()`): nothing else would end them, and the message
+   * would show as streaming for good. Writers made with `bot.stream()` are not touched.
+   */
+  private async runMessageHandler<C extends MessageContext>(h: Handler<C>, ctx: C): Promise<void> {
+    try {
+      await h(ctx);
+    } finally {
+      // After stop() nothing can be sent; stop() finished the open writers itself.
+      if (!this.stopped) await this.finishOpenStreams(this.contextStreams.get(ctx) ?? [], "handler left a stream open; finished it");
+    }
+  }
+
+  /** Finishes the writers that are still open with the text they have; errors are logged. */
+  private async finishOpenStreams(writers: Iterable<StreamWriter>, why: string): Promise<void> {
+    const open = [...writers].filter((w) => !w.done);
+    await Promise.all(
+      open.map(async (w) => {
+        this.log.warn(why, { groupId: w.groupId, messageId: w.messageId });
+        try {
+          await w.finish();
+        } catch (err) {
+          // A finish that started meanwhile is fine; anything else leaves the message streaming.
+          if (!w.done) this.log.warn("could not finish an open stream", { messageId: w.messageId, err: String(err) });
+        }
+      }),
+    );
   }
 
   private asideOf(groupId: string, topicId: string): TopicContext | undefined {
@@ -1942,11 +2123,14 @@ export class Bot {
   private asideContext(event: EventOf<"message.created">, ref: AsideRef, catchUp: boolean): AsideContext {
     const base = this.messageContext(event, catchUp);
     const aside = { groupId: ref.groupId, topicId: ref.topicId, uptoSeq: ref.uptoSeq };
-    return {
+    const ctx: AsideContext = {
       ...base,
       aside,
       source: (opts = {}) => this.sourceMessages(aside, opts.limit ?? 200),
     };
+    const opened = this.contextStreams.get(base);
+    if (opened) this.contextStreams.set(ctx, opened);
+    return ctx;
   }
 
   /** Messages of a side chat's topic up to `uptoSeq`, oldest first, at most `limit` newest. */
@@ -2059,6 +2243,16 @@ export class Bot {
         await answered(this.resolveEvent(groupId, cause, result, note));
       },
       updateTopic: (change) => this.updateTopic(groupId, topicId, change),
+      publishPage: (input) => this.publishPage({ groupId, topicId }, input),
+      ...eventValueReaders(rest.value),
+      done: (c) => {
+        // One id per call, taken before the first try: a write sent again without its cause keeps it.
+        const clientMsgId = nextId();
+        return answered(this.withCause(cause, (x) => this.done({ groupId, topicId }, c, x ? { clientMsgId, causeEventId: x } : { clientMsgId })));
+      },
+      setPlan: (plan) => this.setPlan({ groupId, topicId }, plan),
+      endRun: (status, summary) => this.endRun({ groupId, topicId }, status, summary),
+      setAcceptance: (items) => this.setAcceptance({ groupId, topicId }, items),
     };
     return { ctx, flags };
   }
@@ -2214,8 +2408,9 @@ export class Bot {
       );
       let threw = false;
       for (const h of this.cardEventHandlers) {
+        if ((h.name !== undefined && h.name !== e.event) || (h.block !== undefined && h.block !== e.blockId)) continue;
         try {
-          await h(ctx);
+          await h.run(ctx);
         } catch (err) {
           threw = true;
           this.emitError(err, `onCardEvent ${e.event} for ${e.messageId}`);
@@ -2235,8 +2430,9 @@ export class Bot {
       const { ctx, flags } = this.artifactEventContext(e);
       let threw = false;
       for (const h of this.artifactEventHandlers) {
+        if (h.name !== undefined && h.name !== e.name) continue;
         try {
-          await h(ctx);
+          await h.run(ctx);
         } catch (err) {
           threw = true;
           this.emitError(err, "onArtifactEvent");
@@ -2286,6 +2482,10 @@ export class Bot {
         once();
         await this.declineArtifact(groupId, eventId, message);
         flags.responded = true;
+      },
+      data: async () => {
+        const r = await this.http.getArtifactData(artifactId, version);
+        return { data: r.data, dataRev: r.dataRev };
       },
       pushData: async (data, opts = {}) => {
         const r = await this.pushArtifactData(groupId, artifactId, version, data, { ...opts, cause: eventId });
@@ -2516,7 +2716,8 @@ export class Bot {
       if (batch.length > 0 && part.cause && cause && part.cause !== cause) break;
       let partOps: PatchOp[];
       try {
-        partOps = card ? opsOf(card, part.input) : Array.isArray(part.input) ? part.input : [];
+        // A draft of a later part counts what the earlier parts of this frame insert and remove.
+        partOps = card ? opsOf(card, part.input, ops) : Array.isArray(part.input) ? part.input : [];
       } catch (err) {
         if (batch.length > 0) break;
         lane.parts.shift();
@@ -2585,7 +2786,9 @@ export class Bot {
         let fits = false;
         if (fresh) {
           try {
-            fits = opsFit(fresh, batch.flatMap((p) => opsOf(fresh, p.input)));
+            const all: PatchOp[] = [];
+            for (const p of batch) all.push(...opsOf(fresh, p.input, all));
+            fits = opsFit(fresh, all);
           } catch {
             fits = false;
           }
