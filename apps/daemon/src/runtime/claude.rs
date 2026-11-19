@@ -8,9 +8,9 @@
 //! still unread. When no turn is open and no line is unread, stdin is closed and the CLI
 //! exits. A turn that ends while a command it put in the background (`run_in_background`) still
 //! runs has not finished the work: stdin stays open, and the CLI's own turn on the command's
-//! notification goes on with it (the daemon writes [`BACKGROUND_DONE`] when the CLI does not
+//! notification goes on with it (the daemon writes [`background_done`] when the CLI does not
 //! start one). A command still running after [`BACKGROUND_WAIT`] (a server, a watcher) gets one
-//! line ([`BACKGROUND_STILL`]) and the turn after it ends the run as usual. A `result` of no turns with no text while a written line is unread is the CLI
+//! line ([`background_still`]) and the turn after it ends the run as usual. A `result` of no turns with no text while a written line is unread is the CLI
 //! clearing a notification left from the session before (a background command a restart
 //! stopped), not the answer to the line (verification pass 2, problem 4). The raw session is
 //! `$CLAUDE_CONFIG_DIR/projects/<cwd with non-alphanumerics as '-'>/<session id>.jsonl`
@@ -78,10 +78,15 @@ pub struct ClaudeNormalizer {
 
 /// The line the daemon writes when a command the CLI put in the background finished after the
 /// turn ended and the CLI did not go on by itself within [`BACKGROUND_NUDGE`].
-pub const BACKGROUND_DONE: &str = "[team-chat] Written automatically (not a message from a person): \
-the command you ran in the background has finished. Continue the work from where you stopped. \
-When you need a command's result, wait for it in the foreground before you end your turn: \
-the work counts as done only when your turn ends with nothing left running.";
+pub fn background_done() -> String {
+    format!(
+        "{} Written automatically (not a message from a person): the command you ran in the \
+background has finished. Continue the work from where you stopped. When you need a command's \
+result, wait for it in the foreground before you end your turn: the work counts as done only \
+when your turn ends with nothing left running.",
+        crate::product::auto_prefix()
+    )
+}
 /// A `result` of no turns and no text that is no error: the CLI cleared a background command's
 /// notification without the model; it answers no line.
 pub fn idle_result(v: &Value) -> bool {
@@ -96,7 +101,7 @@ pub fn idle_result(v: &Value) -> bool {
 pub const BACKGROUND_NUDGE: Duration = Duration::from_secs(15);
 /// How long a run whose turn ended waits for the commands the CLI left in the background. The
 /// run sends nothing while it waits, so this stays well below the server's nudge (5 minutes of
-/// quiet, `NUDGE_MS`) and stall restart (10 minutes): the daemon's [`BACKGROUND_STILL`] comes
+/// quiet, `NUDGE_MS`) and stall restart (10 minutes): the daemon's [`background_still`] comes
 /// first, and a command that needs longer is then waited for in the foreground, as an open tool
 /// call the server gives its longer tool limit.
 pub const BACKGROUND_WAIT: Duration = Duration::from_secs(4 * 60);
@@ -117,17 +122,22 @@ fn background_wait_for() -> Duration {
     }
 }
 /// The line the daemon writes when a background command still runs after [`BACKGROUND_WAIT`].
-pub const BACKGROUND_STILL: &str = "[team-chat] Written automatically (not a message from a person): \
-your turn ended while a command you ran in the background still runs. If the work needs its \
-result, wait for it now in the foreground; if you no longer need it (a server, a watcher), stop \
-it. Then end your turn with the result: the run ends after this turn.";
+pub fn background_still() -> String {
+    format!(
+        "{} Written automatically (not a message from a person): your turn ended while a \
+command you ran in the background still runs. If the work needs its result, wait for it now in \
+the foreground; if you no longer need it (a server, a watcher), stop it. Then end your turn with \
+the result: the run ends after this turn.",
+        crate::product::auto_prefix()
+    )
+}
 
 /// What the daemon writes when a run waits after a turn that left background commands.
 #[derive(Clone, Copy, PartialEq)]
 enum Wake {
-    /// They finished and the CLI did not go on: [`BACKGROUND_DONE`].
+    /// They finished and the CLI did not go on: [`background_done`].
     Done,
-    /// One still runs after [`BACKGROUND_WAIT`]: [`BACKGROUND_STILL`].
+    /// One still runs after [`BACKGROUND_WAIT`]: [`background_still`].
     Still,
 }
 
@@ -777,6 +787,13 @@ async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Con
         .as_deref()
         .filter(|_| spec.resume_session_id.is_some() && resume.is_none());
     let resume_missed = full.is_some();
+    // Gone and no whole prompt came: the prompt holds only what is new, so the CLI is told that
+    // this session does not remember the rest.
+    let first = match (full, spec.resume_session_id.is_some() && resume.is_none()) {
+        (Some(full), _) => full.to_string(),
+        (None, true) => super::lost_session_prompt(&spec.prompt),
+        (None, false) => spec.prompt.clone(),
+    };
     let mut args: Vec<String> = [
         "-p",
         "--input-format",
@@ -868,7 +885,7 @@ a person's approval would run unasked, so the run was not started.",
     for ev in norm.queue_turn() {
         let _ = emit.send(ev);
     }
-    if let Err(e) = p.write_json(&user_line(full.unwrap_or(&spec.prompt))).await {
+    if let Err(e) = p.write_json(&user_line(&first)).await {
         return Outcome::failed(format!("claude: {e}"));
     }
     let mut control_open = true;
@@ -877,7 +894,7 @@ a person's approval would run unasked, so the run was not started.",
     let mut background_wait = false;
     // When the daemon writes a line about it (Wake), unless the CLI starts a turn by itself first.
     let mut wake: Option<(tokio::time::Instant, Wake)> = None;
-    // BACKGROUND_STILL was written: the next turn ends the run whatever still runs.
+    // `background_still` was written: the next turn ends the run whatever still runs.
     let mut still_asked = false;
     loop {
         tokio::select! {
@@ -923,13 +940,13 @@ a person's approval would run unasked, so the run was not started.",
                 let line = match wake.take().map(|(_, w)| w) {
                     Some(Wake::Still) => {
                         still_asked = true;
-                        BACKGROUND_STILL
+                        background_still()
                     }
-                    _ => BACKGROUND_DONE,
+                    _ => background_done(),
                 };
                 background_wait = false;
                 for ev in norm.queue_turn() { let _ = emit.send(ev); }
-                if p.write_json(&user_line(line)).await.is_err() {
+                if p.write_json(&user_line(&line)).await.is_err() {
                     exited_early = true;
                     break;
                 }

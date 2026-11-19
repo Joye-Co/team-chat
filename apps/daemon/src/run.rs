@@ -468,7 +468,7 @@ fn start_chat_run(
     let bin = match crate::chat_run::install_link(run_dir) {
         Ok(b) => b,
         Err(e) => {
-            eprintln!("{} run {run_id}: no chat-run link: {e}", now_ms());
+            crate::problems::warn(format_args!("run {run_id}: no chat-run link: {e}"));
             return None;
         }
     };
@@ -511,7 +511,7 @@ fn start_chat_run(
     let (host, (var, value)) = match started {
         Ok(h) => h,
         Err(e) => {
-            eprintln!("{} run {run_id}: no chat-run transport: {e}", now_ms());
+            crate::problems::warn(format_args!("run {run_id}: no chat-run transport: {e}"));
             return None;
         }
     };
@@ -620,14 +620,13 @@ pub async fn supervise(ctx: RunCtx) {
                         if let Some(ch) = crate::vm_cache::toolchain_channel(&cwd) {
                             let rustup = std::path::Path::new(crate::vm_cache::HOST_RUSTUP);
                             match crate::vm_cache::install_toolchain(&held.dir, &ch, rustup).await {
-                                Ok(ms) => {
-                                    eprintln!(
-                                        "{} run {run_id}: toolchain {ch} ready ({ms})",
-                                        now_ms()
-                                    )
-                                }
+                                Ok(ms) => crate::problems::log(format_args!(
+                                    "run {run_id}: toolchain {ch} ready ({ms})"
+                                )),
                                 Err(e) => {
-                                    eprintln!("{} run {run_id}: toolchain {ch}: {e}", now_ms());
+                                    crate::problems::log(format_args!(
+                                        "run {run_id}: toolchain {ch}: {e}"
+                                    ));
                                     toolchain_missing = Some(ch);
                                 }
                             }
@@ -636,7 +635,9 @@ pub async fn supervise(ctx: RunCtx) {
                         Some(held)
                     }
                     Err(e) => {
-                        eprintln!("{} run {run_id}: no repository cache: {e}", now_ms());
+                        crate::problems::log(format_args!(
+                            "run {run_id}: no repository cache: {e}"
+                        ));
                         None
                     }
                 }
@@ -705,7 +706,7 @@ pub async fn supervise(ctx: RunCtx) {
                     && github.as_ref().is_some_and(|g| g.vm())
                     && let Err(e) = crate::github::install_gh(&dir.join("bin"))
                 {
-                    eprintln!("{} run {run_id}: no gh proxy: {e}", now_ms());
+                    crate::problems::warn(format_args!("run {run_id}: no gh proxy: {e}"));
                 }
                 host
             };
@@ -736,7 +737,7 @@ pub async fn supervise(ctx: RunCtx) {
                         .map(|(_, v)| std::ffi::OsString::from(v))
                         .unwrap_or_default();
                     if let Err(e) = crate::shim::install(&dir.join("bin"), &path) {
-                        eprintln!("{} run {run_id}: shims left out: {e}", now_ms());
+                        crate::problems::warn(format_args!("run {run_id}: shims left out: {e}"));
                     }
                     dir.join("bin").display().to_string()
                 };
@@ -750,7 +751,9 @@ pub async fn supervise(ctx: RunCtx) {
                 {
                     match crate::shim::claude_env_file(&dir, &bin) {
                         Ok(f) => env.push((crate::shim::CLAUDE_ENV_FILE.into(), f)),
-                        Err(e) => eprintln!("{} run {run_id}: no Claude env file: {e}", now_ms()),
+                        Err(e) => crate::problems::log(format_args!(
+                            "run {run_id}: no Claude env file: {e}"
+                        )),
                     }
                 }
                 // Every bash of the run (Codex's `bash -lc` when the user's shell is bash, Git
@@ -760,7 +763,7 @@ pub async fn supervise(ctx: RunCtx) {
                     && let Err(e) =
                         crate::shim::set_bash_env(&mut env, &dir, &bin, rt.kind != "claude")
                 {
-                    eprintln!("{} run {run_id}: no bash env file: {e}", now_ms());
+                    crate::problems::log(format_args!("run {run_id}: no bash env file: {e}"));
                 }
                 // Codex (and an ACP agent) runs each command in the user's login shell
                 // (`zsh -lc`): on macOS path_helper, or a profile, would put the shims last.
@@ -782,7 +785,9 @@ pub async fn supervise(ctx: RunCtx) {
                             }
                             env.push((crate::shim::ZDOTDIR.into(), zdot.display().to_string()));
                         }
-                        Err(e) => eprintln!("{} run {run_id}: no zsh files: {e}", now_ms()),
+                        Err(e) => {
+                            crate::problems::log(format_args!("run {run_id}: no zsh files: {e}"))
+                        }
                     }
                 }
             }
@@ -1033,6 +1038,8 @@ fn after_sleep(
 /// Pause state of a run (接管).
 struct Paused {
     since: Instant,
+    /// The member id of the person who paused it (empty when the server did not say).
+    by: String,
     /// The stopped CLI and its tools (None while the CLI has not started yet).
     stopped: Option<Box<dyn Stopped>>,
     /// A person took over: their commands may run (design-takeover 3.4).
@@ -1174,6 +1181,7 @@ async fn run_runtime(
                             };
                             paused = Some(Paused {
                                 since: Instant::now(),
+                                by: by.clone().unwrap_or_default(),
                                 stopped,
                                 takeover,
                                 queued: vec![],
@@ -1191,11 +1199,11 @@ async fn run_runtime(
                             for ev in gate.push(RunEvent::Paused { paused: false, by: None }) {
                                 event(ev);
                             }
-                            if let Some(text) = words {
+                            if let Some(words) = words {
                                 resumes += 1;
                                 let _ = rt_tx.send(Control::Input {
                                     input_id: format!("resume-{resumes}"),
-                                    text,
+                                    text: crate::handback::pause_note("", None, &words),
                                 });
                             }
                             continue;
@@ -1210,7 +1218,10 @@ async fn run_runtime(
                                 event(RunEvent::HandSummary(summary));
                                 Some(text)
                             }
-                            None => words,
+                            // A plain pause: who paused it and for how long, then their words.
+                            None => words.map(|w| {
+                                crate::handback::pause_note(&p.by, Some(p.since.elapsed()), &w)
+                            }),
                         };
                         p.resume();
                         // The paused time does not count toward maxDurationMs or the stall.

@@ -2,7 +2,8 @@
 """Fake ACP agent (JSON-RPC 2.0 on stdio, Agent Client Protocol v1): streams message chunks,
 one tool call, and asks permission when the prompt says "approve": for a file write, or with
 "merge" in the prompt for the shell command `gh pr merge 5`. The words count in the request, not
-in the rules the server puts in front of it.
+in the rules the server puts in front of it nor in the run note the daemon puts before the first
+prompt (the request is the last paragraph).
 
 Sessions are kept in $HOME/acp-sessions/<id>.json (the prompts and the cwd), so a later
 process can `session/load` one: the agent then replays the history as `session/update`s, as
@@ -60,7 +61,7 @@ for line in sys.stdin:
         earlier = list(sess["prompts"])
         sess["prompts"].append(text)
         save()
-        cue = text.rsplit("\nRequest from ", 1)[-1]
+        cue = text.rsplit("\nRequest from ", 1)[-1].rsplit("\n\n", 1)[-1]
         upd({"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "acp: "}})
         if "approve" in cue:
             out({"id": 500, "method": "session/request_permission", "params": {"sessionId": sid,
