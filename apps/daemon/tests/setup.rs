@@ -125,7 +125,11 @@ fn doctor_reports_without_secrets() {
     text.push_str("[runtimes.gone]\nkind = \"acp\"\ncommand = \"/nonexistent/agent\"\n");
     let c = Config::parse(&text).unwrap();
     let rt = tokio::runtime::Runtime::new().unwrap();
-    let (report, ok) = rt.block_on(daemon::doctor::report(&c));
+    let (report, ok) = rt.block_on(daemon::doctor::report(
+        &c,
+        &dir.path().join("daemon.toml"),
+        None,
+    ));
     assert!(!ok);
     assert!(report.contains("NOT FOUND"));
     assert!(report.contains("disk free"));

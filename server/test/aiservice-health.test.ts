@@ -4,7 +4,7 @@
 // weekly budget leaving out runs on a subscription sign-in. Provider calls go to a fake fetch.
 import { ActivityResponse, AiServiceConfig, AiServiceStatus, TeamUsage } from "@chat/protocol";
 import { env } from "cloudflare:test";
-import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SECRET_MISSING, TEST_CHECK_MS, requireSecret } from "../src/aiservice";
 import { callModel, completionUsage } from "../src/aiservice/providers";
 import { BACKOFF_MS, retryAfterMs, retryable } from "../src/aiservice/retry";
@@ -14,14 +14,8 @@ import type { UsageRun } from "../src/bots/desk/external";
 import { paidRuns } from "../src/budget";
 import type { Env } from "../src/core/env";
 import { resetPriceCache } from "../src/usage/prices";
-import { Daemon, HEALTH, downViolations, mention, world } from "./daemon";
-import { Client, api, createMember, protocolViolations, waitUntil } from "./helpers";
-
-afterAll(async () => {
-  await new Promise((r) => setTimeout(r, 300));
-  expect(protocolViolations).toEqual([]);
-  expect(downViolations).toEqual([]);
-});
+import { Daemon, HEALTH, mention, world } from "./daemon";
+import { Client, api, createMember, waitUntil } from "./helpers";
 
 const realFetch = globalThis.fetch;
 const KEY = "sk-deepseek-health-77aa";

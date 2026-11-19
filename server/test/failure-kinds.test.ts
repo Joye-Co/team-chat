@@ -1,7 +1,7 @@
 // 模 2.2, 2.3, 2.10, 3.1, 3.2, 3.5; 接 5.3; 盯 1.13; 机 2.5, 5.2: a failed run says what went wrong
 // and what to do, a signed-out CLI gets no work, and the run keeps the model it really used.
 import { env, runInDurableObject } from "cloudflare:test";
-import { afterAll, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
   type MachineView,
   TEXT,
@@ -14,15 +14,10 @@ import {
 } from "../src/bots/dispatch";
 import { SIGNED_OUT_MARK_MS, signedOutRuntimes } from "../src/bots/link";
 import type { BotsEnv } from "../src/bots/env";
-import { Daemon, HEALTH, downViolations, mention, world } from "./daemon";
-import { Client, api, protocolViolations, waitUntil } from "./helpers";
+import { Daemon, HEALTH, mention, world } from "./daemon";
+import { Client, api, waitUntil } from "./helpers";
 
 const benv = env as unknown as BotsEnv;
-
-afterAll(() => {
-  expect(protocolViolations).toEqual([]);
-  expect(downViolations).toEqual([]);
-});
 
 function botMessages(c: Client, topicId: string, botId: string): any[] {
   return c

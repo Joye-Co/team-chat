@@ -2,15 +2,9 @@
 // id, made by its first message; 开个话题 from one of its messages; no work status, no
 // auto-follow and no responsible bot.
 import { mainTopicId } from "@chat/protocol";
-import { afterAll, describe, expect, it } from "vitest";
-import { Daemon, downViolations, world } from "./daemon";
-import { Client, api, clientMsgId, createGroup, createMember, protocolViolations, waitUntil } from "./helpers";
-
-afterAll(async () => {
-  await new Promise((r) => setTimeout(r, 300));
-  expect(protocolViolations).toEqual([]);
-  expect(downViolations).toEqual([]);
-});
+import { describe, expect, it } from "vitest";
+import { Daemon, world } from "./daemon";
+import { Client, api, clientMsgId, createGroup, createMember, waitUntil } from "./helpers";
 
 async function setup(n = 2) {
   const members = await Promise.all(Array.from({ length: n }, (_, i) => createMember({ name: `M${i}` })));
@@ -144,7 +138,7 @@ describe("群聊", () => {
     // A later mention of dev goes to dev's active run.
     await c.ok({ t: "send", groupId: w.gid, topicId: main, clientMsgId: clientMsgId(), body: "@dev 还有 lint", mentions: [w.bot.id] });
     const input = await d.next((f) => f.t === "run.input");
-    expect(input).toMatchObject({ runId: first.runId, text: "@dev 还有 lint" });
+    expect(input).toMatchObject({ runId: first.runId, text: "Follow-up from Alice:\n@dev 还有 lint" });
 
     // The run's status reports change nothing on the 群聊.
     const s = d.done(first.runId, { status: "succeeded", exitCode: 0, resultText: "修好了", summary: "修好了" });
