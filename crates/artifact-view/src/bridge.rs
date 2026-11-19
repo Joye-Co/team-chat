@@ -172,6 +172,9 @@ impl Reject {
     }
 }
 
+/// Longest `Error.message` a page gets from outside the bridge.
+pub const MAX_ERROR_MESSAGE_CHARS: usize = 300;
+
 /// Largest accepted bridge message (serialized JSON).
 pub const MAX_MESSAGE_BYTES: usize = 256 * 1024;
 /// Largest `emit` / `ask` payload (INTERACT §5.6).
@@ -649,6 +652,15 @@ const PAGE_TEMPLATE: &str = r#"(function(){
   if (!h) { var c = window.chrome && window.chrome.webview; if (c) h = { postMessage: function (m) { c.postMessage(m); } }; }
   if (!h) return;
   var init = __INIT__;
+  // The page has no dialogs (the host shows none): say so where the author looks.
+  [['alert', undefined], ['confirm', false], ['prompt', null]].forEach(function (d) {
+    try {
+      Object.defineProperty(window, d[0], { configurable: true, writable: true, enumerable: false, value: function () {
+        try { console.warn('teamchat: ' + d[0] + '() is not available in a page; draw it in the page itself'); } catch (e) {}
+        return d[1];
+      } });
+    } catch (e) {}
+  });
   var n = 0, pending = new Map(), subs = [], last = null, asking = false;
   window.addEventListener('artifactbridgereply', function (e) {
     var d = e.detail || {}, p = pending.get(d.id);

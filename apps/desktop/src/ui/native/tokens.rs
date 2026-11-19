@@ -1080,6 +1080,19 @@ pub mod metrics {
     // Inspector and lists (§2.5, §2.6)
     pub const INSPECTOR_ROW: Pixels = height::ROW;
     pub const INSPECTOR_PAD: Pixels = space::S16;
+    /// A code block of a message longer than `CODE_FOLD_OVER` lines shows its
+    /// first `CODE_FOLD_LINES` lines and a 展开 button (the gap between the two
+    /// keeps a fold from hiding only a few lines).
+    pub const CODE_FOLD_LINES: usize = 24;
+    pub const CODE_FOLD_OVER: usize = 30;
+    /// A finished answer of an AI member longer than `BODY_FOLD_OVER` rendered
+    /// rows (or `BODY_FOLD_CHARS` characters) shows its first blocks, up to
+    /// `BODY_FOLD_ROWS` rows, and a 展开全文 row. `BODY_FOLD_UNITS` is the
+    /// width of one row of the in-thread column in half-width characters.
+    pub const BODY_FOLD_OVER: usize = 60;
+    pub const BODY_FOLD_CHARS: usize = 4000;
+    pub const BODY_FOLD_ROWS: usize = 40;
+    pub const BODY_FOLD_UNITS: usize = 84;
     /// The label column of a DescriptionList and of every sheet.
     pub const LABEL_COLUMN: Pixels = px(112.);
     pub const LABEL_GAP: Pixels = space::S8;
