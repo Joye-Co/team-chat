@@ -80,4 +80,18 @@ impl ChatProvider for Unsynced {
         unbounded().1
     }
     fn reconnect_now(&self) {}
+    // Nothing remembered yet: an empty list once connected (the card's
+    // compact empty), and no answer from a server that is not reached.
+    fn memories(&self, _scope: &memory::MemoryScope) -> AdminReply<Vec<memory::Memory>> {
+        reply_now(match self.state {
+            ConnectionState::Online => Ok(Vec::new()),
+            _ => Err(AdminError::Offline),
+        })
+    }
+    fn memory_updates(&self, _scope: &memory::MemoryScope) -> AdminReply<memory::MemoryDay> {
+        reply_now(match self.state {
+            ConnectionState::Online => Ok(memory::MemoryDay::default()),
+            _ => Err(AdminError::Offline),
+        })
+    }
 }

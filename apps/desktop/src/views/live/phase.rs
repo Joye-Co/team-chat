@@ -50,7 +50,7 @@ pub fn phase_words(run: &BotRunSummary, n: &Names, name: impl Fn(&str) -> String
             (
                 c::LIVE_PHASE_STUCK.to_string(),
                 c::LIVE_SHORT_STUCK.to_string(),
-                BadgeState::Abnormal,
+                BadgeState::Failed,
             )
         }
         RunPhase::WaitingPerson | RunPhase::NeedsReply | RunPhase::WaitingApproval => {
@@ -125,12 +125,15 @@ pub fn phase_words(run: &BotRunSummary, n: &Names, name: impl Fn(&str) -> String
         }
         RunPhase::Done => (
             c::LIVE_PHASE_DONE.to_string(),
-            c::LIVE_PHASE_DONE.to_string(),
+            // A run's result is 已交付 (§2.12); 完成 belongs to the 话题.
+            crate::copy::common::STATUS_DELIVERED.to_string(),
             BadgeState::Done,
         ),
         RunPhase::Failed => (
             c::LIVE_PHASE_FAILED.to_string(),
-            c::LIVE_PHASE_FAILED.to_string(),
+            // The badge says 失败, the one failed word of every StatusBadge
+            // (§2.12); 没做完 stays the banner's title above the cause.
+            c::LIVE_SHORT_FAILED.to_string(),
             BadgeState::Failed,
         ),
         RunPhase::Stopped => (
@@ -161,10 +164,14 @@ pub fn phase_since(run: &BotRunSummary, phase: RunPhase) -> Option<Millis> {
     }
 }
 
-/// `· 已 12 分钟`, `· 已 2 小时 5 分钟`: how long the phase has lasted.
+/// `· 已 12 分钟`, `· 已 2 小时 5 分钟`, `· 刚刚` in the first minute: how long the phase has
+/// lasted.
 pub fn lasted(since: Millis, now: Millis) -> String {
     let minutes = ((now - since).max(0) / 60_000) as u64;
-    if minutes < 60 {
+    if minutes == 0 {
+        // The first minute reads 刚刚, never `已 0 分钟`.
+        c::LIVE_PHASE_JUST_NOW.to_string()
+    } else if minutes < 60 {
         fill(c::LIVE_PHASE_FOR, &[("n", &minutes.to_string())])
     } else {
         fill(
@@ -263,6 +270,11 @@ pub fn card_badge(
     progress: Option<(usize, usize)>,
     plan_waiting: bool,
 ) -> (BadgeState, String) {
+    // COMPLETENESS §2.4 (v16): while someone holds its computer the card
+    // says 已暂停, the word of the toolbar; who holds it is on the pane.
+    if words.phase == RunPhase::TakenOver {
+        return (BadgeState::Paused, c::LIVE_SHORT_PAUSED.to_string());
+    }
     if words.phase != RunPhase::Working {
         return (words.badge, words.short.clone());
     }
@@ -346,7 +358,7 @@ mod tests {
             (BadgeState::Paused, "已暂停".into())
         );
         r.hold.hold_kind = Some("takeover".into());
-        assert_eq!(card_badge(&words(&r), None, false).1, "你在操作");
+        assert_eq!(card_badge(&words(&r), None, false).1, "已暂停");
     }
 
     #[test]

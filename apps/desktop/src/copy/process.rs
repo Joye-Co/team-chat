@@ -2,7 +2,6 @@
 //! topic, step by step.
 
 crate::copy! {
-    TAB_DETAILS = "详情",
     TAB_PROCESS = "过程",
     EMPTY = "这个话题里还没有成员在后台工作",
     RUNS = "工作记录",
@@ -17,17 +16,13 @@ crate::copy! {
     STATUS_FAILED = "失败",
     STATUS_CANCELLED = "已取消",
     STATUS_STOPPING = "停止中",
-    RUN_ON = "运行于 {name}",
-    REQUESTED_BY = "{name} 发起",
-    STARTED_AT = "开始 {time}",
-    ENDED_AT = "结束 {time}",
     DURATION = "用时 {d}",
     DURATION_SECONDS = "{n} 秒",
     DURATION_MINUTES = "{m} 分钟",
     DURATION_HOURS = "{h} 小时 {m} 分钟",
     STEPS = "步骤",
     LOADING = "正在加载…",
-    LOAD_FAILED = "加载失败",
+    LOAD_FAILED = "没能读到这次工作的记录",
     OFFLINE = "连不上服务器，联网后再看",
     NOT_FOUND = "找不到这次工作的记录",
     FORBIDDEN = "没有权限查看",
@@ -49,7 +44,7 @@ crate::copy! {
     FILE_MODIFIED = "修改",
     FILE_DELETED = "删除",
     STEP_APPROVAL = "请求同意",
-    APPROVAL_WAITING = "等待回复（在话题里回复 同意 或 拒绝）",
+    APPROVAL_WAITING = "等待回复（在话题里回复「同意」或「拒绝」）",
     APPROVAL_APPROVED = "已同意",
     APPROVAL_DENIED = "已拒绝",
     STEP_TURN_STARTED = "开始处理新消息",
@@ -77,7 +72,6 @@ crate::copy! {
     ACT_START = "看新消息",
     STOP = "停止…",
     STOPPING = "正在停止…",
-    STOP_FAILED = "没能停止：{reason}",
     STOP_FORBIDDEN = "只有群里的成员可以停止",
     // The facts of a run (a DescriptionList, COMPLETENESS §2.5).
     FACT_MACHINE = "电脑",
@@ -106,4 +100,5 @@ crate::copy! {
     DEV_DOWNLOAD_FAILED = "没能下载：{error}",
     DEV_RAW = "原始事件（{n} 条，最新的在最后；点一条展开并复制）",
     DEV_CONTEXT = "存下这次带的上下文（.txt）",
+    COPIED = "已复制",
 }

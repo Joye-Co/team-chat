@@ -6,7 +6,7 @@ use chrono::{Datelike as _, NaiveDate};
 use crate::{
     copy::{fill, memory as c},
     data::{
-        Member, MemberLevel,
+        Member, MemberLevel, Millis,
         memory::{
             Memory, MemoryChange, MemoryDay, MemoryKind, MemoryScope, MemorySourceKind,
             MemoryStatus, MemoryUpdate,
@@ -175,12 +175,16 @@ pub fn lists_in<'a>(order: &[MemoryKind], memories: &'a [Memory]) -> Lists<'a> {
     Lists { groups, retired }
 }
 
-/// Where a memory came from, in words (来龙去脉). `name` reads a member id as a name.
-pub fn source_text(m: &Memory, name: &dyn Fn(&str) -> String) -> String {
+/// Where a memory came from, in words (来龙去脉). `name` reads a member id as a name;
+/// `me` is the signed-in member, who reads their own lines as 你.
+pub fn source_text(m: &Memory, name: &dyn Fn(&str) -> String, me: Option<&str>) -> String {
     let author = name(&m.author_id);
+    let mine = me == Some(m.author_id.as_str());
     match m.source {
+        MemorySourceKind::Manual if mine => c::SOURCE_MANUAL_SELF.to_string(),
         MemorySourceKind::Manual => fill(c::SOURCE_MANUAL, &[("name", &author)]),
         // A person changed what an AI wrote: say who, the change is the newest fact.
+        _ if m.human && mine => c::SOURCE_EDITED_SELF.to_string(),
         _ if m.human && m.source != MemorySourceKind::Manual => {
             fill(c::SOURCE_EDITED, &[("name", &author)])
         }
@@ -195,16 +199,20 @@ pub fn source_text(m: &Memory, name: &dyn Fn(&str) -> String) -> String {
 #[derive(Debug, PartialEq, Eq)]
 pub struct UpdateLine {
     pub id: String,
-    /// 新增, 改了, 停用 or 可能过时.
+    /// 新增, 修改, 停用 or 可能过时.
     pub word: &'static str,
     pub change: MemoryChange,
     /// The memory's text after the change (before it, for a retired one).
     pub text: String,
-    /// What it said before (改了), or why (the consolidation's note).
+    /// What it said before (修改), or why (the consolidation's note).
     pub detail: Option<String>,
     pub undone: bool,
     /// 撤回 shows: a writer, a change that can be undone, not undone yet.
     pub can_undo: bool,
+    /// The memory the line is about.
+    pub memory_id: String,
+    /// 编辑 and 停用 show: a writer, a 可能过时 line, not undone.
+    pub can_act: bool,
 }
 
 pub fn update_line(u: &MemoryUpdate, writer: bool) -> UpdateLine {
@@ -238,10 +246,12 @@ pub fn update_line(u: &MemoryUpdate, writer: bool) -> UpdateLine {
         detail,
         undone,
         can_undo: writer && undoable && !undone,
+        memory_id: u.memory_id.clone(),
+        can_act: writer && u.change == MemoryChange::Flagged && !undone,
     }
 }
 
-/// `新增 2 条，改了 1 条，停用 1 条` for the lines not undone; `None` when nothing is left.
+/// `新增 2 条，修改 1 条，停用 1 条` for the lines not undone; `None` when nothing is left.
 pub fn summary(day: &MemoryDay) -> Option<String> {
     let live: Vec<&MemoryUpdate> = day
         .updates
@@ -278,6 +288,37 @@ pub fn day_label(day: &str, today: NaiveDate) -> String {
             c::DAY_DATE,
             &[("m", &d.month().to_string()), ("d", &d.day().to_string())],
         )
+    }
+}
+
+/// When a memory row was last changed: `今天 09:55`, `昨天`, else `10月19日`, the day form
+/// of 记忆更新 and of the rest of 团队管理 (the year's own form when it is not this year).
+pub fn row_time(now: Millis, at: Millis) -> String {
+    use chrono::{Local, TimeZone as _};
+    let (Some(n), Some(t)) = (
+        Local.timestamp_millis_opt(now).single(),
+        Local.timestamp_millis_opt(at).single(),
+    ) else {
+        return crate::copy::common::TIME_UNKNOWN.to_string();
+    };
+    if at <= 0 {
+        return crate::copy::common::TIME_UNKNOWN.to_string();
+    }
+    let (today, day) = (n.date_naive(), t.date_naive());
+    if day == today {
+        format!("{} {}", c::DAY_TODAY, t.format("%H:%M"))
+    } else if today.pred_opt() == Some(day) {
+        c::DAY_YESTERDAY.to_string()
+    } else if day.year() == today.year() {
+        fill(
+            crate::copy::common::MONTH_DAY,
+            &[
+                ("m", &day.month().to_string()),
+                ("d", &day.day().to_string()),
+            ],
+        )
+    } else {
+        crate::views::shell::day(at)
     }
 }
 
@@ -574,7 +615,7 @@ mod tests {
             ),
             true,
         );
-        assert_eq!(changed.word, "改了");
+        assert_eq!(changed.word, "修改");
         assert_eq!(changed.text, "text m1");
         assert_eq!(
             changed.detail.as_deref(),
@@ -658,16 +699,18 @@ mod tests {
             }
         };
         let mut m = mem("m", MemoryKind::Lesson, MemoryStatus::Active, 1);
-        assert_eq!(source_text(&m, &name), "Forge 干活时记下");
+        assert_eq!(source_text(&m, &name, None), "Forge 干活时记下");
         m.source = MemorySourceKind::Message;
-        assert_eq!(source_text(&m, &name), "从群里的消息记下");
+        assert_eq!(source_text(&m, &name, None), "从群里的消息记下");
         m.source = MemorySourceKind::Card;
-        assert_eq!(source_text(&m, &name), "从卡片的回答记下");
+        assert_eq!(source_text(&m, &name, None), "从卡片的回答记下");
         m.human = true;
         m.author_id = "m-joye".into();
-        assert_eq!(source_text(&m, &name), "Joye 改过");
+        assert_eq!(source_text(&m, &name, None), "Joye 改过");
+        assert_eq!(source_text(&m, &name, Some("m-joye")), "你改过");
         m.source = MemorySourceKind::Manual;
-        assert_eq!(source_text(&m, &name), "Joye 记的");
+        assert_eq!(source_text(&m, &name, Some("m-lisa")), "Joye 记的");
+        assert_eq!(source_text(&m, &name, Some("m-joye")), "你记的");
     }
 
     #[test]

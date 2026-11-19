@@ -256,6 +256,7 @@ impl Snapshot {
         // mapping calls 排队, so the KPI, the rail list and the 话题 header
         // agree. A queued 话题 already in a member's queue counts once.
         let mut queue = p.queue();
+        let queued_runs = queue.len();
         for g in p.groups() {
             for t in p.topics(&g.id) {
                 if aside(&t.group_id, &t.id) {
@@ -275,6 +276,9 @@ impl Snapshot {
                 }
             }
         }
+        // The members' queues keep their position order; the 话题 after them
+        // read oldest first, so top = next.
+        queue[queued_runs..].sort_by_key(|q| (q.at.is_none(), q.at));
         let groups: HashMap<String, String> =
             p.groups().into_iter().map(|g| (g.id, g.name)).collect();
         let places = asks

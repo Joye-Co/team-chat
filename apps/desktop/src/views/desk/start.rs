@@ -244,20 +244,13 @@ impl DeskPage {
                             .text_color(if step.done { k.secondary } else { k.label })
                             .child(title),
                     )
-                    .child(div().n_callout().text_color(k.secondary).child(line))
-                    .when(step.kind == StepKind::FirstTask, |d| {
-                        d.child(
-                            div()
-                                .n_footnote()
-                                .text_color(k.tertiary)
-                                .child(c::DESK_START_GROUPS),
-                        )
-                    }),
+                    .child(div().n_body().text_color(k.secondary).child(line)),
             )
             .when(!actions.is_empty(), |d| {
                 d.child(
                     div()
                         .flex_none()
+                        .self_center()
                         .flex()
                         .items_center()
                         .gap(tsp::S8)

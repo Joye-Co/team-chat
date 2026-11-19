@@ -23,12 +23,12 @@ use gpui::{
 
 use crate::{
     app::{RightPane, Services},
-    copy::{fill, live as c, nav as n},
+    copy::{fill, live as c},
     data::{
         AdminError, BotRunSummary, Millis, PlanState,
         run_phase::{
             HandCommand, HandResult, RunAction, RunPhase, RunRefusal, RunRights, Viewer,
-            WaitingFor, actions, phase_of, rights,
+            WaitingFor, actions, phase_of, primary_action, rights,
         },
         v2::{AcceptanceItem, MachineScreen, ScreenLine, ScreenLineKind},
     },
@@ -49,8 +49,48 @@ use crate::{
         process::{ProcessView, stop_run},
         shell::{PaneView, clock, member_name, panes::watch, stub_body},
         timeline::plan,
+        topic_page::asks_in_topic,
     },
 };
+
+/// Where the banner of a run that waits for me leads.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AskRoute {
+    Approve,
+    Reply,
+}
+
+/// The way to the answer, only for the person the run waits for: anyone else reads
+/// `等 小王 批准` and has nothing to answer.
+fn ask_route(words: &phase::PhaseWords, waiting: Option<WaitingFor>) -> Option<AskRoute> {
+    if words.badge != BadgeState::NeedsYou {
+        return None;
+    }
+    match (words.phase, waiting) {
+        (RunPhase::WaitingApproval, _) => Some(AskRoute::Approve),
+        (RunPhase::WaitingPerson, Some(WaitingFor::Question)) => Some(AskRoute::Reply),
+        _ => None,
+    }
+}
+
+/// The message of the unanswered ask this route leads to: the newest, this member's first.
+fn open_ask(
+    asks: &[(crate::data::v2::AskItem, bool)],
+    bot: &str,
+    route: AskRoute,
+) -> Option<String> {
+    use crate::data::v2::AskKind;
+    // 去回复 answers a question: an approval or a review is not one.
+    let leads_here = |kind: AskKind| match route {
+        AskRoute::Approve => kind == AskKind::Approval,
+        AskRoute::Reply => !matches!(kind, AskKind::Approval | AskKind::Review),
+    };
+    asks.iter()
+        .filter(|(a, done)| !done && leads_here(a.kind))
+        .filter_map(|(a, _)| Some((a, a.message_id.as_ref()?)))
+        .max_by_key(|(a, _)| (a.from == bot, a.at))
+        .map(|(_, id)| id.to_string())
+}
 
 /// A terminal line in the screen preview (12 / 20 mono).
 const TERMINAL_LINE: Pixels = px(20.);
@@ -99,6 +139,8 @@ pub struct LivePane {
     /// Usable (design-takeover T6, T7): the words for the member that go with 继续 / 交还,
     /// the command field while I hold the run, and why the last command was refused.
     note: Option<Entity<InputState>>,
+    /// The note field's placeholder names 交还 (else 继续).
+    note_hand_back: bool,
     command: Option<Entity<InputState>>,
     command_error: Option<&'static str>,
     /// The run the two fields belong to.
@@ -120,6 +162,7 @@ impl LivePane {
             note: None,
             command: None,
             command_error: None,
+            note_hand_back: false,
             inputs_for: None,
             _inputs: Vec::new(),
         }
@@ -182,6 +225,51 @@ impl LivePane {
         Some((me.to_string(), role, !m.is_bot() && !m.deactivated))
     }
 
+    /// Whether the viewer can start stopped `run` again: a person who asked
+    /// for it or an owner (the server's rule), while it is the 话题's newest
+    /// run and no order of 按顺序做 is under way (a lone run would leave it).
+    fn may_restart(&self, run: &BotRunSummary, cx: &App) -> bool {
+        let Some((g, t, _)) = self.target(cx) else {
+            return false;
+        };
+        let Some((me, role, person)) = self.viewer_of() else {
+            return false;
+        };
+        let p = &self.services.provider;
+        let newest = p
+            .runs(&g, &t)
+            .into_iter()
+            .max_by_key(|r| r.started_at.unwrap_or(r.created_at))
+            .is_some_and(|r| r.id == run.id);
+        let in_order = p
+            .topic(&g, &t)
+            .and_then(|t| t.relay)
+            .is_some_and(|r| r.state != "done");
+        person
+            && newest
+            && !in_order
+            && (crate::views::process::asked_by(run, Some(&me))
+                || role == crate::data::TeamRole::Owner)
+    }
+
+    /// A new run with the same request; a refusal is an alert.
+    fn retry_run(&self, bot_id: &str, run_id: &str, cx: &mut Context<Self>) {
+        use crate::copy::timeline as t;
+        let rx = self.services.provider.retry_member_problem(bot_id, run_id);
+        cx.spawn(async move |_, cx| {
+            if let Err(e) = rx.await.unwrap_or(Err(AdminError::Other)) {
+                let _ = cx.update(|cx| {
+                    alert_in_active_window(
+                        t::RUN_RETRY_REFUSED,
+                        crate::views::settings::widgets::error_text(e),
+                        cx,
+                    )
+                });
+            }
+        })
+        .detach();
+    }
+
     /// The words left for the member (继续, 交还), trimmed; `None` when empty.
     fn note_text(&self, cx: &App) -> Option<String> {
         self.note
@@ -190,8 +278,33 @@ impl LivePane {
             .filter(|n| !n.is_empty())
     }
 
-    /// 暂停, 继续, 接管, 交还, 替 {who} 交还, 停止… and 去回复 (design-takeover 3.9).
+    /// 暂停, 继续, 接管, 交还, 替 {who} 交还…, 停止… and 去回复 (design-takeover 3.9).
     fn act(
+        &mut self,
+        run: &BotRunSummary,
+        action: RunAction,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if action == RunAction::HandBackFor {
+            let (view, asked) = (cx.weak_entity(), run.clone());
+            confirm_hand_back_for(
+                &self.services,
+                run,
+                move |window, cx| {
+                    let _ =
+                        view.update(cx, |this, cx| this.send_action(&asked, action, window, cx));
+                },
+                window,
+                cx,
+            );
+            return;
+        }
+        self.send_action(run, action, window, cx);
+    }
+
+    /// Carries out a button of the foot of the pane.
+    fn send_action(
         &mut self,
         run: &BotRunSummary,
         action: RunAction,
@@ -260,6 +373,7 @@ impl LivePane {
         run: &BotRunSummary,
         bot: &str,
         want_note: bool,
+        hand_back: bool,
         want_command: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -273,9 +387,26 @@ impl LivePane {
         }
         if !want_note {
             self.note = None;
-        } else if self.note.is_none() {
-            let placeholder = fill(c::LIVE_NOTE_PLACEHOLDER, &[("member", bot)]);
-            self.note = Some(cx.new(|cx| InputState::new(window, cx).placeholder(placeholder)));
+        } else {
+            // The field says which button carries the note; that can change
+            // while the field stays (a pause becomes a takeover).
+            let template = if hand_back {
+                c::LIVE_NOTE_PLACEHOLDER
+            } else {
+                c::LIVE_NOTE_PLACEHOLDER_RESUME
+            };
+            let placeholder = fill(template, &[("member", bot)]);
+            match &self.note {
+                None => {
+                    self.note =
+                        Some(cx.new(|cx| InputState::new(window, cx).placeholder(placeholder)));
+                }
+                Some(note) if self.note_hand_back != hand_back => {
+                    note.update(cx, |s, cx| s.set_placeholder(placeholder, window, cx));
+                }
+                Some(_) => {}
+            }
+            self.note_hand_back = hand_back;
         }
         if !want_command {
             self.command = None;
@@ -290,7 +421,11 @@ impl LivePane {
                 window,
                 |this: &mut Self, _, event: &InputEvent, window, cx| match event {
                     InputEvent::PressEnter { .. } => this.send_command(window, cx),
-                    InputEvent::Change if this.command_error.take().is_some() => cx.notify(),
+                    // 运行 follows the field (inert while it is empty).
+                    InputEvent::Change => {
+                        this.command_error = None;
+                        cx.notify();
+                    }
                     _ => {}
                 },
             ));
@@ -307,11 +442,15 @@ impl LivePane {
         if text.is_empty() {
             return;
         }
-        // Never queued (design-takeover 3.2): an away computer is said before sending; the
-        // server judges a running command.
+        // Never queued (design-takeover 3.2): an away computer is said before sending.
         if computer_away(&run) {
             self.command_error = Some(c::LIVE_CMD_OFFLINE);
             cx.notify();
+            return;
+        }
+        // One command at a time: the field is off until this one ends.
+        let commands = self.services.provider.hand_commands(&run.id);
+        if running_command(&run, &commands, now_ms()).is_some() {
             return;
         }
         let reply = self.services.provider.run_command(&run.id, text.clone());
@@ -416,12 +555,23 @@ impl LivePane {
         if let Some(ms) =
             crate::views::topic_page::run_elapsed(self.services.provider.as_ref(), run)
         {
-            let copy = plan::SpanCopy {
-                minutes: c::LIVE_ELAPSED,
-                hours: c::LIVE_ELAPSED_HOURS,
+            // 已用 is a clock that runs; a run that ended says what it took.
+            let text = if phase_of(run).0.ended() {
+                fill(
+                    crate::copy::process::DURATION,
+                    &[("d", &plan::span_text(plan::TOOK, ms))],
+                )
+            } else {
+                plan::span_text(
+                    plan::SpanCopy {
+                        minutes: c::LIVE_ELAPSED,
+                        hours: c::LIVE_ELAPSED_HOURS,
+                    },
+                    ms,
+                )
             };
             parts.push(
-                crate::ui::truncate::TruncText::new(plan::span_text(copy, ms))
+                crate::ui::truncate::TruncText::new(text)
                     .id("live-elapsed")
                     .tnum()
                     .flex_shrink(1.)
@@ -497,6 +647,48 @@ impl LivePane {
             ]))
     }
 
+    /// What a run reports went wrong, from the same source as the 话题's alert.
+    fn run_cause(&self, run: &BotRunSummary) -> Option<String> {
+        run.summary
+            .clone()
+            .or_else(|| {
+                let process = self.services.provider.run_process(&run.id);
+                crate::views::process::error_line(&process.steps)
+            })
+            .map(|c| c.trim().to_string())
+            .filter(|c| !c.is_empty())
+    }
+
+    /// 去批准 / 去回复: shows the card that asks in the 话题, or the composer when no card
+    /// does. A full-width pane steps aside, or the card would open behind it.
+    fn go_to_ask(
+        &mut self,
+        run: &BotRunSummary,
+        ask: Option<&str>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.expanded = false;
+        cx.notify();
+        let Some(id) = ask else {
+            self.act(run, RunAction::GoReply, window, cx);
+            return;
+        };
+        let (g, t) = (run.group_id.clone(), run.topic_id.clone());
+        let seq = self
+            .services
+            .provider
+            .messages(&g, &t, 400)
+            .messages
+            .iter()
+            .find(|m| m.id == id)
+            .map_or(0, |m| m.created_seq);
+        let id = id.to_string();
+        self.services
+            .nav
+            .update(cx, |nav, cx| nav.open_message(g, t, id, seq, cx));
+    }
+
     /// The banner over the screen for a phase that needs words (design-takeover 3.9): who
     /// paused or holds the run and for how long, what an ended run waits for, which computer
     /// it waits for; under it the note for the member when I may continue or hand back.
@@ -516,8 +708,47 @@ impl LivePane {
         let me = self.services.me();
         let since = phase::phase_since(run, words.phase).map(|t| phase::lasted(t, now));
         let since = since.map(|s| s.trim_start_matches(['·', ' ']).to_string());
+        // A state color sits on the icon (§2.15); the title stays neutral, and
+        // only the frame of a failed or stuck run takes the destructive line.
+        let mut icon_ink = n.label;
+        // The computer by name, for the lines about an away computer.
+        let computer = screen
+            .machine_name
+            .clone()
+            .or_else(|| run.machine_name.clone())
+            .filter(|m| !m.trim().is_empty())
+            .unwrap_or_else(|| fill(c::LIVE_COMPUTER, &[("name", bot)]));
+        // Why a run failed, under the title.
+        let mut cause: Option<String> = None;
         let (sym, title, detail) = match words.phase {
-            RunPhase::Paused => (Sym::Pause, words.text.clone(), since),
+            RunPhase::Paused => {
+                icon_ink = words.badge.color(&n);
+                (
+                    words.badge.symbol().unwrap_or(Sym::Pause),
+                    words.text.clone(),
+                    since,
+                )
+            }
+            // Still held, but nothing can be done on the computer right now:
+            // the top of the pane says so.
+            RunPhase::TakenOver if computer_away(run) => {
+                icon_ink = n.amber;
+                let hint = match run.hold.paused_by.as_deref().filter(|_| !mine) {
+                    Some(by) => fill(
+                        c::LIVE_HELD_OFFLINE_HINT_OTHER,
+                        &[(
+                            "who",
+                            crate::ui::avatar::name_beside_avatar(&member_name(&self.services, by)),
+                        )],
+                    ),
+                    None => c::LIVE_HELD_OFFLINE_HINT.to_string(),
+                };
+                (
+                    Sym::Alert,
+                    fill(c::LIVE_PHASE_HELD_AWAY, &[("computer", &computer)]),
+                    Some(hint),
+                )
+            }
             RunPhase::TakenOver => (
                 Sym::Pointer,
                 words.text.clone(),
@@ -534,8 +765,9 @@ impl LivePane {
             ),
             RunPhase::NeedsReply => {
                 let stuck = matches!(phase_of(run).1, Some(WaitingFor::Stuck));
+                icon_ink = words.badge.color(&n);
                 (
-                    Sym::Reply,
+                    words.badge.symbol().unwrap_or(Sym::Reply),
                     if stuck {
                         c::LIVE_NEEDS_REPLY_STUCK.to_string()
                     } else {
@@ -544,9 +776,151 @@ impl LivePane {
                     since,
                 )
             }
-            RunPhase::WaitingComputer => (Sym::Hourglass, words.text.clone(), since),
+            // An away computer is named, with what happens when it is back, so
+            // 停止 does not read as the only way out.
+            RunPhase::WaitingComputer if computer_away(run) => {
+                icon_ink = words.badge.color(&n);
+                // How long the computer has been gone, counted from its last
+                // frame: the run's own age is the header's clock.
+                let times = self.services.provider.run_step_times(&run.id);
+                let gone = (!screen.lines.is_empty() || !times.is_empty()).then(|| {
+                    phase::lasted(last_frame_at(run, screen, &times), now)
+                        .trim_start_matches(['·', ' '])
+                        .to_string()
+                });
+                (
+                    words.badge.symbol().unwrap_or(Sym::Waiting),
+                    words.text.clone(),
+                    Some(
+                        [
+                            Some(fill(c::LIVE_PHASE_OFFLINE_HINT, &[("computer", &computer)])),
+                            gone,
+                        ]
+                        .into_iter()
+                        .flatten()
+                        .collect::<Vec<_>>()
+                        .join(" · "),
+                    ),
+                )
+            }
+            RunPhase::WaitingComputer => {
+                icon_ink = words.badge.color(&n);
+                (
+                    words.badge.symbol().unwrap_or(Sym::Waiting),
+                    words.text.clone(),
+                    since,
+                )
+            }
+            // Waiting on a person, or stuck: the state in words and for how long
+            // (design-takeover 3.9: the banner is the 状态词), with the mark of the
+            // header's badge.
+            RunPhase::WaitingPerson | RunPhase::WaitingApproval => {
+                icon_ink = words.badge.color(&n);
+                // A stuck run says what it stopped on: its own words when it left
+                // any, else the step of the plan it is on. A run waiting for approval
+                // names that step too.
+                let at_step = || {
+                    run.plan
+                        .iter()
+                        .find(|p| matches!(p.state, PlanState::Current | PlanState::Waiting))
+                        .map(|p| fill(c::LIVE_STUCK_AT, &[("step", &p.text)]))
+                };
+                if phase_of(run).1 == Some(WaitingFor::Stuck) {
+                    cause = self.run_cause(run).or_else(at_step);
+                } else if words.phase == RunPhase::WaitingApproval {
+                    cause = at_step();
+                }
+                (
+                    words.badge.symbol().unwrap_or(Sym::NeedsYou),
+                    words.text.clone(),
+                    since,
+                )
+            }
+            // A failed run says why (§2.15), from the same source as the 话题's alert.
+            RunPhase::Failed => {
+                icon_ink = n.red;
+                cause = self.run_cause(run);
+                // No `已 N 分钟`: a failure is an event with a cause, not a
+                // state that lasts.
+                (Sym::Failed, words.text.clone(), None)
+            }
+            // A stopped run says so and when, as the other ended phases do.
+            RunPhase::Stopped => (
+                words.badge.symbol().unwrap_or(Sym::Stopped),
+                fill(c::LIVE_MEMBER_ENDED, &[("member", bot)]),
+                run.ended_at.map(crate::views::timeline::plan::ended_text),
+            ),
             _ => return None,
         };
+        let restart = (words.phase == RunPhase::Stopped && self.may_restart(run, cx)).then(|| {
+            let (bot_id, run_id) = (run.bot_id.clone(), run.id.clone());
+            push_button(
+                "live-restart",
+                c::LIVE_RESTART,
+                PushStyle::Outline,
+                PushSize::Small,
+                cx,
+            )
+            .on_click(cx.listener(move |this, _, _, cx| this.retry_run(&bot_id, &run_id, cx)))
+        });
+        // The way to what the run waits for: 去批准 opens the approval card, 去回复 the
+        // question (or the composer when no card asks it).
+        let go_to_ask = ask_route(words, phase_of(run).1).and_then(|route| {
+            let ask = open_ask(
+                &asks_in_topic(
+                    &*self.services.provider,
+                    me.as_deref(),
+                    &run.group_id,
+                    &run.topic_id,
+                ),
+                &run.bot_id,
+                route,
+            );
+            let (id, label) = match route {
+                AskRoute::Approve => ("live-go-approve", c::LIVE_GO_APPROVE),
+                AskRoute::Reply => ("live-go-reply", c::LIVE_GO_REPLY),
+            };
+            (route == AskRoute::Reply || ask.is_some()).then(|| {
+                let run = run.clone();
+                push_button(id, label, PushStyle::Default, PushSize::Small, cx).on_click(
+                    cx.listener(move |this, _, window, cx| {
+                        this.go_to_ask(&run, ask.as_deref(), window, cx)
+                    }),
+                )
+            })
+        });
+        // What a failed run offers (§2.15): 重试 and 查看日志.
+        let failed_actions = (words.phase == RunPhase::Failed).then(|| {
+            use crate::copy::timeline as t;
+            let retry = {
+                let (bot_id, run_id) = (run.bot_id.clone(), run.id.clone());
+                push_button(
+                    "live-retry",
+                    t::RUN_RETRY,
+                    PushStyle::Default,
+                    PushSize::Small,
+                    cx,
+                )
+                .on_click(cx.listener(move |this, _, _, cx| this.retry_run(&bot_id, &run_id, cx)))
+            };
+            let log = push_button(
+                "live-view-log",
+                t::RUN_VIEW_LOG,
+                PushStyle::Outline,
+                PushSize::Small,
+                cx,
+            )
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.show_steps(cx);
+                cx.notify();
+            }));
+            div()
+                .flex()
+                .items_center()
+                .gap(space::S8)
+                .child(retry)
+                .child(log)
+        });
         let reminder = phase::reminder(run, bot, me.as_deref(), now, |id| {
             crate::ui::avatar::name_beside_avatar(&member_name(&self.services, id)).to_string()
         });
@@ -575,14 +949,18 @@ impl LivePane {
             .then(|| self.note.clone())
             .flatten()
             .map(|state| {
-                let commands = self
-                    .services
-                    .provider
-                    .hand_commands(&run.id)
+                let held = self.services.provider.hand_commands(&run.id);
+                let held: Vec<_> = held
                     .iter()
                     .filter(|h| this_hold(run, h))
                     .filter(|h| mine && Some(h.by.as_str()) == me.as_deref())
-                    .count();
+                    .collect();
+                let commands = held.len();
+                // 交还 aborts a command that still runs (the daemon cancels it): say so.
+                // Same test as the command box: a lost result past HAND_COMMAND_MAX is not running.
+                let running = held
+                    .iter()
+                    .any(|h| h.result.is_none() && now - h.at <= HAND_COMMAND_MAX);
                 div()
                     .w_full()
                     .flex()
@@ -593,22 +971,42 @@ impl LivePane {
                             .full_width(),
                     )
                     .children((commands > 0).then(|| {
-                        div().n_footnote().text_color(n.secondary).child(fill(
-                            c::LIVE_NOTE_COMMANDS,
-                            &[("n", &commands.to_string()), ("member", bot)],
-                        ))
+                        div().n_footnote().text_color(n.secondary).child(
+                            if running && rights.hand_back {
+                                c::LIVE_NOTE_COMMAND_RUNNING.to_string()
+                            } else {
+                                fill(
+                                    c::LIVE_NOTE_COMMANDS,
+                                    &[("n", &commands.to_string()), ("member", bot)],
+                                )
+                            },
+                        )
                     }))
             });
+        // More than the title: the icon stays on the title's line (the Alert anatomy).
+        let several_lines = cause.is_some()
+            || detail.as_ref().is_some_and(|d| !d.is_empty())
+            || reminder.is_some()
+            || failed_actions.is_some()
+            || restart.is_some()
+            || go_to_ask.is_some();
         // The Alert anatomy (§2.15, D5): a bordered container, px 16.
         Some(
             div()
                 .flex_none()
-                .mb(px(12.))
                 .px(space::S16)
                 .py(space::S12)
                 .rounded(crate::ui::native::tokens::radius::CONTAINER)
                 .border_1()
-                .border_color(n.separator)
+                .border_color(if words.badge == BadgeState::Failed {
+                    crate::ui::native::feedback::alert_colors(
+                        crate::ui::native::feedback::AlertTone::Destructive,
+                        &n,
+                    )
+                    .2
+                } else {
+                    n.separator
+                })
                 .bg(n.content)
                 .flex()
                 .flex_col()
@@ -617,9 +1015,22 @@ impl LivePane {
                     div()
                         .min_h(BANNER - space::S12 * 2.)
                         .flex()
-                        .items_center()
+                        .map(|d| {
+                            if several_lines {
+                                d.items_start()
+                            } else {
+                                d.items_center()
+                            }
+                        })
                         .gap(space::S12)
-                        .child(sym.icon(SymSize::INLINE).text_color(n.label))
+                        .child(
+                            div()
+                                .flex_none()
+                                .h(crate::ui::native::tokens::text::UI.1)
+                                .flex()
+                                .items_center()
+                                .child(sym.icon(SymSize::INLINE).text_color(icon_ink)),
+                        )
                         .child(
                             div()
                                 .flex_1()
@@ -633,6 +1044,11 @@ impl LivePane {
                                         .one_line()
                                         .child(title),
                                 )
+                                .children(cause.map(|c| {
+                                    crate::ui::truncate::clamped("live-failed-cause", c, 3)
+                                        .n_subheadline()
+                                        .text_color(n.secondary)
+                                }))
                                 .children(detail.filter(|d| !d.is_empty()).map(|d| {
                                     div()
                                         .n_subheadline()
@@ -645,9 +1061,14 @@ impl LivePane {
                                     reminder.map(|r| {
                                         div().n_subheadline().text_color(n.amber).child(r)
                                     }),
-                                ),
+                                )
+                                // The actions sit in the text column, under
+                                // the cause they answer (the Alert anatomy).
+                                .children(failed_actions.map(|a| a.mt(space::S8)))
+                                .children(restart.map(|a| div().mt(space::S8).flex().child(a)))
+                                .children(go_to_ask.map(|a| div().mt(space::S8).flex().child(a))),
                         )
-                        .children(share),
+                        .children(share.map(|b| div().flex_none().self_center().child(b))),
                 )
                 .children(note)
                 .into_any_element(),
@@ -663,17 +1084,14 @@ impl LivePane {
         run: &BotRunSummary,
         mine: bool,
         folder: Option<&std::path::Path>,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let n = native_colors(cx);
         let k = theme::colors(cx);
         let me = self.services.me();
         let commands = self.services.provider.hand_commands(&run.id);
-        // A command of an earlier hold that never got its result is not running now.
-        let running = commands
-            .iter()
-            .find(|h| h.result.is_none() && this_hold(run, h))
-            .cloned();
+        let running = running_command(run, &commands, now_ms());
         let away = computer_away(run);
         crate::selftest::drawn::mark(
             "live-commands",
@@ -693,6 +1111,7 @@ impl LivePane {
             )
             .child(div().flex_1().min_w_0().children(folder.map(|f| {
                 crate::ui::truncate::TruncText::new(f.display().to_string())
+                    .middle()
                     .flex_shrink(1.)
                     .into_any_element()
             })))
@@ -727,41 +1146,64 @@ impl LivePane {
                     let tail: Vec<&str> =
                         h.output.lines().filter(|l| !l.trim().is_empty()).collect();
                     let skip = tail.len().saturating_sub(HAND_LINES);
+                    // D13: the command and its output never wrap and are never cut; a
+                    // long line scrolls sideways. Who ran it and its state stay put.
                     div()
                         .flex()
-                        .flex_col()
-                        .gap(space::S2)
+                        .items_start()
+                        .gap(space::S8)
                         .child(
                             div()
-                                .min_h(TERMINAL_LINE)
+                                .flex_none()
+                                .h(TERMINAL_LINE)
                                 .flex()
                                 .items_center()
-                                .gap(space::S8)
-                                .child(div().flex_none().t_meta().text_color(k.ink_3).child(who))
-                                .child(
-                                    div()
-                                        .flex_1()
-                                        .min_w_0()
-                                        .one_line()
-                                        .t_meta()
-                                        .code_font()
-                                        .text_color(k.ink)
-                                        .child(format!("$ {}", h.command)),
-                                )
-                                .child(
-                                    div()
-                                        .flex_none()
-                                        .child(StatusBadge::new(state, word).dense()),
-                                ),
-                        )
-                        .children(tail[skip..].iter().map(|l| {
-                            div()
-                                .one_line()
                                 .t_meta()
-                                .code_font()
-                                .text_color(k.ink_2)
-                                .child(l.to_string())
-                        }))
+                                .text_color(k.ink_3)
+                                .child(who),
+                        )
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .flex()
+                                .flex_col()
+                                .gap(space::S2)
+                                .child(
+                                    div()
+                                        .min_h(TERMINAL_LINE)
+                                        .flex()
+                                        .items_center()
+                                        .gap(space::S8)
+                                        .child(command_lines(
+                                            ElementId::Name(
+                                                format!("live-command-line-{}", h.id).into(),
+                                            ),
+                                            vec![format!("$ {}", h.command)],
+                                            k.ink,
+                                            window,
+                                            cx,
+                                        ))
+                                        .child(
+                                            div()
+                                                .flex_none()
+                                                .child(StatusBadge::new(state, word).dense()),
+                                        ),
+                                )
+                                // The output takes the row's full width under
+                                // the command, from the command's x.
+                                .children((skip < tail.len()).then(|| {
+                                    command_lines(
+                                        ElementId::Name(
+                                            format!("live-command-output-{}", h.id).into(),
+                                        ),
+                                        tail[skip..].iter().map(|l| l.to_string()).collect(),
+                                        k.ink_2,
+                                        window,
+                                        cx,
+                                    )
+                                })),
+                        )
                         .into_any_element()
                 })
                 .collect()
@@ -782,21 +1224,28 @@ impl LivePane {
                     )
                     .on_click(cx.listener(move |this, _, _, cx| this.abort_command(&id, &cmd, cx)))
                 }),
+                // Nothing to run yet: the same primary at 50 % (§1.8), as the
+                // composer's send.
                 None => Some(
-                    push_button(
-                        "live-command-run",
-                        c::LIVE_CMD_RUN,
-                        PushStyle::Default,
-                        PushSize::Regular,
+                    ui::native::disabled_push(
+                        push_button(
+                            "live-command-run",
+                            c::LIVE_CMD_RUN,
+                            PushStyle::Default,
+                            PushSize::Regular,
+                            cx,
+                        ),
+                        state.read(cx).value().trim().is_empty(),
                         cx,
                     )
                     .on_click(cx.listener(|this, _, window, cx| this.send_command(window, cx))),
                 ),
             };
             // While the computer is away the box cannot run anything: say so, not as an error.
+            // A refusal keeps its words in the text color; the red is on its symbol (D14).
             let hint = match self.command_error {
-                Some(e) => Some((e, n.red)),
-                None => away.then_some((c::LIVE_CMD_OFFLINE, n.secondary)),
+                Some(e) => Some((e, true)),
+                None => away.then_some((c::LIVE_CMD_OFFLINE, false)),
             };
             div()
                 .flex()
@@ -814,17 +1263,27 @@ impl LivePane {
                                     &state,
                                 )
                                 .full_width()
-                                .disabled(away)
+                                .disabled(away || running.is_some())
                                 .error(self.command_error.is_some()),
                             ),
                         )
                         .children(action.map(|a| div().flex_none().child(a))),
                 )
-                .children(hint.map(|(e, color)| div().n_footnote().text_color(color).child(e)))
+                .children(hint.map(|(e, refused)| {
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(space::S4)
+                        .n_footnote()
+                        .text_color(if refused { n.label } else { n.secondary })
+                        .when(refused, |d| {
+                            d.child(ui::sym(Sym::Warning, ui::SymSize::INLINE, n.red))
+                        })
+                        .child(e)
+                }))
         });
         div()
             .flex_none()
-            .mt(space::S16)
             .px(space::S16)
             .py(space::S12)
             .rounded(crate::ui::native::tokens::radius::CONTAINER)
@@ -864,8 +1323,9 @@ impl LivePane {
             .unwrap_or_default();
         let hint = (actions.contains(&RunAction::TakeOver) && !phase_of(run).0.held())
             .then(|| fill(c::LIVE_TAKE_OVER_HINT, &[("name", bot)]));
-        let buttons = actions.iter().enumerate().map(|(i, a)| {
-            let style = if i == 0 && *a != RunAction::Stop {
+        let primary = primary_action(run, actions);
+        let buttons = actions.iter().map(|a| {
+            let style = if primary == Some(*a) {
                 PushStyle::Default
             } else {
                 PushStyle::Outline
@@ -930,6 +1390,8 @@ impl LivePane {
         title: String,
         cursor: bool,
         pointer: Option<String>,
+        no_lines: &'static str,
+        frame_at: Option<Millis>,
         cx: &App,
     ) -> AnyElement {
         let k = theme::colors(cx);
@@ -955,7 +1417,7 @@ impl LivePane {
             .child(c::LIVE_MENU_EDIT)
             .child(c::LIVE_MENU_WINDOW)
             .child(div().flex_1())
-            .child(div().mono().child(menu_clock()));
+            .child(div().mono().child(menu_clock(frame_at)));
         let dot = |color: gpui::Hsla| div().size(TRAFFIC).rounded_full().bg(color);
         let bar = div()
             .flex_none()
@@ -990,9 +1452,11 @@ impl LivePane {
                     .flex()
                     .items_center()
                     .justify_center()
-                    .child(div().flex_none().child(
-                        crate::ui::native::EmptyLine::new(c::LIVE_NO_LINES).icon(Sym::Terminal),
-                    ))
+                    .child(
+                        div()
+                            .flex_none()
+                            .child(crate::ui::native::EmptyLine::new(no_lines).icon(Sym::Terminal)),
+                    )
                     .into_any_element(),
             ]
         } else {
@@ -1062,10 +1526,10 @@ impl LivePane {
         let pointer = pointer.map(|name| {
             div()
                 .absolute()
-                // Far enough from the right edge that the name tag (max
-                // 120) stays inside the frame.
-                .left(relative(0.5))
-                .top(relative(0.56))
+                // In the terminal's bottom corner, on the row `render` keeps
+                // free of lines, so the tag never covers one.
+                .right(space::S14)
+                .bottom(space::S4)
                 .child(ui::motion::rise(
                     "live-pointer",
                     0,
@@ -1097,7 +1561,6 @@ impl LivePane {
             .rounded(theme::radius::FIELD)
             .border_1()
             .border_color(k.line_2)
-            .shadow(k.lift())
             .overflow_hidden()
             .flex()
             .flex_col()
@@ -1111,9 +1574,8 @@ impl LivePane {
                     .flex_1()
                     .min_h(px(0.))
                     .rounded_b(theme::radius::FIELD - metrics::HAIRLINE)
-                    .bg(k.ph[1])
-                    .child(terminal)
-                    .children(pointer),
+                    .bg(k.sunken)
+                    .child(terminal.children(pointer)),
             )
             .into_any_element()
     }
@@ -1126,12 +1588,12 @@ impl LivePane {
         current: Option<usize>,
         shown: Option<usize>,
         end: Millis,
+        active: bool,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let k = theme::colors(cx);
         let start = *times.first()?;
         let span = (end - start).max(1) as f32;
-        let active = run.status.is_active();
         let last = current.unwrap_or(times.len().saturating_sub(1));
         let mut marks: Vec<AnyElement> = Vec::new();
         for i in 0..times.len() {
@@ -1145,6 +1607,9 @@ impl LivePane {
                 }
             };
             let selected = shown == Some(i);
+            // An ended run rests on its last step: that mark is filled, so
+            // the track always shows which step the screen is on.
+            let at = selected || (shown.is_none() && is_last);
             // The knob is foreground (§2.12: no state color as decoration).
             let dot = if is_last && active {
                 div()
@@ -1159,9 +1624,9 @@ impl LivePane {
                 div()
                     .size(MARK_DOT)
                     .rounded_full()
-                    .bg(if selected { k.ink } else { k.raised })
+                    .bg(if at { k.ink } else { k.raised })
                     .border_2()
-                    .border_color(if selected { k.ink } else { k.ink_3 })
+                    .border_color(if at { k.ink } else { k.ink_3 })
                     .into_any_element()
             };
             let id = ElementId::Name(format!("live-mark-{}-{i}", run.id).into());
@@ -1219,27 +1684,38 @@ impl LivePane {
                 .into_any_element()
         };
         // One label row under the track (never a label per mark, so two
-        // labels never share a span): the step 回放 shows, or the step the
-        // run is on, at the leading edge; `现在 10:21` in its own slot at the
-        // trailing edge.
-        let (label, done) = match shown.filter(|&i| i != last) {
-            Some(i) => (run.plan.get(i).map(|p| p.text.clone()), true),
-            None => (run.plan.get(last).map(|p| p.text.clone()), false),
-        };
-        let word = if active {
+        // labels never share a span): the step and its time together at the
+        // trailing edge, under the playhead (`提 PR · 结束 09:55`). A step 回放
+        // shows carries its own time, the instant its mark stands at.
+        let earlier = shown.filter(|&i| i != last);
+        let done = earlier.is_some();
+        let label = run
+            .plan
+            .get(earlier.unwrap_or(last))
+            .map(|p| p.text.clone());
+        let mark_time = earlier.and_then(|i| times.get(i + 1).copied());
+        // An away computer's picture is its last frame, not the present.
+        let away = computer_away(run);
+        let word = if away {
+            c::LIVE_LAST_FRAME_AT
+        } else if active {
             c::LIVE_NOW_AT
         } else {
             c::LIVE_ENDED_AT
         };
+        // The labels take the track's inset: the time ends under the last mark
+        // and the step gives way first.
+        let has_label = label.is_some();
         let labels = div()
+            .mx(space::S12)
             .h(px(20.))
             .flex()
             .items_center()
-            .gap(space::S12)
+            .justify_end()
+            .gap(space::S6)
             .t_meta()
             .child(
                 div()
-                    .flex_1()
                     .min_w_0()
                     .flex()
                     .items_center()
@@ -1254,6 +1730,14 @@ impl LivePane {
                     })
                     .children(label.map(|t| div().min_w_0().one_line().child(t))),
             )
+            .when(has_label, |d| {
+                d.child(
+                    div()
+                        .flex_none()
+                        .text_color(k.ink_3)
+                        .child(c::LIVE_ACCEPTANCE_DOT),
+                )
+            })
             .child(
                 div()
                     .flex_none()
@@ -1262,19 +1746,22 @@ impl LivePane {
                     .gap(space::S6)
                     .medium()
                     .text_color(k.ink)
-                    .child(word)
+                    .when(mark_time.is_none(), |d| d.child(word))
                     .child(
                         div()
                             .mono()
                             .font_weight(gpui::FontWeight::NORMAL)
                             .text_color(k.ink_3)
-                            .child(clock(if active { now_ms() } else { end })),
+                            .child(clock(mark_time.unwrap_or(if active && !away {
+                                now_ms()
+                            } else {
+                                end
+                            }))),
                     ),
             );
         Some(
             div()
                 .flex_none()
-                .mt(space::S16)
                 .flex()
                 .items_start()
                 .gap(space::S12)
@@ -1382,17 +1869,17 @@ impl LivePane {
             } else {
                 title
             };
+            let provider = self.services.provider.as_ref();
+            let glyph = provider.artifact(&id).map_or(Sym::Document, |a| {
+                crate::views::artifact_page::list::ListKind::of(provider, &a.summary).sym()
+            });
             out.push(
-                chip(
-                    format!("live-evidence-artifact-{index}"),
-                    Sym::Document,
-                    label,
-                )
-                .on_click(move |_, _, cx| {
-                    let id = id.clone();
-                    nav.update(cx, |nav, cx| nav.open_artifact(id, Some(version), cx))
-                })
-                .into_any_element(),
+                chip(format!("live-evidence-artifact-{index}"), glyph, label)
+                    .on_click(move |_, _, cx| {
+                        let id = id.clone();
+                        nav.update(cx, |nav, cx| nav.open_artifact(id, Some(version), cx))
+                    })
+                    .into_any_element(),
             );
         }
         out
@@ -1402,6 +1889,7 @@ impl LivePane {
         &self,
         run: &BotRunSummary,
         items: &[AcceptanceItem],
+        working: bool,
         cx: &App,
     ) -> Option<AnyElement> {
         if items.is_empty() {
@@ -1446,15 +1934,16 @@ impl LivePane {
             }))
             .children(has_from.then(|| div().flex_none().child(c::LIVE_ACCEPTANCE_DOT)))
             .child(div().flex_none().child(tally));
-        let active = run.status.is_active();
         let rows = items.iter().enumerate().map(|(i, item)| {
             // The state as a status badge (never a bare colored dot or
             // colored words), in a 160 pt value column with the evidence.
             let status = match item.met {
                 Some(true) => status_badge(StatusKind::Done, c::LIVE_MET, cx),
                 Some(false) => status_badge(StatusKind::Failed, c::LIVE_NOT_MET, cx),
-                // T-16, §2.12: a criterion still being checked reads 在做.
-                None if active => status_badge(
+                // T-16, §2.12: a criterion still being checked reads 在做, only
+                // while the member works: a paused, waiting or ended run checks
+                // nothing.
+                None if working => status_badge(
                     StatusKind::Working,
                     crate::copy::topic_rail::STATE_WORKING_SHORT,
                     cx,
@@ -1503,7 +1992,6 @@ impl LivePane {
         Some(
             div()
                 .flex_none()
-                .mt(space::S16)
                 .pt(space::S12)
                 .px(space::S16)
                 .pb(space::S4)
@@ -1536,12 +2024,14 @@ impl LivePane {
         &self,
         run: &BotRunSummary,
         times: &[Millis],
-        held: bool,
+        words: &phase::PhaseWords,
+        working: bool,
         cx: &App,
     ) -> Option<AnyElement> {
         if run.plan.is_empty() {
             return None;
         }
+        let held = words.phase.held();
         let k = theme::colors(cx);
         let done = run
             .plan
@@ -1560,7 +2050,7 @@ impl LivePane {
         let bar = steps_bar(
             finished,
             total,
-            (run.status.is_active() && !held).then_some(native_colors(cx).blue),
+            working.then_some(native_colors(cx).blue),
             cx,
         );
         let now = run.ended_at.unwrap_or_else(now_ms);
@@ -1570,7 +2060,24 @@ impl LivePane {
             match p.state {
                 PlanState::Current | PlanState::Waiting => {
                     let mark: AnyElement = if held {
-                        ui::icon(Sym::Pause, theme::icon::TAG, k.ink_3).into_any_element()
+                        // The header badge's own pause mark.
+                        state_mark(words.badge, &native_colors(cx)).unwrap_or_else(|| {
+                            ui::icon(Sym::Pause, theme::icon::TAG, k.ink_3).into_any_element()
+                        })
+                    } else if words.phase == RunPhase::Done {
+                        // A step left open by a run that is done: a quiet ring.
+                        div()
+                            .size(px(10.))
+                            .rounded_full()
+                            .border(px(1.5))
+                            .border_color(k.line_2)
+                            .into_any_element()
+                    } else if !working {
+                        // The run waits, is stuck or ended: the mark of its
+                        // phase, the one the header's badge shows. Never the
+                        // working spinner.
+                        state_mark(words.badge, &native_colors(cx))
+                            .unwrap_or_else(|| div().into_any_element())
                     } else {
                         // §2.12: the step it is on spins (working); a step
                         // that waits on a person shows the needs-you icon.
@@ -1616,7 +2123,9 @@ impl LivePane {
                                         .text_color(k.ink)
                                         .child(p.text.clone()),
                                 )
-                                .children(started.map(|s| {
+                                // `已 N 分钟` counts a step that is still
+                                // open; an ended run has none.
+                                .children(started.filter(|_| !words.phase.ended()).map(|s| {
                                     div()
                                         .t_meta()
                                         .text_color(k.ink_2)
@@ -1677,7 +2186,6 @@ impl LivePane {
         Some(
             div()
                 .flex_none()
-                .mt(space::S16)
                 .rounded(crate::ui::native::tokens::radius::CONTAINER)
                 .border_1()
                 .border_color(native_colors(cx).separator)
@@ -1739,13 +2247,20 @@ impl LivePane {
         )
         .on_click(cx.listener(|this, _, _, cx| {
             if this.developer.take().is_none() {
-                let services = this.services.clone();
-                let view = cx.new(|cx| ProcessView::new(services, cx));
-                view.update(cx, |v, cx| v.set_visible(true, cx));
-                this.developer = Some(view);
+                this.show_steps(cx);
             }
             cx.notify();
         }))
+    }
+
+    /// The run's steps in place of the screen (开发者视图, 查看日志).
+    fn show_steps(&mut self, cx: &mut Context<Self>) {
+        if self.developer.is_none() {
+            let services = self.services.clone();
+            let view = cx.new(|cx| ProcessView::new(services, cx));
+            view.update(cx, |v, cx| v.set_visible(true, cx));
+            self.developer = Some(view);
+        }
     }
 }
 
@@ -1773,6 +2288,7 @@ impl LivePane {
         });
         let developer = self.services.nav.read(cx).developer_view;
         let nav = self.services.nav.clone();
+        let close = self.services.nav.clone();
         div()
             .size_full()
             .flex()
@@ -1797,16 +2313,25 @@ impl LivePane {
                             .child(crate::copy::process::RUNS),
                     )
                     .child(div().flex_1())
-                    .child(ToolbarGroup::new([sym_toolbar_toggle(
-                        "steps-developer",
-                        Sym::Terminal,
-                        c::LIVE_DEVELOPER,
-                        developer,
-                        cx,
-                    )
-                    .on_click(move |_, _, cx| {
-                        nav.update(cx, |nav, cx| nav.set_developer_view(!developer, cx))
-                    })])),
+                    // §2.2: the pane's header ends with its close button, as
+                    // the screen's header and every other right pane.
+                    .child(ToolbarGroup::new([
+                        sym_toolbar_toggle(
+                            "steps-developer",
+                            Sym::Terminal,
+                            c::LIVE_DEVELOPER,
+                            developer,
+                            cx,
+                        )
+                        .on_click(move |_, _, cx| {
+                            nav.update(cx, |nav, cx| nav.set_developer_view(!developer, cx))
+                        }),
+                        sym_toolbar_item("live-close", Sym::Close, c::LIVE_CLOSE, cx).on_click(
+                            move |_, _, cx| {
+                                close.update(cx, |nav, cx| nav.set_right_pane(RightPane::None, cx))
+                            },
+                        ),
+                    ])),
             )
             .child(div().flex_1().min_h(px(0.)).child(view))
             .children(stop.map(|stop| {
@@ -1830,7 +2355,6 @@ fn compact_panel(label: &'static str, line: &'static str, sym: Sym, cx: &App) ->
     let k = theme::colors(cx);
     div()
         .flex_none()
-        .mt(space::S16)
         .px(space::S16)
         .py(space::S12)
         .rounded(crate::ui::native::tokens::radius::CONTAINER)
@@ -1843,6 +2367,58 @@ fn compact_panel(label: &'static str, line: &'static str, sym: Sym, cx: &App) ->
         .child(div().t_meta_medium().text_color(k.ink_3).child(label))
         .child(crate::ui::native::EmptyLine::new(line).icon(sym))
         .into_any_element()
+}
+
+/// Lines of the command box in the terminal's type (D13): they never wrap and
+/// are never cut. A line wider than the box scrolls sideways, with a
+/// scrollbar along the block's bottom edge while one is.
+fn command_lines(
+    id: ElementId,
+    lines: Vec<String>,
+    ink: gpui::Hsla,
+    window: &mut Window,
+    cx: &mut App,
+) -> gpui::Div {
+    let scroll = window
+        .use_keyed_state(id.clone(), cx, |_, _| gpui::ScrollHandle::new())
+        .read(cx)
+        .clone();
+    // Known from the frame before: a line is wider than the box.
+    let scrolls = scroll.max_offset().x > px(0.);
+    div()
+        .relative()
+        .flex_1()
+        .min_w_0()
+        .child(
+            div()
+                .id(id)
+                .w_full()
+                .flex()
+                .overflow_x_scroll()
+                .restrict_scroll_to_axis()
+                .track_scroll(&scroll)
+                .child(
+                    div()
+                        .flex_none()
+                        .min_w_full()
+                        .flex()
+                        .flex_col()
+                        .gap(space::S2)
+                        // Room for the scrollbar under the last line.
+                        .when(scrolls, |d| d.pb(space::S12))
+                        .t_meta()
+                        .code_font()
+                        .whitespace_nowrap()
+                        .text_color(ink)
+                        .children(lines.into_iter().map(|l| div().child(l))),
+                ),
+        )
+        .child(
+            div().absolute().inset_0().child(
+                gpui_component::scroll::Scrollbar::horizontal(&scroll)
+                    .mode(gpui_component::scroll::ScrollbarMode::Always),
+            ),
+        )
 }
 
 fn stop_button(stopping: bool, cx: &App) -> gpui_component::button::Button {
@@ -1926,6 +2502,37 @@ fn command_refusal(e: AdminError) -> &'static str {
     }
 }
 
+/// 替 {who} 交还… asks first: the person holding the run loses the computer and their running
+/// command stops (design-takeover 3.9).
+fn confirm_hand_back_for(
+    services: &Services,
+    run: &BotRunSummary,
+    on_confirm: impl Fn(&mut Window, &mut App) + 'static,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let who = run
+        .hold
+        .paused_by
+        .as_deref()
+        .map(|w| crate::ui::avatar::name_beside_avatar(&member_name(services, w)).to_string())
+        .unwrap_or_default();
+    let member = member_name(services, &run.bot_id);
+    let member = crate::ui::avatar::name_beside_avatar(&member);
+    crate::views::nav::dialogs::confirm_alert(
+        "live-hand-back-for",
+        fill(c::LIVE_HAND_BACK_FOR_ASK_TITLE, &[("who", &who)]),
+        fill(
+            c::LIVE_HAND_BACK_FOR_ASK_BODY,
+            &[("who", &who), ("member", member)],
+        ),
+        c::LIVE_HAND_BACK,
+        on_confirm,
+        window,
+        cx,
+    );
+}
+
 /// The alert words of a refused 暂停, 接管, 继续 or 交还 (design-takeover 3.9 不可用).
 fn hold_refusal(e: AdminError) -> &'static str {
     match e {
@@ -1951,6 +2558,33 @@ fn this_hold(run: &BotRunSummary, h: &HandCommand) -> bool {
     run.hold.held_at.is_none_or(|at| h.at >= at)
 }
 
+/// How long the server counts a command with no result as running
+/// (`HAND_COMMAND_MAX_MS`): a lost result does not lock the box for the whole hold.
+const HAND_COMMAND_MAX: Millis = 11 * 60_000;
+
+/// The command that runs now. One of an earlier hold that never got its
+/// result does not, nor does one past [`HAND_COMMAND_MAX`].
+fn running_command(
+    run: &BotRunSummary,
+    commands: &[HandCommand],
+    now: Millis,
+) -> Option<HandCommand> {
+    commands
+        .iter()
+        .find(|h| h.result.is_none() && this_hold(run, h) && now - h.at <= HAND_COMMAND_MAX)
+        .cloned()
+}
+
+/// When the screen's newest frame was taken: the run's end, else the last
+/// sign of it working.
+fn last_frame_at(run: &BotRunSummary, screen: &MachineScreen, times: &[Millis]) -> Millis {
+    run.ended_at.unwrap_or_else(|| {
+        let last_line = screen.lines.last().map(|l| l.at).unwrap_or(0);
+        let last_step = times.last().copied().unwrap_or(0);
+        run.updated_at.max(last_line).max(last_step)
+    })
+}
+
 /// The screen sharing address to offer, when it is one the app may open
 /// (`vnc`, `http` or `https`; never `file:`, `smb:` or another app's scheme).
 fn screen_share_url(screen: &MachineScreen) -> Option<String> {
@@ -1966,19 +2600,15 @@ fn now_ms() -> Millis {
     crate::selftest::clock::utc_now().timestamp_millis()
 }
 
-/// `周一 10:21`, the menu bar clock.
-fn menu_clock() -> String {
-    use chrono::Datelike as _;
-    let now = crate::selftest::clock::local_now();
-    let day = match now.weekday() {
-        chrono::Weekday::Mon => n::WEEKDAY_MON,
-        chrono::Weekday::Tue => n::WEEKDAY_TUE,
-        chrono::Weekday::Wed => n::WEEKDAY_WED,
-        chrono::Weekday::Thu => n::WEEKDAY_THU,
-        chrono::Weekday::Fri => n::WEEKDAY_FRI,
-        chrono::Weekday::Sat => n::WEEKDAY_SAT,
-        chrono::Weekday::Sun => n::WEEKDAY_SUN,
-    };
+/// `周一 10:21`, the menu bar clock: now for a live screen, or the time of
+/// the frame `at` when the screen is the last one of an ended run, of a
+/// computer that is away, or of a replayed step.
+fn menu_clock(at: Option<Millis>) -> String {
+    use chrono::{Datelike as _, TimeZone as _};
+    let now = at
+        .and_then(|ms| chrono::Local.timestamp_millis_opt(ms).single())
+        .unwrap_or_else(crate::selftest::clock::local_now);
+    let day = crate::copy::weekday(now.weekday());
     format!("{day} {}", now.format("%H:%M"))
 }
 
@@ -2107,6 +2737,7 @@ impl Render for LivePane {
             &run,
             &bot,
             run_rights.resume || run_rights.hand_back,
+            run_rights.hand_back,
             run_rights.run_commands,
             window,
             cx,
@@ -2140,7 +2771,12 @@ impl Render for LivePane {
             (Some(m), true) => m.clone(),
             (None, _) => shown_text.clone(),
         };
-        let live_now = run.status.is_active() && !held && replay_step.is_none();
+        // The member works now: not waiting, not held, not ended. The body
+        // follows the one phase the header reads (§2.12), so no panel says
+        // 在做 beside a header that says otherwise.
+        let working = words.phase == RunPhase::Working && run.status.is_active();
+        let ended = words.phase.ended() || !run.status.is_active();
+        let live_now = working && replay_step.is_none();
         // Show the newest lines that fit the terminal window, from its top.
         let window_w = window.viewport_size().width;
         // The shell gives the pane the one width of every right pane (D13:
@@ -2160,7 +2796,17 @@ impl Render for LivePane {
         let room =
             (screen_h - MENU_BAR) * 0.84 - WINDOW_BAR - space::S12 * 2. - space::S2 - space::S2;
         let line = f32::from(TERMINAL_LINE);
-        let mut budget = f32::from(room) - if live_now { line } else { 0. };
+        // My pointer on the screen only while I took it over (a pause has no pointer).
+        let pointer = (taken_over && held_by_me)
+            .then(|| me.as_deref().map(|m| member_name(&self.services, m)))
+            .flatten();
+        // Its name tag keeps a row of the terminal to itself.
+        let pointer_room = if pointer.is_some() {
+            line + f32::from(space::S4)
+        } else {
+            0.
+        };
+        let mut budget = f32::from(room) - pointer_room - if live_now { line } else { 0. };
         let mut keep = 0;
         for (i, l) in lines.iter().enumerate().rev() {
             let gap = if i > 0 && l.kind == ScreenLineKind::Command {
@@ -2175,78 +2821,108 @@ impl Render for LivePane {
             keep += 1;
         }
         let lines: Vec<&ScreenLine> = lines[lines.len() - keep..].to_vec();
-        // My pointer on the screen only while I took it over (a pause has no pointer).
-        let pointer = (taken_over && held_by_me)
-            .then(|| me.as_deref().map(|m| member_name(&self.services, m)))
-            .flatten();
-        let end = run.ended_at.unwrap_or_else(|| {
-            let last_line = screen.lines.last().map(|l| l.at).unwrap_or(0);
-            let last_step = times.last().copied().unwrap_or(0);
-            run.updated_at.max(last_line).max(last_step)
-        });
+        let end = last_frame_at(&run, &screen, &times);
+        // The clock of the mock screen is the time of its frame: now while
+        // the screen is live, else when the frame was taken.
+        let frame_at = if replay_step.is_some() {
+            Some(lines.last().map_or(end, |l| l.at))
+        } else if ended || computer_away(&run) {
+            Some(end)
+        } else {
+            None
+        };
         let criteria = p.acceptance_criteria(&run_id);
+        // A run still queued for a computer has not started: no step, no
+        // terminal yet. Its empty screen says when it will show one.
+        let no_lines = if words.phase == RunPhase::WaitingComputer && run.started_at.is_none() {
+            c::LIVE_NO_LINES_QUEUED
+        } else {
+            c::LIVE_NO_LINES
+        };
 
-        let body: AnyElement = match &self.developer {
-            Some(view) => div()
-                .flex_1()
-                .min_h(px(0.))
-                .child(view.clone())
-                .into_any_element(),
-            None => div()
-                .id("live-body")
-                .size_full()
-                .overflow_y_scroll()
-                .track_scroll(&self.scroll)
-                .child(
-                    div()
-                        // First content at y 68 (§2.2: 16 under the header).
-                        .pt(space::S16)
-                        .px(SIDE)
-                        // Nothing ends cut under the bottom bar (§2.21).
-                        .pb(space::S24)
-                        .flex()
-                        .flex_col()
-                        .children(
-                            self.phase_banner(
+        let body: AnyElement =
+            match &self.developer {
+                Some(view) => div()
+                    .flex_1()
+                    .min_h(px(0.))
+                    .child(view.clone())
+                    .into_any_element(),
+                None => div()
+                    .id("live-body")
+                    .size_full()
+                    .overflow_y_scroll()
+                    .track_scroll(&self.scroll)
+                    .child(
+                        div()
+                            // First content at y 68 (§2.2: 16 under the header).
+                            .pt(space::S16)
+                            .px(SIDE)
+                            // Nothing ends cut under the bottom bar (§2.21).
+                            .pb(space::S24)
+                            .flex()
+                            .flex_col()
+                            // §2.5: one gap between the pane's sections.
+                            .gap(space::S24)
+                            .children(self.phase_banner(
                                 &run, &bot, &screen, &words, run_rights, held_by_me, cx,
-                            ),
-                        )
-                        .child(self.screen(&screen, &lines, title, live_now, pointer, cx))
-                        // T7: the command box under the terminal while someone holds it;
-                        // others see the holder's commands once there are some, never an
-                        // empty box that is not theirs.
-                        .children(
-                            (taken_over && (held_by_me || !p.hand_commands(&run_id).is_empty()))
-                                .then(|| self.command_box(&run, held_by_me, folder.as_deref(), cx)),
-                        )
-                        // R2-06, A1: a section with no data keeps its place
-                        // as a compact empty, so the pane never ends in a
-                        // blank band.
-                        .child(
-                            self.replay(&run, &times, current, replay_step, end, cx)
-                                .unwrap_or_else(|| {
-                                    compact_panel(
-                                        c::LIVE_REPLAY,
-                                        c::LIVE_REPLAY_EMPTY,
-                                        Sym::Video,
+                            ))
+                            .child(self.screen(
+                                &screen, &lines, title, live_now, pointer, no_lines, frame_at, cx,
+                            ))
+                            // T7: the command box under the terminal while someone holds it;
+                            // others see the holder's commands once there are some, never an
+                            // empty box that is not theirs.
+                            .children(
+                                (taken_over
+                                    && (held_by_me || !p.hand_commands(&run_id).is_empty()))
+                                .then(|| {
+                                    self.command_box(
+                                        &run,
+                                        held_by_me,
+                                        folder.as_deref(),
+                                        window,
                                         cx,
                                     )
                                 }),
-                        )
-                        .child(self.acceptance(&run, &criteria, cx).unwrap_or_else(|| {
-                            compact_panel(
-                                c::LIVE_ACCEPTANCE,
-                                c::LIVE_ACCEPTANCE_EMPTY,
-                                Sym::Checklist,
-                                cx,
                             )
-                        }))
-                        .child(self.plan(&run, &times, held, cx).unwrap_or_else(|| {
-                            compact_panel(c::LIVE_PLAN, c::LIVE_PLAN_EMPTY, Sym::Checklist, cx)
-                        })),
-                )
-                .into_any_element(),
-        };
+                            // R2-06, A1: a section with no data keeps its place
+                            // as a compact empty, so the pane never ends in a
+                            // blank band.
+                            .child(
+                                self.replay(&run, &times, current, replay_step, end, !ended, cx)
+                                    .unwrap_or_else(|| {
+                                        compact_panel(
+                                            c::LIVE_REPLAY,
+                                            c::LIVE_REPLAY_EMPTY,
+                                            Sym::Video,
+                                            cx,
+                                        )
+                                    }),
+                            )
+                            .child(
+                                self.acceptance(&run, &criteria, working, cx)
+                                    .unwrap_or_else(|| {
+                                        compact_panel(
+                                            c::LIVE_ACCEPTANCE,
+                                            c::LIVE_ACCEPTANCE_EMPTY,
+                                            Sym::Checklist,
+                                            cx,
+                                        )
+                                    }),
+                            )
+                            .child(self.plan(&run, &times, &words, working, cx).unwrap_or_else(
+                                || {
+                                    compact_panel(
+                                        c::LIVE_PLAN,
+                                        c::LIVE_PLAN_EMPTY,
+                                        Sym::Checklist,
+                                        cx,
+                                    )
+                                },
+                            )),
+                    )
+                    .into_any_element(),
+            };
         // R2-06, A4: when the sections run past the footer, the scrollbar
         // shows at rest, so a row under the footer reads as more to scroll,
         // never as a cut (§2.21).
@@ -2303,6 +2979,73 @@ impl Render for LivePane {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn words(phase: RunPhase, badge: BadgeState) -> phase::PhaseWords {
+        phase::PhaseWords {
+            phase,
+            text: String::new(),
+            short: String::new(),
+            badge,
+        }
+    }
+
+    fn ask(
+        id: &str,
+        from: &str,
+        kind: crate::data::v2::AskKind,
+        at: Millis,
+    ) -> crate::data::v2::AskItem {
+        crate::data::v2::AskItem {
+            group_id: "g".into(),
+            topic_id: "t".into(),
+            message_id: Some(id.into()),
+            from: from.into(),
+            kind,
+            title: String::new(),
+            at,
+        }
+    }
+
+    #[test]
+    fn only_the_person_waited_for_gets_a_way_to_the_answer() {
+        let you = BadgeState::NeedsYou;
+        let approval = words(RunPhase::WaitingApproval, you);
+        assert_eq!(ask_route(&approval, None), Some(AskRoute::Approve));
+        let person = words(RunPhase::WaitingPerson, you);
+        assert_eq!(
+            ask_route(&person, Some(WaitingFor::Question)),
+            Some(AskRoute::Reply)
+        );
+        assert_eq!(ask_route(&person, Some(WaitingFor::Stuck)), None);
+        let other = words(RunPhase::WaitingApproval, BadgeState::Quiet);
+        assert_eq!(ask_route(&other, None), None);
+    }
+
+    #[test]
+    fn the_banner_opens_the_unanswered_ask_of_its_member() {
+        use crate::data::v2::AskKind::{Approval, Choice};
+        let asks = [
+            (ask("answered", "forge", Approval, 9), true),
+            (ask("other-bot", "scout", Approval, 8), false),
+            (ask("mine", "forge", Approval, 5), false),
+            (ask("choice", "forge", Choice, 7), false),
+        ];
+        let open = open_ask(&asks, "forge", AskRoute::Approve);
+        assert_eq!(open.as_deref(), Some("mine"));
+        let reply = open_ask(&asks, "forge", AskRoute::Reply);
+        assert_eq!(reply.as_deref(), Some("choice"));
+        assert_eq!(open_ask(&asks[..1], "forge", AskRoute::Approve), None);
+    }
+
+    #[test]
+    fn the_way_to_a_reply_never_opens_an_approval_or_a_review() {
+        use crate::data::v2::AskKind::{Approval, Review};
+        let asks = [
+            (ask("approval", "forge", Approval, 9), false),
+            (ask("review", "forge", Review, 8), false),
+        ];
+        assert_eq!(open_ask(&asks, "forge", AskRoute::Reply), None);
+    }
 
     #[test]
     fn a_command_reads_running_then_its_end() {

@@ -1,6 +1,6 @@
-//! The 汇报和限额 sheet (NATIVE.md §7.1) of the 成员 page, owners only: who the member
+//! The 汇报和预算 sheet (NATIVE.md §7.1) of the 成员 page, owners only: who the member
 //! reports to (`Member.reportsTo`, a pop-up of the team) and, for an AI member, the weekly
-//! limit (`Member.weeklyBudgetCents`, US dollars in the field). 保存 sends both fields with
+//! budget (`Member.weeklyBudgetCents`, US dollars in the field). 保存 sends both fields with
 //! `PATCH /v1/members/:id`; it is off while nothing changed or the amount is invalid, and
 //! a refusal opens an alert while the sheet stays open.
 
@@ -121,7 +121,11 @@ impl PlanForm {
                     Ok(_) => window.close_dialog(cx),
                     Err(e) => {
                         error_alert(
-                            c::MEMBERS_PLAN_REFUSED,
+                            if this.member.is_bot() {
+                                c::MEMBERS_PLAN_REFUSED
+                            } else {
+                                c::MEMBERS_PLAN_REFUSED_PERSON
+                            },
                             crate::views::settings::widgets::error_text(e),
                             |_, _| {},
                             window,
@@ -211,11 +215,17 @@ impl Render for PlanForm {
             }
         }
         let [cancel, save] = sheet_buttons("member-plan", common::CANCEL, common::SAVE, cx);
-        SheetLayout::new(c::MEMBERS_PLAN)
-            .explanation(fill(
-                c::MEMBERS_PLAN_EXPLANATION,
-                &[("name", &self.member.name)],
-            ))
+        // A person has no budget: the sheet does not talk about one.
+        let (title, explanation) = if self.member.is_bot() {
+            (c::MEMBERS_PLAN, c::MEMBERS_PLAN_EXPLANATION)
+        } else {
+            (
+                c::MEMBERS_PLAN_REPORTS_ONLY,
+                c::MEMBERS_PLAN_EXPLANATION_PERSON,
+            )
+        };
+        SheetLayout::new(title)
+            .explanation(fill(explanation, &[("name", &self.member.name)]))
             .body(form)
             .buttons([
                 cancel.on_click(|_, window, cx| window.close_dialog(cx)),
@@ -226,7 +236,7 @@ impl Render for PlanForm {
     }
 }
 
-/// Opens the 汇报和限额 sheet of `member` with its current values.
+/// Opens the 汇报和预算 sheet of `member` with its current values.
 pub fn open_plan_sheet(
     services: Services,
     member: Member,
@@ -276,6 +286,8 @@ pub fn open_plan_sheet(
         if first.replace(false) && form.read(cx).member.is_bot() {
             let limit = form.read(cx).limit.clone();
             limit.read(cx).focus_handle(cx).focus(window, cx);
+            // The first keystroke replaces the amount instead of joining it.
+            limit.update(cx, |s, cx| s.select_all(window, cx));
         }
         native_sheet(dialog, SheetWidth::Form, cx)
             .px_0()

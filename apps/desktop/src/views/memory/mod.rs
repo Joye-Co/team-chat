@@ -1,5 +1,5 @@
 //! 沉淀 (docs/design/agent-harness.zh.md §7.7): 记得的事 on an AI member's page and
-//! 设置 › 团队约定. One board per scope: at the top the newest day's 记忆更新 (新增, 改了,
+//! 设置 › 团队约定. One board per scope: at the top the newest day's 记忆更新 (新增, 修改,
 //! 停用, 可能过时), each line with 撤回; then the memories grouped by kind, each with
 //! when it applies, its evidence, where it came from and "⋯" (编辑, 停用); then what was
 //! 停用, folded, with 恢复. Nothing asks before it is kept: people correct afterwards.
@@ -36,9 +36,9 @@ use crate::{
     },
     ui::{
         native::{
-            GroupedForm, NativeType as _, PushSize, PushStyle, SectionTitle, metrics,
+            GroupedForm, NativeType as _, PushSize, PushStyle, SectionTitle, feedback, metrics,
             native_colors,
-            page::{self, AlertKind, SkeletonKind},
+            page::{self, AlertKind},
             push_button, tokens,
         },
         sf_symbols::Sym,
@@ -412,6 +412,23 @@ impl MemoryBoard {
     // --- pieces ---
 
     fn about(&self, writer: bool) -> SharedString {
+        // With no AI 服务 nothing is tidied at night: the line does not
+        // promise it under the notice that says so.
+        if self.ai_off {
+            return match (&self.scope, writer) {
+                _ if self.folded_mine() => c::MINE_ABOUT_AI_OFF.into(),
+                (MemoryScope::Group(_), _) => c::GROUP_ABOUT_AI_OFF.into(),
+                (MemoryScope::Person(_), _) => c::PERSON_ABOUT_AI_OFF.into(),
+                (MemoryScope::Team, true) => c::TEAM_ABOUT_AI_OFF.into(),
+                (MemoryScope::Team, false) => c::TEAM_ABOUT_READONLY_AI_OFF.into(),
+                (MemoryScope::Member(_), true) => {
+                    fill(c::MEMORY_ABOUT_AI_OFF, &[("name", &self.name)]).into()
+                }
+                (MemoryScope::Member(_), false) => {
+                    fill(c::MEMORY_ABOUT_READONLY_AI_OFF, &[("name", &self.name)]).into()
+                }
+            };
+        }
         match (&self.scope, writer) {
             _ if self.folded_mine() => c::MINE_ABOUT.into(),
             (MemoryScope::Group(_), _) => c::GROUP_ABOUT.into(),
@@ -426,7 +443,7 @@ impl MemoryBoard {
     }
 
     fn add_button(&self, cx: &mut Context<Self>) -> AnyElement {
-        push_button(
+        let button = push_button(
             self.id("add"),
             c::ADD,
             if self.host == Host::Settings {
@@ -436,9 +453,13 @@ impl MemoryBoard {
             },
             PushSize::Small,
             cx,
-        )
-        .on_click(cx.listener(|this, _, window, cx| this.open_sheet(None, window, cx)))
-        .into_any_element()
+        );
+        // Nothing to add to while the list loads or could not be read
+        // (§2.14); the button keeps its place, at 50 %, so the header does
+        // not jump.
+        crate::ui::native::disabled_push(button, !matches!(self.memories, Some(Ok(_))), cx)
+            .on_click(cx.listener(|this, _, window, cx| this.open_sheet(None, window, cx)))
+            .into_any_element()
     }
 
     fn id(&self, part: impl std::fmt::Display) -> ElementId {
@@ -485,15 +506,7 @@ impl MemoryBoard {
         cx: &App,
     ) -> AnyElement {
         let k = native_colors(cx);
-        div()
-            .w_full()
-            .h(tokens::height::ROW)
-            .when(self.host == Host::Settings, |d| {
-                d.px(metrics::FORM_ROW_INSET)
-            })
-            .flex()
-            .items_center()
-            .gap(tokens::space::S8)
+        self.label_slot()
             .child(
                 div()
                     .flex_none()
@@ -507,6 +520,19 @@ impl MemoryBoard {
             .into_any_element()
     }
 
+    /// The h32 row of a list's label, at the rows' inset.
+    fn label_slot(&self) -> gpui::Div {
+        div()
+            .w_full()
+            .h(tokens::height::ROW)
+            .when(self.host == Host::Settings, |d| {
+                d.px(metrics::FORM_ROW_INSET)
+            })
+            .flex()
+            .items_center()
+            .gap(tokens::space::S8)
+    }
+
     fn row_pad(&self) -> gpui::Pixels {
         match self.host {
             Host::Settings => metrics::FORM_ROW_INSET,
@@ -516,17 +542,78 @@ impl MemoryBoard {
 
     /// One 记忆更新 line: the change as a badge, the memory's text and what it said before
     /// (or why), then 撤回 or 已撤回.
-    fn update_row(&self, line: model::UpdateLine, cx: &mut Context<Self>) -> AnyElement {
+    fn update_row(
+        &self,
+        line: model::UpdateLine,
+        badge_column: gpui::Pixels,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let k = native_colors(cx);
         let busy = self.busy.contains(&line.id);
         let id = line.id.clone();
+        // A 可能过时 line asks for a decision: 编辑 and 停用 on the line, for the
+        // memory as it is now (none once it is retired or gone).
+        let flagged = line
+            .can_act
+            .then(|| match &self.memories {
+                Some(Ok(list)) => list
+                    .iter()
+                    .find(|m| m.id == line.memory_id && m.status != MemoryStatus::Retired)
+                    .cloned(),
+                _ => None,
+            })
+            .flatten();
+        // Only a line that still waits for that decision is marked as asking.
+        let needs_you = flagged.is_some();
         let trailing: Option<AnyElement> = if line.undone {
+            // Its own line box (12 / 16) centered on the first text line.
             Some(
-                div()
-                    .n_subheadline()
-                    .text_color(k.secondary)
-                    .child(c::UNDONE)
-                    .into_any_element(),
+                first_line(
+                    tokens::text::META.1,
+                    div()
+                        .n_subheadline()
+                        .text_color(k.secondary)
+                        .child(c::UNDONE),
+                )
+                .into_any_element(),
+            )
+        } else if let Some(memory) = flagged {
+            let busy = self.busy.contains(&memory.id);
+            let mid = memory.id.clone();
+            let edit = push_button(
+                self.id(format!("flag-edit-{}", line.id)),
+                c::EDIT,
+                PushStyle::Outline,
+                PushSize::Small,
+                cx,
+            )
+            .disabled(busy)
+            .on_click(cx.listener(move |this, _, window, cx| {
+                this.open_sheet(Some(memory.clone()), window, cx)
+            }));
+            let retire = push_button(
+                self.id(format!("flag-retire-{}", line.id)),
+                c::RETIRE,
+                PushStyle::Outline,
+                PushSize::Small,
+                cx,
+            )
+            .loading(busy)
+            .disabled(busy)
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.set_status(mid.clone(), MemoryStatus::Retired, cx)
+            }));
+            Some(
+                first_line(
+                    tokens::height::SM,
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(tokens::space::S8)
+                        .child(edit)
+                        .child(retire),
+                )
+                .into_any_element(),
             )
         } else if line.can_undo {
             Some(
@@ -542,6 +629,7 @@ impl MemoryBoard {
                 .on_click(cx.listener(move |this, _, _, cx| this.undo(id.clone(), cx)))
                 .into_any_element(),
             )
+            .map(|b| first_line(tokens::height::SM, b).into_any_element())
         } else {
             None
         };
@@ -553,13 +641,14 @@ impl MemoryBoard {
             .flex()
             .items_start()
             .gap(tokens::space::S12)
-            .child(
-                div()
-                    .flex_none()
-                    .w(BADGE_COLUMN)
-                    .flex()
-                    .child(page::outline_badge(line.word, cx)),
-            )
+            .child(div().flex_none().w(badge_column).flex().child(first_line(
+                tokens::height::BADGE,
+                if needs_you {
+                    page::status_badge(page::Status::NeedsYou, line.word, cx)
+                } else {
+                    page::outline_badge(line.word, cx)
+                },
+            )))
             .child(
                 div()
                     .flex_1()
@@ -568,14 +657,16 @@ impl MemoryBoard {
                     .flex_col()
                     .gap(tokens::space::S4)
                     .child(
-                        div()
-                            .n_body()
-                            .text_color(if line.undone { k.secondary } else { k.label })
-                            .when(line.undone, |d| d.line_through())
-                            .overflow_hidden()
-                            .text_ellipsis()
-                            .line_clamp(3)
-                            .child(line.text.clone()),
+                        // Three lines at most; a cut text shows whole in its
+                        // tooltip, like the detail line under it.
+                        crate::ui::truncate::clamped(
+                            self.id(format!("line-text-{}", line.id)),
+                            line.text.clone(),
+                            3,
+                        )
+                        .n_body()
+                        .text_color(if line.undone { k.secondary } else { k.label })
+                        .when(line.undone, |d| d.line_through()),
                     )
                     .children(line.detail.clone().map(|d| {
                         TruncText::new(d)
@@ -604,11 +695,11 @@ impl MemoryBoard {
         let meta = fill(
             c::META,
             &[
-                ("source", &model::source_text(m, &name)),
                 (
-                    "time",
-                    &crate::views::group_page::kit::day_and_time(now, m.updated_at, false),
+                    "source",
+                    &model::source_text(m, &name, self.services.me().as_deref()),
                 ),
+                ("time", &model::row_time(now, m.updated_at)),
             ],
         );
         let line = |key: &str, text: String| {
@@ -624,7 +715,7 @@ impl MemoryBoard {
             widgets::more_button(self.id(format!("more-{}", m.id)), window, cx)
                 .loading(busy)
                 .disabled(busy)
-                .dropdown_menu(move |menu, _, _| {
+                .dropdown_menu_with_anchor(gpui::Anchor::TopRight, move |menu, _, _| {
                     let (edit_this, edit_item) = (this.clone(), item.clone());
                     let menu = if item.status == MemoryStatus::Retired {
                         menu
@@ -677,11 +768,17 @@ impl MemoryBoard {
                                     .child(m.text.clone()),
                             )
                             .when(m.status == MemoryStatus::Pending, |d| {
-                                d.child(div().flex_none().child(page::status_badge(
-                                    page::Status::Queued,
-                                    c::PENDING,
-                                    cx,
-                                )))
+                                // On the settings GroupBox the badge's own
+                                // muted fill is the group's fill.
+                                d.child(first_line(
+                                    tokens::height::BADGE,
+                                    page::status_badge_on(
+                                        page::Status::Queued,
+                                        c::PENDING,
+                                        self.host == Host::Settings,
+                                        cx,
+                                    ),
+                                ))
                             }),
                     )
                     .children(
@@ -696,7 +793,7 @@ impl MemoryBoard {
                     )
                     .child(line("meta", meta)),
             )
-            .children(menu.map(|m| div().flex_none().child(m)))
+            .children(menu.map(|m| first_line(tokens::height::SM, m)))
             .into_any_element()
     }
 
@@ -725,7 +822,10 @@ impl MemoryBoard {
             }
             widgets::list_empty(Sym::Book, c::UPDATES_EMPTY, None, cx).into_any_element()
         } else {
-            let rows = day
+            // One text edge for the day: the column is only as wide as the
+            // widest badge the day shows. The English screenshots' words
+            // (Added) do not fit the two-character column.
+            let lines: Vec<_> = day
                 .updates
                 .iter()
                 .map(|u| {
@@ -733,8 +833,19 @@ impl MemoryBoard {
                         Some(m) => self.writes(m),
                         None => writer,
                     };
-                    self.update_row(model::update_line(u, writes), cx)
+                    model::update_line(u, writes)
                 })
+                .collect();
+            let wide =
+                lines.iter().any(|l| l.word == c::CHANGE_FLAGGED) || crate::selftest::english::on();
+            let badge_column = if wide {
+                BADGE_COLUMN
+            } else {
+                tokens::size::MEMORY_BADGE_COLUMN_COMPACT
+            };
+            let rows = lines
+                .into_iter()
+                .map(|line| self.update_row(line, badge_column, cx))
                 .collect();
             self.frame(rows, cx)
         };
@@ -794,14 +905,23 @@ impl MemoryBoard {
                 PushSize::Small,
                 cx,
             )
+            // The app's disclosure: right while folded, down while open.
+            .icon(crate::ui::icons::labeled_button_sym(
+                if open {
+                    Sym::ChevronDown
+                } else {
+                    Sym::ChevronRight
+                },
+                crate::ui::SymSize::INLINE,
+            ))
             .on_click(cx.listener(|this, _, _, cx| {
                 this.show_retired = !this.show_retired;
                 cx.notify();
             }))
             .into_any_element();
             let mut block = div().w_full().flex().flex_col().child(self.label(
-                fill(c::RETIRED_N, &[("n", &lists.retired.len().to_string())]),
-                None,
+                c::RETIRED,
+                Some(lists.retired.len()),
                 Some(toggle),
                 cx,
             ));
@@ -818,54 +938,106 @@ impl MemoryBoard {
         out
     }
 
+    /// An alert of the board on its surface: inside the 成员 page's card it
+    /// takes the card's fill, in settings it sits on the window.
+    fn alert_surface(
+        &self,
+        alert: gpui::Stateful<gpui::Div>,
+        cx: &App,
+    ) -> gpui::Stateful<gpui::Div> {
+        match self.host {
+            Host::Page => page::on_card(alert, cx),
+            Host::Settings => alert,
+        }
+    }
+
     fn failure_alert(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let (title, e) = self.failure?;
         Some(
-            page::page_alert(
-                self.id("action-failed"),
-                AlertKind::Error,
-                title,
-                Some(widgets::error_text(e).into()),
-                None,
+            self.alert_surface(
+                page::page_alert(
+                    self.id("action-failed"),
+                    AlertKind::Error,
+                    title,
+                    Some(widgets::error_text(e).into()),
+                    None,
+                    cx,
+                ),
                 cx,
             )
+            .bg(self.alert_fill(cx))
             .into_any_element(),
         )
     }
 
+    /// An alert's fill: the card's on a page (the board is a card there),
+    /// the window's in Settings.
+    fn alert_fill(&self, cx: &App) -> gpui::Hsla {
+        let k = native_colors(cx);
+        match self.host {
+            Host::Page => k.sheet,
+            Host::Settings if self.admin_panel => k.admin_panel(),
+            Host::Settings => k.content,
+        }
+    }
+
     fn load_failed(&self, e: AdminError, cx: &mut Context<Self>) -> AnyElement {
         let busy = self.loading;
-        page::page_alert(
-            self.id("failed"),
-            AlertKind::Error,
-            match self.scope {
-                _ if self.folded_mine() => c::MINE_FAILED,
-                MemoryScope::Team => c::TEAM_FAILED,
-                MemoryScope::Member(_) => c::MEMBER_FAILED,
-                MemoryScope::Group(_) => c::GROUP_FAILED,
-                MemoryScope::Person(_) => c::PERSON_FAILED,
-            },
-            Some(widgets::error_text(e).into()),
-            Some(
-                push_button(
-                    self.id("retry"),
-                    c::RETRY,
-                    PushStyle::Outline,
-                    PushSize::Small,
-                    cx,
-                )
-                .loading(busy)
-                .disabled(busy)
-                .on_click(cx.listener(|this, _, _, cx| this.load(cx)))
-                .into_any_element(),
+        // An older server has no such list: 重试 cannot help, and it is not
+        // a failure of this page, so the alert is neutral and has no action.
+        let unsupported = e == AdminError::Unsupported;
+        self.alert_surface(
+            page::page_alert(
+                self.id("failed"),
+                page::admin_alert_kind(e),
+                match self.scope {
+                    _ if self.folded_mine() => c::MINE_FAILED,
+                    MemoryScope::Team => c::TEAM_FAILED,
+                    MemoryScope::Member(_) => c::MEMBER_FAILED,
+                    MemoryScope::Group(_) => c::GROUP_FAILED,
+                    MemoryScope::Person(_) => c::PERSON_FAILED,
+                },
+                Some(widgets::error_text(e).into()),
+                (!unsupported).then(|| {
+                    push_button(
+                        self.id("retry"),
+                        c::RETRY,
+                        PushStyle::Outline,
+                        PushSize::Small,
+                        cx,
+                    )
+                    .loading(busy)
+                    .disabled(busy)
+                    .on_click(cx.listener(|this, _, _, cx| this.load(cx)))
+                    .into_any_element()
+                }),
+                cx,
             ),
             cx,
         )
+        .bg(self.alert_fill(cx))
         .into_any_element()
+    }
+
+    /// 团队约定 in the admin window with nothing at all: the board is the whole page
+    /// there, so it takes the page's Empty state (§2.13) and 记一条 moves into it.
+    fn page_empty(&self) -> bool {
+        self.admin_panel
+            && matches!(&self.memories, Some(Ok(m)) if m.is_empty())
+            && !matches!(&self.day, Some(Ok(d)) if !d.updates.is_empty())
     }
 
     /// Nothing kept yet. 记一条 sits in the header already, so the line has no action.
     fn empty(&self, cx: &mut Context<Self>) -> AnyElement {
+        if self.page_empty() {
+            let mut state = feedback::Empty::new(Sym::Book, c::TEAM_EMPTY_TITLE)
+                .description(c::TEAM_EMPTY_BODY)
+                .wide();
+            if self.adds() {
+                state = state.action(self.add_button(cx));
+            }
+            return state.into_any_element();
+        }
         let text: SharedString = match &self.scope {
             _ if self.folded_mine() => c::MINE_EMPTY.into(),
             MemoryScope::Team => c::TEAM_EMPTY.into(),
@@ -882,14 +1054,63 @@ impl MemoryBoard {
         }
     }
 
+    /// The loading state in the shape of the loaded board (§2.14): a group
+    /// label, then rows of a title line and two meta lines with the "⋯" at
+    /// the right, at the real row pitch and with the list's own separators.
     fn skeleton(&self, cx: &App) -> AnyElement {
-        let id = format!("{}-sk", self.id_prefix());
-        match self.host {
-            Host::Settings => GroupedForm::new()
-                .row(widgets::list_loading(&id, 3, true, cx))
-                .into_any_element(),
-            Host::Page => page::skeleton_rows(&id, SkeletonKind::Compact, 4, cx),
-        }
+        use crate::ui::native::Bone;
+        // On the settings GroupBox the bones take the stronger fill.
+        let on_fill = self.host == Host::Settings;
+        let bone = |size: (gpui::Pixels, gpui::Pixels), w: f32| {
+            div()
+                .w_full()
+                .h(size.1)
+                .flex()
+                .items_center()
+                .child(Bone::new().on_fill(on_fill).h(size.0).w(gpui::relative(w)))
+        };
+        let rows = [0.7, 0.52, 0.62]
+            .into_iter()
+            .map(|w| {
+                div()
+                    .w_full()
+                    .px(self.row_pad())
+                    .py(tokens::space::S12)
+                    .flex()
+                    .items_start()
+                    .gap(tokens::space::S12)
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w(gpui::Pixels::ZERO)
+                            .flex()
+                            .flex_col()
+                            .gap(tokens::space::S4)
+                            .child(bone(tokens::text::UI, w))
+                            .child(bone(tokens::text::META, w * 0.6))
+                            .child(bone(tokens::text::META, w * 0.45)),
+                    )
+                    .child(first_line(
+                        tokens::height::SM,
+                        Bone::new()
+                            .on_fill(on_fill)
+                            .size(tokens::height::SM)
+                            .rounded(tokens::radius::ITEM),
+                    ))
+                    .into_any_element()
+            })
+            .collect();
+        let label = div()
+            .flex_none()
+            .w(BADGE_COLUMN)
+            .child(Bone::new().on_fill(false).h(tokens::text::META.0));
+        div()
+            .w_full()
+            .flex()
+            .flex_col()
+            .child(self.label_slot().child(label))
+            .child(self.frame(rows, cx))
+            .into_any_element()
     }
 
     /// The kind groups this board shows, in order.
@@ -905,30 +1126,34 @@ impl MemoryBoard {
         }
         let services = self.services.clone();
         Some(
-            page::page_alert(
-                self.id("ai-off"),
-                AlertKind::Info,
-                c::AI_OFF_TITLE,
-                Some(c::AI_OFF_BODY.into()),
-                Some(
-                    push_button(
-                        self.id("ai-off-setup"),
-                        c::AI_OFF_SETUP,
-                        PushStyle::Outline,
-                        PushSize::Small,
-                        cx,
-                    )
-                    .on_click(move |_, _, cx| {
-                        crate::views::admin::open_at(
-                            services.clone(),
-                            crate::views::admin::AdminPage::Ai,
+            self.alert_surface(
+                page::page_alert(
+                    self.id("ai-off"),
+                    AlertKind::Info,
+                    c::AI_OFF_TITLE,
+                    Some(c::AI_OFF_BODY.into()),
+                    Some(
+                        push_button(
+                            self.id("ai-off-setup"),
+                            c::AI_OFF_SETUP,
+                            PushStyle::Outline,
+                            PushSize::Small,
                             cx,
                         )
-                    })
-                    .into_any_element(),
+                        .on_click(move |_, _, cx| {
+                            crate::views::admin::open_at(
+                                services.clone(),
+                                crate::views::admin::AdminPage::Ai,
+                                cx,
+                            )
+                        })
+                        .into_any_element(),
+                    ),
+                    cx,
                 ),
                 cx,
             )
+            .bg(self.alert_fill(cx))
             .into_any_element(),
         )
     }
@@ -974,9 +1199,19 @@ impl MemoryBoard {
     }
 }
 
-/// The badge column of a 记忆更新 line: 72, as the time column, so the widest word
-/// (可能过时) fits and every line's text starts at one x.
-const BADGE_COLUMN: gpui::Pixels = page::m::TIME_COLUMN;
+/// A control of height `h` beside a row's text, centered on the row's first
+/// line (14 / 20) instead of hanging from its top: the rows are top-aligned
+/// because their text runs to several lines.
+fn first_line(h: gpui::Pixels, el: impl IntoElement) -> gpui::Div {
+    div()
+        .flex_none()
+        .mt((tokens::text::UI.1 - h) / 2.)
+        .child(el)
+}
+
+/// The badge column of a 记忆更新 line: the widest badge (可能过时 with its mark)
+/// fits, and every line's text starts at one x.
+const BADGE_COLUMN: gpui::Pixels = tokens::size::MEMORY_BADGE_COLUMN;
 
 impl Render for MemoryBoard {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -1024,7 +1259,7 @@ impl Render for MemoryBoard {
                 if let Some(n) = count {
                     header = header.count(n);
                 }
-                if let Some(a) = action {
+                if let Some(a) = action.filter(|_| !self.page_empty()) {
                     header = header.action(a);
                 }
                 widgets::pane()

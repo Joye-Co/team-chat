@@ -4,7 +4,7 @@
 //! a Contacts card: avatar 64, the name as the Large title, 岗位 and who
 //! they report to, push buttons (交代… default, 单独问, 暂停), then grouped
 //! forms with label/value rows: 现在在做, 这周, 最近交付, 最近的问题, 在哪干活,
-//! 需要你批准的事, 能用的工具, 用到的决定. Stats come from the runs cache
+//! 要先批准的事, 能用的工具, 用到的决定. Stats come from the runs cache
 //! and `BotRun.usage`; 添加 and 修改 reuse the settings forms.
 
 pub mod plan;
@@ -30,6 +30,7 @@ use crate::{
         AdminError, ApprovalDefaults, ApproverRole, BotRunSummary, GroupKind, Member, MemberLevel,
         PlanState,
         pages::{DeliveryKind, DeliveryState, MemberExtras},
+        run_phase::{RunPhase, phase_of},
         v2::{Currency, MemberStats},
     },
     ui::{
@@ -37,7 +38,7 @@ use crate::{
             CompactRow, NativeType as _, PushSize, PushStyle, Segment, Segmented, ToolbarGroup,
             ToolbarItemKind, ToolbarRow, borderless_button, emphasized, native_colors,
             page::{self, PageLoad, Status},
-            push_button, toolbar_item,
+            push_button, toolbar_item, toolbar_labeled_item,
         },
         sf_symbols::{Sf, Sym},
     },
@@ -79,7 +80,7 @@ pub struct MembersPage {
     retrying: HashSet<String>,
     /// 重试 the server refused, by run id.
     retry_errors: HashMap<String, AdminError>,
-    /// 需要你批准的事: the team's rules (`GET /v1/settings/approvals`); `None` before the
+    /// 要先批准的事: the team's rules (`GET /v1/settings/approvals`); `None` before the
     /// first answer.
     approvals: Option<Result<ApprovalDefaults, AdminError>>,
     approvals_loading: bool,
@@ -107,6 +108,20 @@ static SCENE_SCROLL: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::
 /// Set by a screenshot scene before the page opens.
 pub fn set_scene_scroll(to: SceneScroll) {
     SCENE_SCROLL.store(to as u8, std::sync::atomic::Ordering::Relaxed);
+}
+
+impl Filter {
+    /// Whether a member's row is in this filter. 在做事 asks about the run, not the row's
+    /// section: a member with a question for me sits under 等你 and may still be at work.
+    fn shows(self, bucket: Bucket, run: Option<&BotRunSummary>) -> bool {
+        match self {
+            Filter::All => true,
+            Filter::Working => {
+                bucket == Bucket::Working || run.is_some_and(|r| phase_of(r).0 == RunPhase::Working)
+            }
+            Filter::Waiting => bucket == Bucket::Waiting,
+        }
+    }
 }
 
 /// What the list knows of one member.
@@ -140,7 +155,7 @@ impl MembersPage {
         }
     }
 
-    /// Reads the team's approval rules (需要你批准的事); the answer redraws the page.
+    /// Reads the team's approval rules (要先批准的事); the answer redraws the page.
     fn load_approvals(&mut self, cx: &mut Context<Self>) {
         if self.approvals_loading {
             return;
@@ -288,10 +303,11 @@ pub(crate) fn ai_member_word(
     }
 }
 
-/// 需要你批准的事: the actions the team's rules make an AI member ask before, in the
-/// order of 设置 › 成员 › 默认规则.
+/// 要先批准的事: the actions the team's rules make an AI member ask before, in the
+/// order of 设置 › 成员 › 默认规则. The spend limit is not one: it only reminds the member
+/// ([`spend_reminder`]).
 pub(crate) fn approval_items(r: ApprovalDefaults) -> Vec<String> {
-    let mut out: Vec<String> = [
+    [
         (r.merge_main, c::MEMBERS_APPROVE_MERGE),
         (r.deploy_prod, c::MEMBERS_APPROVE_DEPLOY),
         (r.prod_config, c::MEMBERS_APPROVE_CONFIG),
@@ -301,11 +317,13 @@ pub(crate) fn approval_items(r: ApprovalDefaults) -> Vec<String> {
     .into_iter()
     .filter(|(on, _)| *on)
     .map(|(_, t)| t.to_string())
-    .collect();
-    if let Some(n) = r.max_spend_cny {
-        out.push(fill(c::MEMBERS_APPROVE_SPEND, &[("n", &n.to_string())]));
-    }
-    out
+    .collect()
+}
+
+/// The line under 要先批准的事 when the team has a spend limit.
+pub(crate) fn spend_reminder(r: ApprovalDefaults) -> Option<String> {
+    let n = crate::views::settings::widgets::grouped(r.max_spend_cny?.into());
+    Some(fill(c::MEMBERS_SPEND_REMINDER, &[("n", &n)]))
 }
 
 /// The list pane (§9.5): its own toolbar row with the segmented filter.
@@ -340,8 +358,9 @@ impl MembersPage {
             window,
             cx,
         )
-        // Nothing to add to while the team has not loaded (§2.15: the
-        // toolbar stays in place, its controls disabled).
+        // Nothing to add to while the team could not be read (§2.15: the
+        // toolbar stays in place, its controls disabled). The first sync
+        // draws no create button at all (§2.14), see below.
         .disabled(!owner || load != PageLoad::Ready)
         .when(load != PageLoad::Ready, |b| b.opacity(0.5))
         .dropdown_menu_with_anchor(gpui::Anchor::TopRight, move |menu, _, _| {
@@ -391,14 +410,15 @@ impl MembersPage {
             }
         });
         let mut row = ToolbarRow::new(c::MEMBERS_PAGE_TITLE)
-            .leading_inset(rows::toolbar_leading(&self.services, cx))
-            .group(
-                div()
-                    .flex_none()
-                    .when(load != PageLoad::Ready, |d| d.opacity(0.5))
-                    .child(filter),
-            )
-            .group(rows::toolbar_capsule(add, cx));
+            .leading_inset(rows::toolbar_leading(&self.services, cx));
+        // While the first sync runs this narrow column leaves the state word
+        // (正在同步…) no room for the filter. A failed page keeps its toolbar's
+        // layout (§2.15): the filter stays, disabled until the list is back.
+        if load != PageLoad::Loading {
+            row = row
+                .group(div().flex_none().child(filter))
+                .group(rows::toolbar_capsule(add, cx));
+        }
         // The subtitle slot stays in every state, so the title never moves.
         row = row.subtitle(match load {
             PageLoad::Ready => fill(c::MEMBERS_COUNT, &[("n", &entries.len().to_string())]),
@@ -408,11 +428,6 @@ impl MembersPage {
         // ToolbarRow draws the one 1 px line at y 52 itself (§2.2).
         let toolbar = div().flex_none().child(row);
 
-        let shown = |b: Bucket| match self.filter {
-            Filter::All => true,
-            Filter::Working => b == Bucket::Working,
-            Filter::Waiting => b == Bucket::Waiting,
-        };
         let focused = self.focus.is_focused(window);
         let active = emphasized(window);
         let mut list = div()
@@ -430,10 +445,10 @@ impl MembersPage {
             Bucket::Idle,
             Bucket::People,
         ] {
-            if !shown(bucket) {
-                continue;
-            }
-            let group: Vec<&Entry> = entries.iter().filter(|e| e.bucket == bucket).collect();
+            let group: Vec<&Entry> = entries
+                .iter()
+                .filter(|e| e.bucket == bucket && self.filter.shows(e.bucket, e.run.as_ref()))
+                .collect();
             if group.is_empty() {
                 continue;
             }
@@ -481,7 +496,7 @@ impl MembersPage {
                 .pt(tsp::S12)
                 .child(page::compact_empty(
                     Sym::Members,
-                    crate::copy::group_page::GROUP_PAGE_OFFLINE,
+                    c::MEMBERS_LIST_OFFLINE,
                     None,
                     cx,
                 ));
@@ -559,9 +574,10 @@ impl MembersPage {
         let mut badge: Option<AnyElement> = None;
         match e.bucket {
             Bucket::Waiting => {
-                badge = Some(page::status_badge(
+                badge = Some(page::status_badge_on(
                     Status::NeedsYou,
                     c::MEMBERS_WAITS_ON_YOU,
+                    is_selected,
                     cx,
                 ));
                 parts.extend(e.extras.line.clone().or(e.ask.clone()));
@@ -579,7 +595,12 @@ impl MembersPage {
                     ),
                     None => c::MEMBERS_WORKING.to_string(),
                 };
-                badge = Some(page::status_badge(Status::Working, text, cx));
+                badge = Some(page::status_badge_on(
+                    Status::Working,
+                    text,
+                    is_selected,
+                    cx,
+                ));
             }
             Bucket::Idle => {
                 parts.push(
@@ -609,8 +630,11 @@ impl MembersPage {
             } else {
                 &s.short
             };
-            badge =
-                Some(crate::ui::native::StatusBadge::new(s.badge, text.clone()).into_any_element());
+            badge = Some(
+                crate::ui::native::StatusBadge::new(s.badge, text.clone())
+                    .on_fill(is_selected)
+                    .into_any_element(),
+            );
         }
         parts.retain(|p| !p.trim().is_empty());
         let mark = badge;
@@ -657,12 +681,15 @@ impl MembersPage {
     fn detail_toolbar(&self, e: &Entry, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let active = emphasized(window);
         let nav = self.services.nav.clone();
+        // Toolbar items carry their word (D20): a bare glyph had to be
+        // guessed.
         let mut items = vec![
-            toolbar_item(
+            toolbar_labeled_item(
                 "member-outputs",
                 Sf::Outputs,
                 c::MEMBERS_OUTPUTS_BUTTON,
-                ToolbarItemKind::Plain,
+                c::MEMBERS_OUTPUTS_BUTTON,
+                false,
                 active,
                 window,
                 cx,
@@ -673,11 +700,14 @@ impl MembersPage {
             let run = e.run.clone();
             let nav = self.services.nav.clone();
             items.push(
-                toolbar_item(
+                // The item opens 实时查看 of the member's run, so it says so;
+                // the tooltip names the computer it shows.
+                toolbar_labeled_item(
                     "member-computer",
                     Sf::Computer,
+                    crate::copy::live::LIVE_TITLE,
                     c::MEMBERS_COMPUTER_BUTTON,
-                    ToolbarItemKind::Plain,
+                    false,
                     active,
                     window,
                     cx,
@@ -720,14 +750,23 @@ impl MembersPage {
                 &[("name", &member_name(&self.services, r))],
             ));
         }
-        if !groups.is_empty() {
-            parts.push(fill(
+        // The names are quoted: a group called 开发 must not read as a verb.
+        match groups.as_slice() {
+            [] => {}
+            [group] => parts.push(fill(c::MEMBERS_IN_ONE_GROUP, &[("group", group)])),
+            several => parts.push(fill(
                 c::MEMBERS_IN_GROUPS,
                 &[
-                    ("groups", &groups.join(c::MEMBERS_LIST_SEP)),
-                    ("n", &count_word(groups.len())),
+                    (
+                        "groups",
+                        &several
+                            .iter()
+                            .map(|g| fill(c::MEMBERS_GROUP_QUOTED, &[("group", g)]))
+                            .collect::<String>(),
+                    ),
+                    ("n", &count_word(several.len())),
                 ],
-            ));
+            )),
         }
         let mut actions: Vec<AnyElement> = Vec::new();
         if m.is_bot() {
@@ -858,7 +897,9 @@ impl MembersPage {
             body = body.child(
                 page::card_row(
                     "member-now-topic",
-                    None,
+                    // The 话题 icon, as the queued and waiting rows: one
+                    // icon column for the card.
+                    Some(page::row_icon(Sym::Topic, k.secondary)),
                     topic.map(|t| t.title).unwrap_or_default(),
                     Some(fill(c::MEMBERS_TOPIC_META, &[("group", &group), ("name", &by)]).into()),
                     Some(page::status_badge(Status::Working, badge, cx)),
@@ -1053,7 +1094,7 @@ impl MembersPage {
         // 成本 and its weekly limit. The limit is in US cents
         // (`weeklyBudgetCents`); a cost is shown in the currency it was
         // reported in and never converted. Only a cost in US dollars is
-        // measured against the limit (`$132.00 / 上限 $300.00` with a
+        // measured against the limit (`$132.00 / 预算 $300.00` with a
         // Progress); a cost in another currency and the limit show as two
         // separate values with no ratio bar. No run reported a cost: `–`,
         // never a wrong $0.
@@ -1152,28 +1193,7 @@ impl MembersPage {
             page::compact_empty(Sym::Document, c::MEMBERS_DELIVERIES_EMPTY, None, cx)
                 .into_any_element()
         } else {
-            let cols = [
-                page::Col {
-                    header: c::MEMBERS_COL_NAME.into(),
-                    width: None,
-                    right: false,
-                },
-                page::Col {
-                    header: c::MEMBERS_COL_WHERE.into(),
-                    width: Some(px(120.)),
-                    right: false,
-                },
-                page::Col {
-                    header: c::MEMBERS_COL_TIME.into(),
-                    width: Some(px(96.)),
-                    right: true,
-                },
-                page::Col {
-                    header: c::MEMBERS_COL_STATE.into(),
-                    width: Some(px(104.)),
-                    right: true,
-                },
-            ];
+            let cols = delivery_cols();
             let rows = e
                 .extras
                 .deliveries
@@ -1201,12 +1221,17 @@ impl MembersPage {
                             artifact_id,
                             version,
                         } => {
-                            let kind = p
-                                .artifact(artifact_id)
-                                .map(|a| crate::views::group_page::kind_label(a.summary.kind))
+                            let listed = p.artifact(artifact_id).map(|a| {
+                                crate::views::artifact_page::list::ListKind::of(
+                                    p.as_ref(),
+                                    &a.summary,
+                                )
+                            });
+                            let kind = listed
+                                .map(|l| l.label())
                                 .unwrap_or(crate::copy::group_page::GROUP_PAGE_KIND_PAGE);
                             (
-                                Sym::Document,
+                                listed.map_or(Sym::Document, |l| l.sym()),
                                 fill(
                                     c::MEMBERS_ARTIFACT,
                                     &[("title", &d.title), ("v", &version.to_string())],
@@ -1267,8 +1292,8 @@ impl MembersPage {
                     )
                 })
                 .collect();
-            page::frame(cx)
-                .child(page::table("member-deliveries", &cols, rows, cx))
+            page::frame_on_card(cx)
+                .child(page::table_on_card("member-deliveries", &cols, rows, cx))
                 .into_any_element()
         };
         page::titled_card(
@@ -1301,12 +1326,15 @@ impl MembersPage {
         for (i, pr) in e.stats.problems.iter().enumerate() {
             let retried = pr.run_id.as_ref().is_some_and(|r| self.retried.contains(r));
             if retried {
-                body = body.child(page::page_alert(
-                    SharedString::from(format!("member-problem-{i}")),
-                    page::AlertKind::Info,
-                    fill(c::MEMBERS_RETRIED, &[("name", &name)]),
-                    Some(c::MEMBERS_RETRIED_NOTE.into()),
-                    None,
+                body = body.child(page::on_card(
+                    page::page_alert(
+                        SharedString::from(format!("member-problem-{i}")),
+                        page::AlertKind::Info,
+                        fill(c::MEMBERS_RETRIED, &[("name", &name)]),
+                        Some(c::MEMBERS_RETRIED_NOTE.into()),
+                        None,
+                        cx,
+                    ),
                     cx,
                 ));
                 continue;
@@ -1372,12 +1400,15 @@ impl MembersPage {
                 ),
                 None => stuck,
             };
-            body = body.child(page::page_alert(
-                SharedString::from(format!("member-problem-{i}")),
-                page::AlertKind::Error,
-                pr.text.clone(),
-                Some(description.into()),
-                retry,
+            body = body.child(page::on_card(
+                page::page_alert(
+                    SharedString::from(format!("member-problem-{i}")),
+                    page::AlertKind::Error,
+                    pr.text.clone(),
+                    Some(description.into()),
+                    retry,
+                    cx,
+                ),
                 cx,
             ));
         }
@@ -1525,7 +1556,7 @@ impl MembersPage {
         .into_any_element()
     }
 
-    /// 需要你批准的事 (card): what the team's rules make an AI member ask before
+    /// 要先批准的事 (card): what the team's rules make an AI member ask before
     /// (`GET /v1/settings/approvals`), who approves as the description, and `修改…`
     /// (设置 › 成员) in the header. A person needs no approval.
     fn approvals(&self, e: &Entry, cx: &mut Context<Self>) -> AnyElement {
@@ -1538,6 +1569,14 @@ impl MembersPage {
             .and_then(|r| r.as_ref().ok())
             .copied();
         let items: Vec<String> = rules.map(approval_items).unwrap_or_default();
+        // A muted note, not a row: nothing waits for an approval here.
+        let spend = rules.and_then(spend_reminder).map(|text| {
+            div()
+                .pt(tsp::S8)
+                .n_callout()
+                .text_color(k.secondary)
+                .child(text)
+        });
         let body: AnyElement = match (&self.approvals, bot) {
             (_, false) => page::compact_empty(Sym::Lock, c::MEMBERS_APPROVALS_PERSON, None, cx)
                 .into_any_element(),
@@ -1546,35 +1585,45 @@ impl MembersPage {
             }
             (Some(Err(err)), true) => {
                 let busy = self.approvals_loading;
-                page::page_alert(
-                    "member-approvals-failed",
-                    page::AlertKind::Error,
-                    c::MEMBERS_APPROVALS_FAILED,
-                    Some(crate::views::settings::widgets::error_text(*err).into()),
-                    Some(
-                        push_button(
-                            "member-approvals-retry",
-                            c::MEMBERS_RETRY,
-                            PushStyle::Outline,
-                            PushSize::Small,
-                            cx,
-                        )
-                        .loading(busy)
-                        .disabled(busy)
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.load_approvals(cx);
-                            cx.notify();
-                        }))
-                        .into_any_element(),
+                page::on_card(
+                    page::page_alert(
+                        "member-approvals-failed",
+                        page::admin_alert_kind(*err),
+                        c::MEMBERS_APPROVALS_FAILED,
+                        Some(crate::views::settings::widgets::error_text(*err).into()),
+                        Some(
+                            push_button(
+                                "member-approvals-retry",
+                                c::MEMBERS_RETRY,
+                                PushStyle::Outline,
+                                PushSize::Small,
+                                cx,
+                            )
+                            .loading(busy)
+                            .disabled(busy)
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.load_approvals(cx);
+                                cx.notify();
+                            }))
+                            .into_any_element(),
+                        ),
+                        cx,
                     ),
                     cx,
                 )
                 .into_any_element()
             }
-            (Some(Ok(_)), true) if items.is_empty() => {
-                page::compact_empty(Sym::Lock, c::MEMBERS_APPROVALS_EMPTY, None, cx)
-                    .into_any_element()
-            }
+            (Some(Ok(_)), true) if items.is_empty() => div()
+                .flex()
+                .flex_col()
+                .child(page::compact_empty(
+                    Sym::Lock,
+                    c::MEMBERS_APPROVALS_EMPTY,
+                    None,
+                    cx,
+                ))
+                .children(spend)
+                .into_any_element(),
             (Some(Ok(_)), true) => {
                 let n = items.len();
                 div()
@@ -1591,6 +1640,7 @@ impl MembersPage {
                             cx,
                         )
                     }))
+                    .children(spend)
                     .into_any_element()
             }
         };
@@ -1626,7 +1676,7 @@ impl MembersPage {
         .into_any_element()
     }
 
-    /// 汇报和限额 (card): who the member reports to (`reportsTo`) and, for an AI member,
+    /// 汇报和预算 (card): who the member reports to (`reportsTo`) and, for an AI member,
     /// the weekly limit (`weeklyBudgetCents`, US cents). Owners change both in a sheet.
     fn plan(&self, e: &Entry, cx: &App) -> AnyElement {
         let k = native_colors(cx);
@@ -1707,7 +1757,7 @@ impl MembersPage {
         .into_any_element()
     }
 
-    /// True when I am an owner (owners set 汇报给 and 限额).
+    /// True when I am an owner (owners set 汇报给 and 预算).
     fn i_am_owner(&self) -> bool {
         match self.services.provider.session() {
             crate::data::SessionState::SignedIn { me, .. } => me.level == MemberLevel::Owner,
@@ -1745,6 +1795,8 @@ impl MembersPage {
                 .into_any_element()
         };
         page::titled_card("member-tools", c::MEMBERS_TOOLS, None, None, body, None, cx)
+            // Cards side by side share one height (§2.4 grid).
+            .flex_1()
             .into_any_element()
     }
 
@@ -1947,12 +1999,23 @@ impl MembersPage {
             )
             .child(pair_skeleton("member-sk-a", cx))
             // 最近交付 is a table in a card (§2.18): its header and rows.
-            .child(card_skeleton(
-                "member-sk-t",
-                page::SkeletonKind::TableRow,
-                3,
-                cx,
-            ))
+            .child(
+                page::card(cx)
+                    .p(page::m::GUTTER)
+                    .gap(page::m::GUTTER)
+                    .child(
+                        crate::ui::native::Bone::new()
+                            .h(crate::ui::native::tokens::text::HEADING.0)
+                            .w(gpui::relative(0.3))
+                            .rounded(tsp::S8),
+                    )
+                    .child(page::skeleton_table_on_card(
+                        "member-sk-t",
+                        &delivery_cols(),
+                        3,
+                        cx,
+                    )),
+            )
             .child(pair_skeleton("member-sk-b", cx))
     }
 }
@@ -2013,9 +2076,11 @@ fn member_skeleton(cx: &App) -> gpui::Div {
                     d.child(
                         div()
                             .absolute()
-                            .bottom_0()
+                            // Where the loaded row draws its line: under the
+                            // row, out to the row's own edge.
+                            .bottom(-crate::ui::native::metrics::HAIRLINE)
                             .left(AVATAR + rows::ROW_GAP)
-                            .right_0()
+                            .right(-rows::ROW_PAD)
                             .h(crate::ui::native::metrics::HAIRLINE)
                             .bg(k.separator),
                     )
@@ -2038,6 +2103,32 @@ fn card_skeleton(id: &str, kind: page::SkeletonKind, n: usize, cx: &App) -> gpui
                 .rounded(tsp::S8),
         )
         .child(page::skeleton_rows(id, kind, n, cx))
+}
+
+/// The columns of 最近交付: 名称, 在哪, 时间, 状态 (the table and its skeleton).
+fn delivery_cols() -> [page::Col; 4] {
+    [
+        page::Col {
+            header: c::MEMBERS_COL_NAME.into(),
+            width: None,
+            right: false,
+        },
+        page::Col {
+            header: c::MEMBERS_COL_WHERE.into(),
+            width: Some(px(120.)),
+            right: false,
+        },
+        page::Col {
+            header: c::MEMBERS_COL_TIME.into(),
+            width: Some(px(96.)),
+            right: true,
+        },
+        page::Col {
+            header: c::MEMBERS_COL_STATE.into(),
+            width: Some(px(104.)),
+            right: true,
+        },
+    ]
 }
 
 /// Two detail cards side by side (现在在做 | 这周), as skeletons.
@@ -2224,11 +2315,7 @@ impl MembersPage {
         let filter = self.filter;
         self.entries()
             .into_iter()
-            .filter(|e| match filter {
-                Filter::All => true,
-                Filter::Working => e.bucket == Bucket::Working,
-                Filter::Waiting => e.bucket == Bucket::Waiting,
-            })
+            .filter(|e| filter.shows(e.bucket, e.run.as_ref()))
             .map(|e| e.member.id)
             .collect()
     }
@@ -2363,6 +2450,37 @@ mod wire_tests {
     use super::*;
 
     #[test]
+    fn the_working_filter_asks_about_the_run_not_the_section() {
+        let mut run = BotRunSummary {
+            id: "r1".into(),
+            bot_id: "b1".into(),
+            group_id: "g1".into(),
+            topic_id: "t1".into(),
+            machine_id: None,
+            machine_name: None,
+            status: crate::data::RunStatus::Running,
+            requested_by: None,
+            created_at: 0,
+            started_at: Some(0),
+            ended_at: None,
+            updated_at: 0,
+            model: None,
+            effort: None,
+            summary: None,
+            plan: Vec::new(),
+            hold: Default::default(),
+        };
+        // At work with a question for me: under 等你, and in 在做事 too.
+        assert!(Filter::Working.shows(Bucket::Waiting, Some(&run)));
+        assert!(Filter::Waiting.shows(Bucket::Waiting, Some(&run)));
+        // A question with a run that waits on a person is not at work.
+        run.status = crate::data::RunStatus::Waiting;
+        assert!(!Filter::Working.shows(Bucket::Waiting, Some(&run)));
+        assert!(!Filter::Working.shows(Bucket::Waiting, None));
+        assert!(!Filter::Working.shows(Bucket::Idle, None));
+    }
+
+    #[test]
     fn approvals_list_what_the_rules_turn_on_in_the_settings_order() {
         let all = approval_items(ApprovalDefaults::default());
         assert_eq!(
@@ -2373,8 +2491,14 @@ mod wire_tests {
                 c::MEMBERS_APPROVE_CONFIG.into(),
                 c::MEMBERS_APPROVE_DELETE.into(),
                 c::MEMBERS_APPROVE_PUBLISH.into(),
-                fill(c::MEMBERS_APPROVE_SPEND, &[("n", "50")]),
             ]
+        );
+        assert_eq!(
+            spend_reminder(ApprovalDefaults {
+                max_spend_cny: Some(1_000_000),
+                ..ApprovalDefaults::default()
+            }),
+            Some(fill(c::MEMBERS_SPEND_REMINDER, &[("n", "1,000,000")]))
         );
         let none = ApprovalDefaults {
             merge_main: false,
@@ -2386,5 +2510,6 @@ mod wire_tests {
             approver: ApproverRole::Owners,
         };
         assert!(approval_items(none).is_empty());
+        assert_eq!(spend_reminder(none), None);
     }
 }

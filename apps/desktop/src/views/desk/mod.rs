@@ -1,7 +1,7 @@
 //! 首页 (COMPLETENESS.md §2.18): the toolbar row (title 首页, subtitle
 //! `3 件事等你拍板`, from the same needs-you query as the sidebar count),
 //! then Jojo's priority as an Alert, a KPI row (等你, 在做, 今天交付, 排队)
-//! and one section per queue (需要你拍板, 正在做, 今天交付), each a framed
+//! and one section per queue (需要你拍板, 在做, 今天交付), each a framed
 //! list with fixed columns. The right pane holds only what the list does
 //! not show (排队, 在哪干活). Every state is drawn: loading (skeletons),
 //! failed (Alert with 重试), empty (Empty state) and long lists (看全部).
@@ -37,10 +37,9 @@ use crate::{
     data::Millis,
     ui::{
         native::{
-            PushSize, PushStyle, ToolbarGroup, ToolbarItemKind, ToolbarRow, emphasized,
-            native_colors,
+            PushSize, PushStyle, ToolbarGroup, ToolbarRow, emphasized, native_colors,
             page::{self, PageLoad, m},
-            push_button, toolbar_item,
+            push_button, toolbar_labeled_item,
         },
         sf_symbols::{Sf, Sym},
     },
@@ -272,28 +271,16 @@ impl DeskPage {
     }
 }
 
-/// `11 月 3 日 周一`.
+/// `11月3日 周一`.
 pub fn today_line() -> String {
     use chrono::Datelike as _;
     let now = crate::selftest::clock::local_now();
-    const DAYS: [&str; 7] = [
-        c::WEEKDAY_1,
-        c::WEEKDAY_2,
-        c::WEEKDAY_3,
-        c::WEEKDAY_4,
-        c::WEEKDAY_5,
-        c::WEEKDAY_6,
-        c::WEEKDAY_7,
-    ];
     crate::copy::fill(
         c::DESK_DATE,
         &[
             ("m", &now.month().to_string()),
             ("d", &now.day().to_string()),
-            (
-                "weekday",
-                DAYS[now.weekday().num_days_from_monday() as usize],
-            ),
+            ("weekday", crate::copy::weekday(now.weekday())),
         ],
     )
 }
@@ -353,7 +340,7 @@ impl DeskPage {
                 cx,
             )
         };
-        page::frame(cx).children(shown).child(footer)
+        page::list_frame(cx).children(shown).child(footer)
     }
 
     /// The KPI row (§2.4): 等你, 在做, 今天交付, 排队.
@@ -473,16 +460,12 @@ impl Render for DeskPage {
             } else {
                 c::DESK_SHOW_SIDE
             };
-            let kind = if show_side {
-                ToolbarItemKind::Toggled
-            } else {
-                ToolbarItemKind::Plain
-            };
-            toolbar = toolbar.group(ToolbarGroup::new([toolbar_item(
+            toolbar = toolbar.group(ToolbarGroup::new([toolbar_labeled_item(
                 "desk-inspector",
                 Sf::PaneRight,
+                c::DESK_RAIL_TITLE,
                 name,
-                kind,
+                show_side,
                 emphasized(window),
                 window,
                 cx,
@@ -519,11 +502,11 @@ impl Render for DeskPage {
                     ))
                     .child(section(
                         page::section_header(c::DESK_WORKING, None, None, None, cx),
-                        kit::skeleton_list("desk-sk-runs", list::DESK_COLUMNS, false, 3, cx),
+                        kit::skeleton_list("desk-sk-runs", list::DESK_COLUMNS_PLAIN, false, 3, cx),
                     ))
                     .child(section(
                         page::section_header(c::DESK_DONE_TODAY, None, None, None, cx),
-                        kit::skeleton_list("desk-sk-done", list::DESK_COLUMNS, false, 3, cx),
+                        kit::skeleton_list("desk-sk-done", list::DESK_COLUMNS_PLAIN, false, 3, cx),
                     ));
             }
             PageLoad::Ready => {
@@ -542,9 +525,11 @@ impl Render for DeskPage {
                         continue;
                     }
                     let n = asks.len();
+                    let cols = list::ask_columns(&asks, self);
+                    let slot = list::answer_slot(&asks, self, window, cx);
                     let rows: Vec<AnyElement> = asks
                         .into_iter()
-                        .map(|a| list::ask_row(a, self, &snap, cx))
+                        .map(|a| list::ask_row(a, self, &snap, cols, slot, cx))
                         .collect();
                     content = content.child(section(
                         page::section_header(title, Some(n), None, None, cx),
