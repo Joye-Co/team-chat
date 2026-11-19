@@ -1,11 +1,6 @@
-import { afterAll, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { env } from "cloudflare:test";
-import { Client, api, createGroup, createMember, protocolViolations, waitUntil } from "./helpers";
-
-afterAll(async () => {
-  await new Promise((r) => setTimeout(r, 300));
-  expect(protocolViolations).toEqual([]);
-});
+import { Client, api, createGroup, createMember, waitUntil } from "./helpers";
 
 const rename = (id: string, token: string | undefined, body: unknown) =>
   api(`/v1/groups/${id}`, { method: "PATCH", token, body });

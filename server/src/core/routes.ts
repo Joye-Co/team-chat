@@ -14,8 +14,8 @@ import {
   normalizeGroupText,
 } from "@chat/protocol";
 import { auditStatement } from "./audit";
-import { type AuthContext, requireTeamOwner } from "./auth";
-import { newInviteCode, newToken, normalizeInviteCode, sha256Hex, timingSafeEqualString } from "./crypto";
+import { type AuthContext, requireAdmin, requireTeamOwner } from "./auth";
+import { newInviteCode, newToken, normalizeInviteCode, sha256Hex } from "./crypto";
 import { REDEEM_RATE, refundAttempt, takeAttempt } from "./ratelimit";
 import {
   type MemberRow,
@@ -225,10 +225,7 @@ export function registerCoreRoutes(): void {
     path: "/v1/admin/bootstrap",
     auth: "none",
     async handler({ request, env, body }) {
-      const given = request.headers.get("x-admin-secret") ?? "";
-      const expected = env.ADMIN_SECRET ?? "";
-      const ok = await timingSafeEqualString(given, expected);
-      if (!expected || !ok) throw new ApiError("unauthorized", "invalid admin secret");
+      await requireAdmin(request, env);
       const { ownerName } = await body(BootstrapRequest);
       const now = Date.now();
       const memberId = ulid(now);
@@ -277,7 +274,7 @@ export function registerCoreRoutes(): void {
       // Codes are 8 characters (about 40 bits): limit guesses per client IP. The IP is hashed,
       // never stored or logged.
       const ip = request.headers.get("cf-connecting-ip") ?? "unknown";
-      const attempt = await takeAttempt(env.DB, `redeem:${await sha256Hex(ip)}`, REDEEM_RATE);
+      const attempt = await takeAttempt(env.DB, `redeem:${await sha256Hex(ip)}`, REDEEM_RATE, "invite code attempts");
       const { inviteCode, deviceName } = await body(RedeemRequest);
       const codeHash = await sha256Hex(normalizeInviteCode(inviteCode));
       const now = Date.now();
@@ -475,7 +472,7 @@ export function registerCoreRoutes(): void {
       const name = normalizeGroupName(req.name);
       const a = auth as AuthContext;
       const memberIds = [...new Set([a.memberId, ...req.memberIds])];
-      if (memberIds.length > 99) throw new ApiError("invalid", "too many members");
+      if (memberIds.length > 99) throw new ApiError("invalid", "at most 99 members");
       await requireActiveMembers(env, memberIds);
       const now = Date.now();
       const groupId = ulid(now);
@@ -683,5 +680,11 @@ async function requireActiveMembers(env: Env, ids: string[]): Promise<void> {
   const r = await env.DB.prepare(`SELECT id FROM members WHERE deactivated = 0 AND id IN (${placeholders})`)
     .bind(...ids)
     .all<{ id: string }>();
-  if (r.results.length !== new Set(ids).size) throw new ApiError("invalid", "unknown or deactivated member");
+  const active = new Set(r.results.map((row) => row.id));
+  // The caller sent these ids, so naming them tells it nothing new.
+  const missing = [...new Set(ids)].filter((id) => !active.has(id));
+  if (missing.length > 0) {
+    const more = missing.length > 1 ? ` (and ${missing.length - 1} more)` : "";
+    throw new ApiError("invalid", `unknown or deactivated member: ${missing[0]}${more}`, "member.unknown", undefined, missing);
+  }
 }

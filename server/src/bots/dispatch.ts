@@ -649,10 +649,20 @@ export interface ContextMessage {
 export const ACCEPTANCE_RULE = [
   "When the request is a piece of work with outcomes someone can check (code, a deploy, a file, a 产出), report its acceptance criteria and their state as a fenced block with the info string `acceptance` at the end of your message. Skip the block for questions, chat and short answers. The block is taken out of your posted answer and shown as a checklist under it, so never refer to it in your text. Example:",
   "```acceptance",
-  '[{ "text": "Tests pass", "state": "pass", "evidence": { "text": "cargo test: 42 passed" } }, { "text": "Deployed to staging", "state": "pending" }]',
+  '[{ "text": "Report delivered", "state": "pass", "evidence": { "artifact": { "artifactId": "<id>", "version": 1 } } }, { "text": "Deployed to staging", "state": "pass", "evidence": { "url": "https://staging.example.com" } }, { "text": "Reviewed by a person", "state": "pending" }]',
   "```",
   "Each item has `text` (1-500 characters), `state` (`pending`, `pass` or `fail`) and optional `evidence` (`text` up to 1000 characters, `url`, `fileId`, or `artifact` { artifactId, version }). At most 20 items. Send the whole list again when a state changes: the last block counts.",
+  "A `pass` shows as passed only with a `url`, a `fileId` or an `artifact`; with text alone it shows as your claim. Test counts come from the run's log, so do not list them.",
 ].join("\n");
+
+/**
+ * The first rule of a run's prompt: what the last message is. A machine with `chat-run` (the
+ * `context` feature) can make a 产出 or a card, so the long part of a result goes there; other
+ * machines get only the old rule.
+ */
+export const RESULT_RULE = "Your final answer is posted into the topic as is, so keep it short and in the language of the request.";
+export const RESULT_FORM_RULE =
+  "Your last message is the result people read first: one or two sentences, in the language of the request. Anything longer (a report, a table, a comparison, a design, a list of findings) goes into a 产出 or a card before you end; the last message then only names it and says what the reader still has to do.";
 
 /**
  * What a message body draws and where the app folds it. The same sentence as `MESSAGE_FORMS` in
@@ -716,7 +726,8 @@ export function buildPrompt(opts: {
   const name = (id: string) => opts.names.get(id) ?? id;
   const lines = [
     `You are ${opts.botName}, a member of a team chat. You were asked to work in the topic "${opts.title}".`,
-    "Your final answer is posted into the topic as is, so keep it short and in the language of the request.",
+    opts.contextTools ? RESULT_FORM_RULE : RESULT_RULE,
+    MESSAGE_FORMS_RULE,
     "People also watch what you say while you work: write those lines in the language of the request too.",
     ...(opts.acceptance ? [ACCEPTANCE_RULE] : []),
     ...(opts.refs ? [REFS_RULE] : []),
