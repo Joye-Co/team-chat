@@ -81,6 +81,9 @@
 撤回	Undo
 停用	Off
 停止…	Stop…
+停止顺序…	Stop order…
+想让他们按顺序做？用 -> 连起来，比如 {}	Want them to go in order? Join them with ->, like {}
+这个顺序会停在这里，之后可以重试。	The order stops here. You can retry it later.
 接管	Take over
 交还	Hand back
 回放	Replay
@@ -88,7 +91,7 @@
 计划	Plan
 检查	Checks
 达标	Met
-要求	Requirements
+提出的人	Requested by
 验收标准	Acceptance criteria
 改动	Diff
 看改动	View changes
@@ -96,13 +99,16 @@
 录屏 {}	Recording {}
 文件	Files
 状态	Status
+本周话题	Topics this week
+没有	None
+GitHub 未登录	GitHub signed out
+AI 成员推不了代码	AI members can't push code
 名称	Name
 版本	Version
 时间	Time
 用时	Time taken
-成本	Cost
 花费	Spend
-用时和成本	Time and cost
+用时和花费	Time and cost
 在哪	Where
 在哪干活	Where it works
 做的人	Made by
@@ -110,11 +116,8 @@
 来自话题	From topic
 被引用	Cited in
 用到的决定	Decisions used
-话题信息	Topic info
 产出信息	Artifact info
 在右侧打开	Open on the right
-和 v2 对比	Compare with v2
-和 v1 对比	Compare with v1
 回到 v3	Back to v3
 你在看 v2，不是最新版	You're viewing v2, not the latest
 有 v3	v3 available
@@ -123,19 +126,18 @@
 做法	Practice
 经验	Lessons
 新增	Added
-改了	Changed
 已撤回	Undone
 可能过时	Stale
 记一条	Add a note
 记得的事	Memory
 汇报给	Reports to
-汇报和限额	Reporting and limits
-每周限额	Weekly limit
+汇报和预算	Reporting and budget
+每周预算	Weekly budget
 能用的工具	Tools it can use
 只读	Read-only
 可以提 PR	Can open PRs
 可以部署和回滚	Can deploy and roll back
-添加成员…	Add member…
+添加 AI 成员…	Add AI member…
 添加电脑	Add computer
 用这台电脑	Use this computer
 团队的电脑	Team computers
@@ -170,8 +172,10 @@ AI 成员被 @ 后，在这些电脑上干活。	AI members work here when you @
 已回答	Answered
 你选了「{}」	You chose “{}”
 你选了 A：一个输入框，粘贴自动识别	You chose A: a single field
-需要你批准的事	Needs your approval
+要先批准的事	Needs approval first
 {} 件事等你拍板	{} things need your call
+下面还有 {} 件等你	{} more waiting below
+还没有启动数据	No boot data yet
 正在做	In progress
 在做	Working
 在做事	Busy
@@ -209,12 +213,16 @@ AI 成员被 @ 后，在这些电脑上干活。	AI members work here when you @
 正在打开…	Opening…
 正在处理 {} 个话题	Working on {} topics
 正在处理 1 个话题	Working on 1 topic
-已停用 {} 条	{} turned off
-新增 1 条，改了 1 条，停用 1 条，1 条可能过时	1 added, 1 changed, 1 turned off, 1 may be outdated
+已停用	Turned off
+你记的	You added this
+你改过	You edited this
+还没有团队约定	No team rules yet
+比如「先发 staging，再发生产」。记下后马上生效。	For example, "staging first, then production". Takes effect right away.
+新增 1 条，修改 1 条，停用 1 条，1 条可能过时	1 added, 1 changed, 1 turned off, 1 may be outdated
 记忆更新	Memory update
 明天生效	Takes effect tomorrow
 第一版	First draft
-{} / 上限 {}	{} of {} limit
+{} / 预算 {}	{} of {} budget
 内存 {}	Memory {}
 现在 {}	Now {}
 磁盘 {}	Disk {}
@@ -222,7 +230,7 @@ AI 成员被 @ 后，在这些电脑上干活。	AI members work here when you @
 {} PR	{} PRs
 {} 月	{}
 10 月	October 
-11 月 3 日 周二	Tuesday, November 3
+11月3日 周二	Tuesday, November 3
 网页	Page
 办公室	Office
 
@@ -235,13 +243,16 @@ Forge 已暂停	Forge paused
 Forge 正在合并	Forge merging
 Forge 在做 {}	Forge working {}
 Forge 正在做：{}	Forge is working on: {}
+Forge 停在：{}	Forge stopped at: {}
+Forge：{}	Forge: {}
+Scout 卡住了	Scout is stuck
 Forge 会在下一步前看到	Forge sees this before its next step
 Jojo 的提醒	Note from Jojo
 Jojo 转给了 Forge	Jojo handed it to Forge
 Jojo 看完再分给合适的成员	Jojo reads it and hands it to the right member
 Jojo	Jojo
-Joye 在 开发 发起	Joye started this in Engineering
-小王 在 开发 发起	Will started this in Engineering
+Joye 在「开发」发起	Joye started this in Engineering
+小王 在「开发」发起	Will started this in Engineering
 Joye 选了「{}」	Joye chose “{}”
 选了「{}」	Chose “{}”
 Joye 改过	Edited by Joye
@@ -271,11 +282,12 @@ Forge 干活时记下	Noted by Forge on the job
 空闲 · 09:12 巡检 staging，24 项都通过	Idle · Checked staging at 09:12, all 24 passed
 在线 · 09:30 发了拾光 3.0 的文案	Online · Posted the Keepsake 3.0 copy at 09:30
 向 Tata 汇报	Reports to Tata
-在开发、运维两个群	In Engineering and Ops
+在「开发」「运维」两个群	In Engineering and Ops
+在「开发」群	In Engineering
 在跑压测	Running a load test
 本周 4 个话题	4 topics this week
 这周的进度、排队的事和在用的电脑	This week's progress, queue and computers in use
-来龙去脉、版本和页面能做的	Background, versions and what the page can do
+来龙去脉、版本和这一页能做的事	Background, versions and what the page can do
 Scout 巡检 staging	Scout checks staging
 Scout	Scout
 24 项都通过	All 24 passed
@@ -365,9 +377,9 @@ CI 超时，PR #59 的检查没跑完	CI timed out before PR #59's checks finish
 让 Ledger 拉一下 10 月各渠道的新增	Ledger, pull October signups by channel
 发到 拾光增长	Post to Keepsake Growth
 orderbot、拾光、TeamChat 三个仓库	The orderbot, Keepsake and TeamChat repos
-单次花费超过 ¥50	Any single run over $50
+单次花费超过 ¥50 时提醒成员	Reminds the member when a single run is over $50
 改生产环境配置	Change production config
-做这些事之前会先发卡片：团队的电脑上由管理员批准，个人的电脑上由电脑主人批准。其他要确认的事由交代的人或管理员批准。	Before doing any of these, it sends a card: an admin approves on a team computer, the owner on a personal one. Anything else that needs a yes is approved by the requester or an admin.
+做这些事之前会先发卡片请人批准：团队的电脑找管理员，个人的电脑找电脑主人，其他事找交代的人或管理员。	Before doing any of these, it sends a card: an admin approves on a team computer, the owner on a personal one. Anything else that needs a yes is approved by the requester or an admin.
 压测用 1000 条消息就够了。	1,000 messages is enough for a load test.
 被「{}」取代	Replaced by “{}”
 依据：11 月 1 日和 2 日两次回滚，都是没跑压测就合并了	Why: both rollbacks on Nov 1 and 2 were merged without a load test
@@ -422,9 +434,6 @@ Joye 提出	Requested by Joye
 说说为什么，Tata 会写进需求（可选）	Say why (optional), and Tata will add it to the spec
 确定	Confirm
 打开原型	Open prototypes
-Forge 在等你批准	Forge is waiting for your approval
-Watch 在等你批准	Watch is waiting for your approval
-Taro 在等你确认	Taro is waiting for your OK
 PR #61 重连后按 seq 去重	PR #61 Dedupe by seq after reconnect
 通过	Approve
 要改	Request changes
@@ -490,3 +499,33 @@ Taro 推荐大字标题：上一条大字封面的点击率高了 40%。	Taro re
 选好后草稿里的封面会换掉	Your pick replaces the cover in the draft
 用这张	Use this one
 已 {}	{}
+还没填：{}	Still needed: {}
+上移	Move up
+下移	Move down
+点一下就算选了	One click answers
+选好再提交	Choose, then submit
+检查更新…	Check for Updates…
+交还时留句话给 {}（可不填）	Leave {} a note for the hand-back (optional)
+继续时留句话给 {}（可不填）	Leave {} a note for when it continues (optional)
+{} 不在线	{} is offline
+你还在接管，它回来后才能继续操作	You still hold it. You can continue when it's back
+{} 还在接管，它回来后才能继续操作	{} still holds it. You can continue when it's back
+它的电脑不在线	Its computer is offline
+{} 已停止	{} stopped
+停在：{}	Stopped at: {}
+最后画面	Last frame
+结论是什么？	What's the conclusion?
+依据是什么？	What is it based on?
+还有什么遗留问题？	Anything still open?
+没能读到记得的事	Couldn't load this member's memory
+没能读到团队约定	Couldn't load team rules
+没能读到群里的约定	Couldn't load group rules
+没能读到我的偏好	Couldn't load your preferences
+没能读到我的约定	Couldn't load your rules
+无	None
+页面里的操作会发给 Ledger：{}	Actions on this page go to Ledger: {}
+：「{}」「{}」	: “{}” “{}”
+：「{}」	: “{}”
+「{}」「{}」	“{}” “{}”
+「{}」	“{}”
+矩阵，每行最多选一个	Matrix, at most one per row
