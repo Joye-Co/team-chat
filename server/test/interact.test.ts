@@ -215,13 +215,17 @@ describe("limits of card events", () => {
 
     // Live events: 10 at once, then 5 a second.
     const m = (await send(cbot, gid, report([alice.id]))).message;
+    const started = Date.now();
     const burst = await Promise.all(
       Array.from({ length: 14 }, (_, i) => ev(ca, gid, m.id, { blockId: "trend", event: "chart.select", value: { series: "oct", x: "10-13", y: 12, index: 1 }, clientEventId: `burst-${i}` })),
     );
+    // The bucket refills 1 every 200 ms while the burst is on its way: a slow runner takes more.
+    const refilled = Math.ceil((Date.now() - started) / 200);
     const taken = burst.filter((r) => r.ok);
     const limited = burst.filter((r) => !r.ok);
     expect(taken.length).toBeGreaterThanOrEqual(10);
-    expect(taken.length).toBeLessThanOrEqual(11);
+    expect(taken.length).toBeLessThanOrEqual(10 + refilled);
+    if (refilled < 4) expect(limited.length).toBeGreaterThan(0);
     expect(limited.every((r) => r.error.code === "rate_limited" && r.error.retryAfterMs > 0 && r.error.retryAfterMs <= 200)).toBe(true);
     for (const c of [ca, cbot]) c.close();
   });
