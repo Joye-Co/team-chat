@@ -146,6 +146,11 @@ pub enum Reject {
     Failed,
     Reloaded,
     UnknownMethod,
+    /// `emit` or `ask` that did not follow the viewer's own input in the page (see
+    /// [`crate::gate::USER_ACTION_WINDOW`]).
+    NoUserAction,
+    /// The payload does not fit the schema the event declares; the message says where.
+    BadPayload,
 }
 
 impl Reject {
@@ -161,6 +166,8 @@ impl Reject {
             Reject::Failed => "failed",
             Reject::Reloaded => "reloaded",
             Reject::UnknownMethod => "unknown_method",
+            Reject::NoUserAction => "no_user_action",
+            Reject::BadPayload => "bad_payload",
         }
     }
 }
