@@ -48,4 +48,6 @@ crate::copy! {
     RELAY_REFUSED_UNAVAILABLE = "没能开始按顺序做：{name} 现在接不了。换一位成员再发",
     // The order a stopped relay's bar gives as an example.
     RELAY_ORDER_EXAMPLE = "@{first} -> @{second}",
+    // 详情 → 成员: the member a paused order is stuck at (the bar's word).
+    PEOPLE_STUCK = "卡住了",
 }

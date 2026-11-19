@@ -83,7 +83,7 @@ The interface is in Simplified Chinese. It uses only these four nouns for produc
   {name} 现在接不了这件事, 等 {name} 手上的做完, 交出次数到上限了, {name} 的代码还没推上去,
   发起的人已经不在这个群, 没有交到 {name} 手上, 停住了; the composer's 想让他们按顺序做？用 -> 连起来，比如 @{first} -> @{second},
   按顺序做要在话题里用, 这个话题已经在按顺序做，先停止它, 按顺序做要写 2 到 6 步，同一个成员不能挨着;
-  and in 详情 → 成员 在做 and 参与过. Several members can work in a 话题 at once or one after
+  and in 详情 → 成员 在做 and 参与过 (卡住了 for the member a paused order is stuck at). Several members can work in a 话题 at once or one after
   another; no member is the one responsible for a 话题.
 - The settings window may also use 岗位 (role and how the member works), 权限 (permissions),
   机器 (machines) and 花费 (cost).
@@ -137,7 +137,7 @@ The layout and look of every screen are in [DESIGN.md](DESIGN.md) v3 and its art
   rendered natively), the newest decision that waits on me pinned above the composer, and the
   composer (multi-line, Chinese IME, @mentions, quote a message, paste or drop images and files).
   On the right, the topic rail (详情): 成员 (everyone in the 群, who all see the 话题, with the AI
-  members at work marked 在做, those that took part 参与过, and the one who 提出 it), 计划, 改动, 产出, 用到的决定, 电脑, 用时和花费; a card
+  the member a paused order is stuck at marked 卡住了, members at work marked 在做, those that took part 参与过, and the one who 提出 it), 计划, 改动, 产出, 用到的决定, 电脑, 用时和花费; a card
   with no data is hidden.
 - **单独问** (⌘;): a side chat with a member (the main bot by default) beside a topic. The member has read
   the topic up to now. Only I see the questions and answers. A suggested step goes into the topic

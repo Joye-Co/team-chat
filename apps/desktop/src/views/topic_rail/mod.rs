@@ -154,9 +154,10 @@ impl Data {
 mod native;
 pub use native::run_since;
 
-/// The members 成员 marks, in order (design-relay §3.6): the AI members at work here (在做,
-/// the newest start first), then those that took part (参与过), then the one who 提出 the
-/// 话题 (提出) unless already marked.
+/// The members 成员 marks, in order (design-relay §3.6): the member a paused 按顺序做 is
+/// stuck at (卡住了, the word its bar uses), the AI members at work here (在做, the newest
+/// start first), then those that took part (参与过), then the one who 提出 the 话题 (提出)
+/// unless already marked.
 pub fn people_marks(topic: &Topic) -> Vec<(MemberId, &'static str)> {
     use crate::copy::relay as r;
     let mut ps: Vec<&crate::data::TopicParticipant> = topic.participants.iter().collect();
@@ -172,6 +173,13 @@ pub fn people_marks(topic: &Topic) -> Vec<(MemberId, &'static str)> {
             (p.member_id.clone(), tag)
         })
         .collect();
+    // 参与过 would read as finished: the stuck member leads with the bar's word.
+    if let Some(relay) = topic.relay.as_ref().filter(|r| r.state == "paused")
+        && let Some(step) = relay.steps.get(relay.current as usize)
+    {
+        out.retain(|(id, _)| *id != step.member_id);
+        out.insert(0, (step.member_id.clone(), r::PEOPLE_STUCK));
+    }
     let by = &topic.created_by;
     if !by.is_empty() && !out.iter().any(|(id, _)| id == by) {
         out.push((by.clone(), c::INSPECTOR_ASKED));
@@ -892,5 +900,43 @@ mod people_tests {
         let t = topic(vec![], "me", Some("a"));
         assert_eq!(people_marks(&t), vec![("me".to_string(), "提出")]);
         assert!(people_marks(&topic(vec![], "", None)).is_empty());
+    }
+
+    #[test]
+    fn the_member_a_paused_order_is_stuck_at_leads_as_stuck() {
+        use crate::data::{TopicRelay, TopicRelayStep};
+        let step = |id: &str, state: &str| TopicRelayStep {
+            member_id: id.into(),
+            note: None,
+            state: state.into(),
+            run_id: None,
+        };
+        let mut t = topic(
+            vec![who("forge", false, 5), who("scout", false, 9)],
+            "me",
+            None,
+        );
+        t.relay = Some(TopicRelay {
+            id: "r".into(),
+            started_by: "me".into(),
+            goal: String::new(),
+            current: 1,
+            state: "paused".into(),
+            reason: None,
+            stopped_by: None,
+            updated_at: 0,
+            steps: vec![step("forge", "done"), step("scout", "failed")],
+        });
+        assert_eq!(
+            people_marks(&t),
+            vec![
+                ("scout".to_string(), "卡住了"),
+                ("forge".to_string(), "参与过"),
+                ("me".to_string(), "提出"),
+            ]
+        );
+        // A running order marks nobody stuck.
+        t.relay.as_mut().unwrap().state = "running".into();
+        assert!(people_marks(&t).iter().all(|(_, tag)| *tag != "卡住了"));
     }
 }

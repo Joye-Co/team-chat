@@ -465,7 +465,7 @@ Topic rail cards, in this order:
 
 | Card | Content |
 | --- | --- |
-| 成员 | Everyone in the 群: the AI members at work here first, marked `在做` at the right, then those that took part (`参与过`), then the asker (`提出`), then the rest; 16 avatar + name + 岗位. No member is marked 负责: several can work in one 话题 (design-relay §3.6, `Topic.participants`) |
+| 成员 | Everyone in the 群: the member a paused 按顺序做 is stuck at first, marked `卡住了` like its bar, then the AI members at work here, marked `在做` at the right, then those that took part (`参与过`), then the asker (`提出`), then the rest; 16 avatar + name + 岗位. No member is marked 负责: several can work in one 话题 (design-relay §3.6, `Topic.participants`) |
 | 计划 | The plan: ✓ done (`ink-3`, mono duration), ● current (`live`, breathing), ○ todo; segments bar (4 pt, radius 2, gap 4: done `ink-3`, current `live`, todo `line-2`). When done it collapses to `✓ 5 步都做完了 · 41 分钟` with `展开` |
 | 改动 | Title `ui` 500; `#61 +214 −63` mono (`ok-ink` / `bad-ink`) with a 5-cell diffstat; `12 个文件`; checks `✓ 3/3 项检查通过`; status tag (`未合并`, `合并中`, `已合并`). No merge button here: the decision is the pinned card |
 | 产出 | A real-content thumbnail (title + tiny table) 96 tall, radius 8, `line`; name `ui` 500 + `v2 · 09:55` mono; extra rows for recordings (`▶` tile 32 × 22 + name + `0:42`) |
