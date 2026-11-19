@@ -7,8 +7,8 @@
 
 use gpui::{
     App, AppContext as _, Context, ElementId, Entity, Focusable as _, InteractiveElement as _,
-    IntoElement, ParentElement, Render, SharedString, StatefulInteractiveElement as _, Styled,
-    Subscription, Window, div, prelude::FluentBuilder as _, px,
+    IntoElement, ParentElement, Render, SharedString, Styled, Subscription, Window, div,
+    prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
     Disableable as _, WindowExt as _,
@@ -22,7 +22,7 @@ use super::{
     i_am_owner,
     widgets::{self, Status, answer},
 };
-use crate::views::nav::dialogs::{sheet_form, sheet_form_row};
+use crate::views::nav::dialogs::{sheet_form, sheet_form_row, sheet_form_row_wrap};
 use crate::{
     app::{Changes, Services},
     characters::{self, CharacterId, CharacterStatus},
@@ -86,8 +86,6 @@ fn one_line(text: &str) -> String {
 
 /// The width of every select in the 成员 tab (2.8: one value column).
 const SELECT_WIDTH: gpui::Pixels = tokens::size::SELECT_WIDTH;
-/// 在哪台电脑干活 shows a computer name and 这台电脑.
-const MACHINE_SELECT_WIDTH: gpui::Pixels = tokens::size::SELECT_WIDE;
 /// The spend limit field (2.8 number field).
 const SPEND_WIDTH: gpui::Pixels = metrics::LABEL_COLUMN;
 
@@ -523,6 +521,7 @@ impl MembersPage {
         let value: Option<gpui::AnyElement> = if m.deactivated {
             Some(
                 StatusBadge::new(BadgeState::Deactivated, common::MEMBER_DEACTIVATED)
+                    .on_group()
                     .into_any_element(),
             )
         } else if self.roster.solo {
@@ -623,11 +622,21 @@ impl MembersPage {
                     menu
                 };
                 offer.iter().fold(menu, |menu, &role| {
-                    let (page, target) = (page.clone(), member.id.clone());
+                    let (page, target, name) =
+                        (page.clone(), member.id.clone(), member.name.clone());
                     menu.item(PopupMenuItem::new(super::set_role_text(role)).on_click(
-                        move |_, _, cx| {
-                            let target = target.clone();
-                            page.update(cx, |p, cx| p.set_role(target, role, cx));
+                        move |_, window, cx| {
+                            let (page, target) = (page.clone(), target.clone());
+                            super::ask_before_role(
+                                role,
+                                &name,
+                                move |_, cx| {
+                                    let target = target.clone();
+                                    page.update(cx, |p, cx| p.set_role(target, role, cx));
+                                },
+                                window,
+                                cx,
+                            );
                         },
                     ))
                 })
@@ -651,11 +660,40 @@ impl MembersPage {
     /// "¥" in it and separators, and who approves; its loading and failed
     /// states.
     fn rules_section(&self, owner: bool, window: &Window, cx: &mut Context<Self>) -> gpui::Div {
-        let header = SectionTitle::new(s::RULES).description(if owner {
-            s::RULES_FOOTER
+        // Usable (design-github-identity.zh.md §3.5): the gated actions follow the
+        // computer, not the approver select; said once above the rows.
+        let about = format!(
+            "{}\n{}",
+            if owner {
+                s::RULES_FOOTER
+            } else {
+                s::RULES_READONLY
+            },
+            s::RULES_GATED_NOTE
+        );
+        // 团队管理 › 默认规则 has the page title above it: the section title
+        // would say 默认规则 a second time, so only the description stays.
+        let header: gpui::AnyElement = if self.part == MembersPart::Rules {
+            div()
+                .max_w(tokens::layout::PAGE_MEASURE)
+                .n_body()
+                .text_color(native_colors(cx).secondary)
+                .child(about)
+                .into_any_element()
         } else {
-            s::RULES_READONLY
-        });
+            SectionTitle::new(s::RULES)
+                .description(about)
+                .into_any_element()
+        };
+        let section = |header: gpui::AnyElement, body: gpui::AnyElement| {
+            div()
+                .w_full()
+                .flex()
+                .flex_col()
+                .gap(metrics::GROUP_HEADER_GAP)
+                .child(header)
+                .child(body)
+        };
         let Some(r) = self.rules else {
             let body = match &self.rules_status {
                 Status::Failed(t) => widgets::failed_alert(
@@ -671,7 +709,7 @@ impl MembersPage {
                     .row(widgets::list_loading("rules-loading", 2, false, cx))
                     .into_any_element(),
             };
-            return widgets::section(header, body);
+            return section(header, body);
         };
         let page = cx.entity();
         let switch = |id: &'static str,
@@ -752,21 +790,10 @@ impl MembersPage {
                 |r, v| r.deploy_prod = v,
             ))
             // At rest the amount is right-aligned (2.8 number field).
-            .row(FormRow::new(s::RULES_SPEND).control(spend))
-            // Usable (design-github-identity.zh.md §3.5): the gated actions follow the
-            // computer, not the dropdown below; read-only, it wraps.
             .row(
-                div()
-                    .id("rules-gated-note")
-                    .w_full()
-                    .min_h(metrics::FORM_ROW)
-                    .px(metrics::FORM_ROW_INSET)
-                    .py(tokens::space::S6)
-                    .flex()
-                    .items_center()
-                    .n_subheadline()
-                    .text_color(native_colors(cx).secondary)
-                    .child(s::RULES_GATED_NOTE),
+                FormRow::new(s::RULES_SPEND)
+                    .when(owner, |row| row.detail(s::RULES_SPEND_HINT))
+                    .control(spend),
             )
             .row(FormRow::new(s::RULES_APPROVER).control(approver));
         // A value the server refused or a spend that is not a number: the
@@ -781,7 +808,7 @@ impl MembersPage {
             )),
             _ => None,
         };
-        widgets::section(
+        section(
             header,
             div()
                 .w_full()
@@ -789,7 +816,8 @@ impl MembersPage {
                 .flex_col()
                 .gap(tokens::space::S12)
                 .child(group)
-                .children(failed),
+                .children(failed)
+                .into_any_element(),
         )
     }
 }
@@ -897,7 +925,11 @@ impl Render for MembersPage {
             )
         });
         if self.part == MembersPart::Rules {
-            return widgets::pane().child(self.rules_section(owner, window, cx));
+            // The admin body already spaces its pages from the header: only the
+            // hairline stays, so a first card's ring is not clipped.
+            return widgets::pane()
+                .pt(metrics::HAIRLINE)
+                .child(self.rules_section(owner, window, cx));
         }
         widgets::pane()
             .child(members_section)
@@ -1002,39 +1034,6 @@ fn refusal(
     }
 }
 
-/// A pop-up row in a sheet: two choices, `on` is the second.
-fn choice_row(
-    label: &'static str,
-    id: &'static str,
-    options: [&'static str; 2],
-    second: bool,
-    disabled: bool,
-    pick: impl Fn(bool, &mut Window, &mut App) + 'static,
-    window: &Window,
-    cx: &App,
-) -> gpui::Div {
-    let pick = std::rc::Rc::new(pick);
-    sheet_form_row(
-        label,
-        disabled_push(
-            widgets::popup_fixed(id, options[usize::from(second)], SELECT_WIDTH, window, cx),
-            disabled,
-            cx,
-        )
-        .dropdown_menu(move |menu, _, _| {
-            [false, true].into_iter().fold(menu, |menu, v| {
-                let pick = pick.clone();
-                menu.item(
-                    PopupMenuItem::new(options[usize::from(v)])
-                        .checked(v == second)
-                        .on_click(move |_, window, cx| pick(v, window, cx)),
-                )
-            })
-        }),
-        cx,
-    )
-}
-
 /// The two large buttons at the bottom of a form sheet: 取消 and `default`.
 fn sheet_actions(
     id: &'static str,
@@ -1076,21 +1075,42 @@ fn done_button(id: &'static str, cx: &App) -> Button {
 /// 9 (2.9 avatar grid).
 const PICKER_COLUMNS: f32 = 9.;
 
+/// The tint of the picker's tiles for a member called `name` who wears
+/// `selected`: the key a member's avatar tile uses (the roster name, else
+/// the character), so the grid sits on the tint the avatar has.
+pub fn picker_tint(name: &str, selected: Option<CharacterId>, cx: &App) -> gpui::Hsla {
+    let named = theme::MEMBER_TINTS
+        .iter()
+        .any(|n| n.eq_ignore_ascii_case(name.trim()));
+    let k = theme::colors(cx);
+    match selected {
+        Some(c) if !named => k.member_tint(c.as_str()),
+        _ => k.member_tint(name),
+    }
+}
+
 /// The 26 characters and a random cell as a 9-column grid of 40 ghost
-/// tiles, gap 8, the idle look at 32; the chosen one has the selected fill
-/// and a `label` edge. `pick` gets the clicked (or the random) character.
+/// buttons, gap 8, each character in its squircle tile on `tint` (§1.6:
+/// dark art disappears on a dark fill, light art on a light one); the
+/// chosen one has the selected fill and a `label` edge around its tile.
+/// `pick` gets the clicked (or the random) character.
 ///
 /// The grid is one Tab stop (§2.9 grid, E3): the focused tile, else the
 /// chosen one, else the first; ← → ↑ ↓ walk the tiles inside it.
 pub fn character_picker(
     id: &'static str,
     selected: Option<CharacterId>,
+    tint: gpui::Hsla,
     disabled: bool,
     pick: impl Fn(CharacterId, &mut Window, &mut App) + Clone + 'static,
     window: &mut Window,
     cx: &mut App,
 ) -> gpui::Div {
     let count = CharacterId::ALL.len() + 1;
+    // The tile inside its 40 button: 2 on each side for the selected edge.
+    let tile = cell_tile();
+    let edge = theme::colors(cx).tile_edge();
+    let scale = window.scale_factor();
     let handles = window
         .use_keyed_state(
             SharedString::from(format!("{id}-focus")),
@@ -1114,11 +1134,23 @@ pub fn character_picker(
             .tab_stop(rover == last)
             .disabled(disabled)
             .tooltip(s::CHARACTER_RANDOM)
-            .child(crate::ui::icons::icon(
-                ui::Sym::Refresh,
-                tokens::icon::MD,
-                k.secondary,
-            ))
+            // A cell of the grid like its siblings: the same squircle, on
+            // a quiet fill that shows on a sheet and on a group, with the
+            // dice (not the page's reload arrow).
+            .child(
+                div()
+                    .size(tile)
+                    .rounded(theme::radius::bot(tile))
+                    .bg(k.on_group)
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(crate::ui::icons::icon(
+                        ui::Sym::Random,
+                        tokens::icon::MD,
+                        k.secondary,
+                    )),
+            )
             .on_click(move |_, window, cx| {
                 let all = CharacterId::ALL;
                 let nanos = std::time::SystemTime::now()
@@ -1173,11 +1205,23 @@ pub fn character_picker(
             .track_focus(&handles[ix])
             .tab_stop(rover == ix)
             .disabled(disabled)
-            .child(characters::image(
-                c,
-                CharacterStatus::Idle,
-                tokens::avatar::MD,
-            ))
+            .child(
+                div()
+                    .size(tile)
+                    .rounded(theme::radius::bot(tile))
+                    .bg(tint)
+                    .shadow(edge.clone())
+                    .overflow_hidden()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(characters::tile::tile_image(
+                        c,
+                        CharacterStatus::Idle.into(),
+                        tile,
+                        scale,
+                    )),
+            )
             .on_click(move |_, window, cx| pick(c, window, cx))
         }))
         .child(random);
@@ -1187,6 +1231,11 @@ pub fn character_picker(
         .justify_center()
         .on_key_down(walk)
         .child(grid)
+}
+
+/// The tile of one picker cell: the 40 cell less 2 on each side.
+fn cell_tile() -> gpui::Pixels {
+    tokens::avatar::LG - tokens::space::S4
 }
 
 /// The look a new bot gets until one is picked by hand: the roster's character for `name`,
@@ -1209,9 +1258,9 @@ pub struct InviteForm {
     services: Services,
     name: Entity<InputState>,
     role: Entity<InputState>,
-    kind: MemberKind,
     status: Status,
     created: Option<InviteCreated>,
+    done: widgets::DoneStep,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -1231,9 +1280,9 @@ impl InviteForm {
             services,
             name,
             role,
-            kind: MemberKind::Human,
             status: Status::Idle,
             created: None,
+            done: widgets::DoneStep::new(cx),
             _subscriptions: subscriptions,
         }
     }
@@ -1275,7 +1324,8 @@ impl InviteForm {
         }
         let reply = self.services.provider.create_invite(InviteRequest {
             name,
-            kind: self.kind,
+            // An invite is for a person: 添加 AI 成员 is the one way to add an AI member.
+            kind: MemberKind::Human,
             // design-roles 3.9: everyone joins as 普通成员; a 所有者 gives 身份 afterwards.
             level: MemberLevel::Member,
             role: (!role.is_empty()).then_some(role),
@@ -1302,7 +1352,7 @@ impl InviteForm {
 impl Render for InviteForm {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         if let Some(created) = &self.created {
-            return SheetLayout::new(s::INVITE_CREATED)
+            let layout = SheetLayout::new(s::INVITE_CREATED)
                 .explanation(s::SHOWN_ONCE)
                 .body(secret_row(
                     "invite-code",
@@ -1324,15 +1374,15 @@ impl Render for InviteForm {
                     cx,
                 ))
                 .body(widgets::quiet(s::INVITE_DOWNLOAD_HINT, cx))
-                .buttons([done_button("invite-done", cx)])
-                .into_any_element();
+                .buttons([done_button("invite-done", cx)]);
+            return self.done.show(layout, window, cx);
         }
         let busy = self.status.busy();
         let (off, name_err, role_err) = name_role_problem(
             self.name.read(cx).value().trim(),
             self.role.read(cx).value().trim(),
         );
-        let (kind_page, submit, retry) = (cx.entity(), cx.entity(), cx.entity());
+        let (submit, retry) = (cx.entity(), cx.entity());
         let failed = refusal(
             "invite-failed",
             &self.status,
@@ -1357,25 +1407,6 @@ impl Render for InviteForm {
                         &self.role,
                         role_err.is_some(),
                         cx,
-                    ))
-                    .child(choice_row(
-                        s::INVITE_KIND,
-                        "invite-kind",
-                        [s::KIND_HUMAN, s::KIND_AI],
-                        self.kind == MemberKind::Bot,
-                        busy,
-                        move |bot, _, cx| {
-                            kind_page.update(cx, |f, cx| {
-                                f.kind = if bot {
-                                    MemberKind::Bot
-                                } else {
-                                    MemberKind::Human
-                                };
-                                cx.notify();
-                            })
-                        },
-                        window,
-                        cx,
                     )),
             )
             .when_some(failed, |l, f| l.body(f))
@@ -1394,12 +1425,15 @@ impl Render for InviteForm {
 }
 
 /// Opens a form sheet holding `form`; Return runs `submit`, the first field
-/// takes the focus once.
+/// takes the focus once. On the step that shows what was `created` once
+/// (a code, a credential) Return is 完成, the default button there, and Esc
+/// does not close the sheet: only 完成 throws the once-only text away.
 fn open_form_sheet<V: Render>(
     form: Entity<V>,
     width: SheetWidth,
     floor: gpui::Pixels,
     first_field: impl Fn(&V) -> Option<Entity<InputState>> + 'static,
+    created: impl Fn(&V) -> bool + Clone + 'static,
     submit: impl Fn(&mut V, &mut Context<V>) + Clone + 'static,
     window: &mut Window,
     cx: &mut App,
@@ -1411,11 +1445,18 @@ fn open_form_sheet<V: Render>(
         {
             field.read(cx).focus_handle(cx).focus(window, cx);
         }
-        let (ok, submit) = (form.clone(), submit.clone());
+        let (ok, submit, on_created) = (form.clone(), submit.clone(), created.clone());
+        // Esc is refused on the created step (the sheet keeps its keys:
+        // without them Return would be dead too).
+        let (kept, is_created) = (form.clone(), created.clone());
         dialog
+            .on_cancel(move |_, _, cx| !is_created(kept.read(cx)))
             .on_ok(move |_, _, cx| {
-                ok.update(cx, |f, cx| submit(f, cx));
-                false
+                ok.update(cx, |f, cx| {
+                    let done = on_created(f);
+                    submit(f, cx);
+                    done
+                })
             })
             .child(form.clone())
     });
@@ -1428,6 +1469,7 @@ pub fn open_invite(services: Services, window: &mut Window, cx: &mut App) -> Ent
         SheetWidth::Form,
         px(470.),
         |f| (f.created.is_none()).then(|| f.name.clone()),
+        |f| f.created.is_some(),
         |f, cx| f.submit(cx),
         window,
         cx,
@@ -1689,6 +1731,30 @@ pub fn pinned_elsewhere<'a>(
         .find(|m| m.id == id && m.ownership(me) == Ownership::Theirs)
 }
 
+/// A stored placement this sheet may not end: the member sits on somebody else's own computer,
+/// or the computers have not loaded, so that cannot be ruled out yet. 工作方式 stays put then;
+/// switching to 外部接入 would take the member off a computer that is its owner's to change.
+pub fn placement_locked(
+    stored: Option<&str>,
+    machines: &[MachineInfo],
+    machines_loaded: bool,
+    me: Option<&str>,
+) -> bool {
+    stored.is_some() && (!machines_loaded || pinned_elsewhere(stored, machines, me).is_some())
+}
+
+/// The line under 运行方式 when the picked one is signed out: on the picked computer, or on
+/// every computer when none is picked.
+pub fn signed_out_hint(name: &str, machine: Option<&str>) -> String {
+    match machine {
+        Some(machine) => fill(
+            s::RUNNER_RUNTIME_SIGNED_OUT_HINT,
+            &[("name", name), ("machine", machine)],
+        ),
+        None => fill(s::RUNNER_RUNTIME_SIGNED_OUT_ANY_HINT, &[("name", name)]),
+    }
+}
+
 /// The line under 在哪台电脑干活: on my own computer only my work is done there; on someone
 /// else's, only theirs. Nothing when one person uses the server.
 pub fn placement_hint(
@@ -1767,6 +1833,10 @@ pub struct BotForm {
     branch: Entity<InputState>,
     /// The team's computers, for 在哪台电脑干活 and 运行方式.
     machines: Vec<MachineInfo>,
+    /// How the read of `machines` stands.
+    machines_load: MachinesLoad,
+    /// A screenshot scene set the computers: the server's list does not replace them.
+    machines_fixed: bool,
     /// The sign-ins of each online computer's CLIs (its monitor), by computer id: 运行方式
     /// marks the ones that are not signed in.
     logins: std::collections::HashMap<String, Vec<chat_core::proto::monitor::MonitorCli>>,
@@ -1790,28 +1860,26 @@ pub struct BotForm {
     character: Option<CharacterId>,
     status: Status,
     created: Option<BotCreated>,
+    done: widgets::DoneStep,
     /// Set when the sheet edits an existing AI member.
     editing: Option<BotEditing>,
     /// The window the sheet is in: a saved edit closes it.
     window: gpui::AnyWindowHandle,
+    /// The scroll of the sheet's body.
+    scroll: gpui::ScrollHandle,
     _subscriptions: Vec<Subscription>,
+}
+
+/// The team's computers of the AI member sheet as they load.
+enum MachinesLoad {
+    Loading,
+    Failed(gpui::SharedString),
+    Loaded,
 }
 
 impl BotForm {
     pub fn new(services: Services, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let machines = services.provider.machines();
         let this_machine = services.provider.this_machine_id();
-        cx.spawn(async move |this, cx| {
-            if let Ok(list) = answer(machines).await {
-                let _ = this.update(cx, |this, cx| {
-                    this.machines = list;
-                    this.default_to_this_computer();
-                    this.load_logins(cx);
-                    cx.notify();
-                });
-            }
-        })
-        .detach();
         let input = |placeholder: &'static str, window: &mut Window, cx: &mut Context<Self>| {
             cx.new(|cx| InputState::new(window, cx).placeholder(placeholder))
         };
@@ -1832,7 +1900,7 @@ impl BotForm {
             cx.subscribe(&runtime, notify),
             cx.subscribe(&model_input, notify),
         ];
-        Self {
+        let mut form = Self {
             name,
             role,
             labels: input(s::RUNNER_LABELS_PLACEHOLDER, window, cx),
@@ -1842,6 +1910,8 @@ impl BotForm {
             services,
             runner: false,
             machines: Vec::new(),
+            machines_load: MachinesLoad::Loading,
+            machines_fixed: false,
             logins: Default::default(),
             this_machine,
             machine: None,
@@ -1853,10 +1923,91 @@ impl BotForm {
             character: None,
             status: Status::Idle,
             created: None,
+            done: widgets::DoneStep::new(cx),
             editing: None,
             window: window.window_handle(),
+            scroll: gpui::ScrollHandle::new(),
             _subscriptions: subscriptions,
-        }
+        };
+        form.load_machines(cx);
+        form
+    }
+
+    /// Shows the sheet as when the computers did not load (self-test scenes).
+    pub fn show_machines_failed(&mut self, cx: &mut Context<Self>) {
+        self.machines.clear();
+        self.machines_load =
+            MachinesLoad::Failed(widgets::error_text(crate::data::AdminError::Offline).into());
+        cx.notify();
+    }
+
+    /// Reads the team's computers: the placement and 运行方式 choices come from them. A
+    /// failed read says so with 重试; it never looks like a team with no computer.
+    fn load_machines(&mut self, cx: &mut Context<Self>) {
+        self.machines_load = MachinesLoad::Loading;
+        let machines = self.services.provider.machines();
+        cx.spawn(async move |this, cx| {
+            let result = answer(machines).await;
+            let _ = this.update(cx, |this, cx| {
+                match result {
+                    Ok(_) if this.machines_fixed => {}
+                    Ok(list) => {
+                        this.machines = list;
+                        this.machines_load = MachinesLoad::Loaded;
+                        this.default_to_this_computer();
+                        this.load_logins(cx);
+                    }
+                    Err(e) => {
+                        this.machines_load = MachinesLoad::Failed(widgets::error_text(e).into())
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+        cx.notify();
+    }
+
+    /// The sheet as a team with no computer sees it, for a screenshot scene.
+    pub fn preview_no_computers(&mut self, cx: &mut Context<Self>) {
+        self.machines.clear();
+        self.logins.clear();
+        self.machine = None;
+        self.machines_load = MachinesLoad::Loaded;
+        self.machines_fixed = true;
+        self.runner = true;
+        cx.notify();
+    }
+
+    /// 在电脑上工作 with no computer connected: nothing can run this member
+    /// yet. The compact empty (2.13) as the group of the section says so,
+    /// with the way to the 电脑 page (the sheet closes; what was typed is
+    /// short).
+    fn no_computer_notice(&self, cx: &mut Context<Self>) -> Option<gpui::AnyElement> {
+        (matches!(self.machines_load, MachinesLoad::Loaded) && self.machines.is_empty()).then(
+            || {
+                let services = self.services.clone();
+                let open = push_button(
+                    "bot-no-computer-open",
+                    s::BOT_NO_COMPUTER_OPEN,
+                    PushStyle::Ghost,
+                    PushSize::Small,
+                    cx,
+                )
+                .on_click(move |_, window, cx| {
+                    window.close_dialog(cx);
+                    super::open_page(services.clone(), super::Page::Machines, cx);
+                });
+                sheet_form()
+                    .child(widgets::list_empty(
+                        ui::Sym::Computer,
+                        s::BOT_NO_COMPUTER,
+                        Some(open.into_any_element()),
+                        cx,
+                    ))
+                    .into_any_element()
+            },
+        )
     }
 
     /// Turns the sheet into the edit sheet of `member` and loads its runner.
@@ -2004,7 +2155,12 @@ impl BotForm {
     }
 
     /// 在哪台电脑干活 picked: the hand-typed labels no longer count.
-    fn pick_machine(&mut self, id: Option<String>, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn pick_machine(
+        &mut self,
+        id: Option<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.machine = id;
         self.machine_chosen = true;
         self.labels
@@ -2048,6 +2204,43 @@ impl BotForm {
         }
     }
 
+    /// Whose own computer the edited member is stored on, when that is somebody else's: only
+    /// they can change 工作方式. None while the computers load, or when the name is unknown.
+    fn pinned_owner(&self) -> Option<String> {
+        let Some(BotEditing {
+            runner: RunnerLoad::Loaded(Some(stored)),
+            ..
+        }) = &self.editing
+        else {
+            return None;
+        };
+        let me = super::my_id(&self.services);
+        let machine =
+            pinned_elsewhere(stored.machine_id.as_deref(), &self.machines, me.as_deref())?;
+        let owner = self
+            .services
+            .provider
+            .member(machine.owner_id.as_deref()?)?;
+        Some(crate::ui::avatar::name_beside_avatar(&owner.name).to_string())
+    }
+
+    /// The edited member's stored placement may not be ended from this sheet.
+    fn runner_locked(&self) -> bool {
+        let Some(BotEditing {
+            runner: RunnerLoad::Loaded(Some(stored)),
+            ..
+        }) = &self.editing
+        else {
+            return false;
+        };
+        placement_locked(
+            stored.machine_id.as_deref(),
+            &self.machines,
+            matches!(self.machines_load, MachinesLoad::Loaded),
+            super::my_id(&self.services).as_deref(),
+        )
+    }
+
     /// What saving the edit sheet now would change; `None` until the runner
     /// is in.
     fn pending_edit(&self, cx: &App) -> Option<BotMemberEdit> {
@@ -2055,14 +2248,18 @@ impl BotForm {
         let RunnerLoad::Loaded(before) = &e.runner else {
             return None;
         };
-        Some(bot_edit(
+        let mut edit = bot_edit(
             &e.name,
             e.role.as_deref(),
             before.as_ref(),
             &self.value(&self.name, cx),
             &self.value(&self.role, cx),
             self.runner_fields(cx).as_ref(),
-        ))
+        );
+        if self.runner_locked() && matches!(edit.runner, Some(RunnerChange::Remove)) {
+            edit.runner = None;
+        }
+        Some(edit)
     }
 
     /// Saves the edit sheet; a saved edit closes it.
@@ -2139,6 +2336,12 @@ impl BotForm {
 
     pub fn status(&self) -> &Status {
         &self.status
+    }
+
+    /// Scrolls the sheet's body to its end, the 形象 grid (self-test scenes).
+    pub fn scroll_to_end(&mut self, cx: &mut Context<Self>) {
+        self.scroll.scroll_to_bottom();
+        cx.notify();
     }
 
     pub fn fill(
@@ -2229,15 +2432,24 @@ impl Render for BotForm {
                     .body(widgets::quiet(s::BOT_CREDENTIAL_HINT, cx)),
                 None => layout.explanation(fill(s::BOT_RUNNER_READY, &[("name", &name)])),
             };
-            return layout
-                .buttons([done_button("bot-done", cx)])
-                .into_any_element();
+            let layout = layout.buttons([done_button("bot-done", cx)]);
+            return self.done.show(layout, window, cx);
         }
         let busy = self.status.busy();
         let (off, name_err, role_err) =
             name_role_problem(&self.value(&self.name, cx), &self.value(&self.role, cx));
-        // Work on the team's computers needs a runtime.
-        let off = off || (self.runner && self.runtime_value(cx).is_empty());
+        // Work on the team's computers needs a runtime. With everything else
+        // right and the select in sight, the footer says what is still missing.
+        let runtime_missing = self.runner && self.runtime_value(cx).is_empty();
+        let runtime_hint = (!off
+            && runtime_missing
+            && self.editing.is_none()
+            && matches!(self.machines_load, MachinesLoad::Loaded)
+            && !self.machines.is_empty()
+            && !self.runtime_options().is_empty()
+            && self.no_computer_notice(cx).is_none())
+        .then(|| widgets::quiet(s::BOT_RUNTIME_NEEDED, cx));
+        let off = off || runtime_missing;
         // Editing: the runner loads first; saving needs it in and a change.
         let load = self.editing.as_ref().map(|e| e.runner.clone());
         let runner_ready = !matches!(load, Some(RunnerLoad::Loading | RunnerLoad::Failed(_)));
@@ -2264,7 +2476,7 @@ impl Render for BotForm {
             div()
                 .pb(tokens::space::S8)
                 .n_subheadline()
-                .font_weight(gpui::FontWeight::MEDIUM)
+                .font_weight(crate::theme::MEDIUM_WEIGHT)
                 .text_color(k.secondary)
                 .child(text)
         };
@@ -2311,12 +2523,14 @@ impl Render for BotForm {
         if runner_ready {
             // 工作方式: two choices side by side, the one in effect raised,
             // and one line on what it means under them.
-            let hint = if self.runner {
-                s::BOT_MODE_RUNNER_HINT
+            let hint = if let Some(person) = self.pinned_owner() {
+                fill(s::BOT_MODE_LOCKED_HINT, &[("person", &person)])
+            } else if self.runner {
+                s::BOT_MODE_RUNNER_HINT.to_string()
             } else if was_runner {
-                s::BOT_EDIT_EXTERNAL_HINT
+                s::BOT_EDIT_EXTERNAL_HINT.to_string()
             } else {
-                s::BOT_MODE_EXTERNAL_HINT
+                s::BOT_MODE_EXTERNAL_HINT.to_string()
             };
             body = body.child(
                 div()
@@ -2333,7 +2547,7 @@ impl Render for BotForm {
                                 ],
                             )
                             .selected(if self.runner { 0 } else { 1 })
-                            .disabled(busy)
+                            .disabled(busy || self.runner_locked())
                             .on_change(move |ix, _, cx| {
                                 mode_page.update(cx, |f, cx| {
                                     f.runner = ix == 0;
@@ -2367,11 +2581,22 @@ impl Render for BotForm {
                     0,
                     RuntimeOption {
                         runtime: current.clone(),
-                        name: current.clone(),
+                        // By the name the listed ones have (Claude Code, Codex).
+                        name: crate::views::admin::cli_name(&current, &current),
                         signed_out: false,
                     },
                 );
             }
+            // The picked one cannot work until it is signed in: said under the row.
+            let picked_name = self
+                .machine
+                .as_deref()
+                .and_then(|id| self.machines.iter().find(|m| m.id == id))
+                .map(|m| m.name.as_str());
+            let signed_out_hint = known
+                .iter()
+                .find(|o| o.runtime == current && o.signed_out)
+                .map(|o| signed_out_hint(&o.name, picked_name));
             let runtime: Option<gpui::AnyElement> = if only {
                 None
             } else if known.is_empty() {
@@ -2382,14 +2607,17 @@ impl Render for BotForm {
                 )
             } else {
                 let input = self.runtime.clone();
-                let shown = known
+                let chosen = known
                     .iter()
                     .find(|o| o.runtime == current)
-                    .map(RuntimeOption::text)
-                    .unwrap_or_else(|| s::RUNNER_RUNTIME_PICK.to_string());
-                Some(
-                    widgets::popup_fixed("member-runtime", shown, SELECT_WIDTH, window, cx)
+                    .map(RuntimeOption::text);
+                // Nothing chosen yet: 选择 in the placeholder color.
+                let unset = chosen.is_none();
+                let shown = chosen.unwrap_or_else(|| s::RUNNER_RUNTIME_PICK.to_string());
+                let popup =
+                    widgets::popup_fill("member-runtime", shown, unset, SheetWidth::List, cx)
                         .dropdown_menu(move |menu, _, _| {
+                            let menu = widgets::form_menu(menu, SheetWidth::List);
                             known.iter().fold(menu, |menu, o| {
                                 let (rt, input) = (o.runtime.clone(), input.clone());
                                 menu.item(
@@ -2402,9 +2630,18 @@ impl Render for BotForm {
                                         }),
                                 )
                             })
-                        })
+                        });
+                Some(match signed_out_hint {
+                    Some(hint) => div()
+                        .w_full()
+                        .flex()
+                        .flex_col()
+                        .gap(tokens::space::S4)
+                        .child(popup)
+                        .child(widgets::quiet(hint, cx))
                         .into_any_element(),
-                )
+                    None => popup.into_any_element(),
+                })
             };
             // 在哪台电脑干活: any free computer, one of the team's, or my own. Picking a
             // computer (or 任意) replaces the old hand-typed labels. An AI member placed on
@@ -2446,8 +2683,9 @@ impl Render for BotForm {
                     .map(|(_, t)| t.clone())
                     .unwrap_or_default();
                 let form = form.clone();
-                widgets::popup_fixed("member-model", shown, SELECT_WIDTH, window, cx)
+                widgets::popup_fill("member-model", shown, false, SheetWidth::List, cx)
                     .dropdown_menu(move |menu, _, _| {
+                        let menu = widgets::form_menu(menu, SheetWidth::List);
                         options.iter().fold(menu, |menu, (id, text)| {
                             let (id, form) = (id.clone(), form.clone());
                             menu.item(
@@ -2486,8 +2724,9 @@ impl Render for BotForm {
                         .map(|(_, t)| t.clone())
                         .unwrap_or_default();
                     let form = form.clone();
-                    widgets::popup_fixed("member-effort", shown, SELECT_WIDTH, window, cx)
+                    widgets::popup_fill("member-effort", shown, false, SheetWidth::List, cx)
                         .dropdown_menu(move |menu, _, _| {
+                            let menu = widgets::form_menu(menu, SheetWidth::List);
                             options.iter().fold(menu, |menu, (id, text)| {
                                 let (id, form) = (id.clone(), form.clone());
                                 menu.item(
@@ -2505,10 +2744,18 @@ impl Render for BotForm {
                         .into_any_element()
                 });
             let machine: gpui::AnyElement = if elsewhere {
-                widgets::row_value(shown, cx).into_any_element()
+                // Somebody else's computer: a set value that cannot be changed
+                // here is the same select, disabled (2.8).
+                disabled_push(
+                    widgets::popup_fill("member-machine", shown, false, SheetWidth::List, cx),
+                    true,
+                    cx,
+                )
+                .into_any_element()
             } else {
-                widgets::popup_fixed("member-machine", shown, MACHINE_SELECT_WIDTH, window, cx)
+                widgets::popup_fill("member-machine", shown, false, SheetWidth::List, cx)
                     .dropdown_menu(move |menu, _, _| {
+                        let menu = widgets::form_menu(menu, SheetWidth::List);
                         options.iter().fold(menu, |menu, (id, text)| {
                             let (id, form) = (id.clone(), form.clone());
                             menu.item(
@@ -2524,8 +2771,30 @@ impl Render for BotForm {
                     })
                     .into_any_element()
             };
+            let machines_loading = matches!(self.machines_load, MachinesLoad::Loading);
+            let machines_failed = match &self.machines_load {
+                MachinesLoad::Failed(text) => {
+                    let again = cx.entity();
+                    // The rows of a member being edited follow under it.
+                    Some(
+                        div()
+                            .when(self.editing.is_some(), |d| d.pb(tokens::space::S8))
+                            .child(widgets::failed_alert(
+                                "bot-machines-failed",
+                                s::COMPUTERS_FAILED,
+                                Some(text.clone()),
+                                Some(widgets::retry_button("bot-machines-retry", cx).on_click(
+                                    move |_, _, cx| again.update(cx, |f, cx| f.load_machines(cx)),
+                                )),
+                                cx,
+                            )),
+                    )
+                }
+                _ => None,
+            };
             let machine: gpui::AnyElement = match place_hint {
                 Some(hint) => div()
+                    .w_full()
                     .flex()
                     .flex_col()
                     .gap(tokens::space::S4)
@@ -2534,30 +2803,67 @@ impl Render for BotForm {
                     .into_any_element(),
                 None => machine,
             };
+            // No computer is connected, or the list did not load: the notice
+            // or the Alert stands where the rows would be. A member being
+            // edited keeps its rows under it, so what is saved (代码仓库,
+            // 基础分支) stays in reach.
+            let notice = self.no_computer_notice(cx);
+            let nothing_to_set =
+                (notice.is_some() || machines_failed.is_some()) && self.editing.is_none();
             body = body.child(
                 div()
                     .flex()
                     .flex_col()
-                    .child(section(s::RUNNER_SECTION))
+                    .gap(if notice.is_some() && !nothing_to_set {
+                        tokens::space::S12
+                    } else {
+                        gpui::Pixels::ZERO
+                    })
                     .child(
-                        sheet_form()
-                            .child(sheet_form_row(s::RUNNER_MACHINE, machine, cx))
-                            .children(runtime.map(|r| sheet_form_row(s::RUNNER_RUNTIME, r, cx)))
-                            .child(field_row(
-                                s::RUNNER_REPO,
-                                "member-repo",
-                                &self.repo,
-                                false,
-                                cx,
-                            ))
-                            .child(field_row(
-                                s::RUNNER_BRANCH,
-                                "member-branch",
-                                &self.branch,
-                                false,
-                                cx,
-                            )),
-                    ),
+                        div()
+                            .flex()
+                            .flex_col()
+                            .child(section(s::RUNNER_SECTION))
+                            .children(machines_failed)
+                            .children(notice),
+                    )
+                    .children((!nothing_to_set).then(|| {
+                        if machines_loading {
+                            // The choices come from the computers: no rows until they are read.
+                            widgets::list_loading("bot-machines-loading", 2, false, cx)
+                        } else {
+                            sheet_form()
+                                .child(sheet_form_row_wrap(
+                                    s::RUNNER_MACHINE,
+                                    tokens::height::DEFAULT,
+                                    machine,
+                                    cx,
+                                ))
+                                .children(runtime.map(|r| {
+                                    sheet_form_row_wrap(
+                                        s::RUNNER_RUNTIME,
+                                        tokens::height::DEFAULT,
+                                        r,
+                                        cx,
+                                    )
+                                }))
+                                .child(field_row(
+                                    s::RUNNER_REPO,
+                                    "member-repo",
+                                    &self.repo,
+                                    false,
+                                    cx,
+                                ))
+                                .child(field_row(
+                                    s::RUNNER_BRANCH,
+                                    "member-branch",
+                                    &self.branch,
+                                    false,
+                                    cx,
+                                ))
+                                .into_any_element()
+                        }
+                    })),
             );
             // 高级: the member's own model. Off (the everyday case), the team's setting runs.
             let own = self.own_model;
@@ -2571,14 +2877,19 @@ impl Render for BotForm {
                         cx.notify();
                     })
                 });
-            body = body.child(
+            body = body.children((!nothing_to_set).then(|| {
                 div()
                     .flex()
                     .flex_col()
                     .child(section(s::RUNNER_OWN_SECTION))
                     .child(
                         sheet_form()
-                            .child(sheet_form_row(s::RUNNER_OWN_MODEL, own_switch, cx))
+                            // A switch sits on the group's trailing edge (2.8).
+                            .child(sheet_form_row(
+                                s::RUNNER_OWN_MODEL,
+                                div().w_full().flex().justify_end().child(own_switch),
+                                cx,
+                            ))
                             .when(own, |f| {
                                 f.child(sheet_form_row(s::RUNNER_MODEL, model, cx))
                                     .children(
@@ -2586,14 +2897,17 @@ impl Render for BotForm {
                                     )
                             }),
                     )
-                    .child(
-                        div()
-                            .pt(tokens::space::S8)
-                            .n_subheadline()
-                            .text_color(k.secondary)
-                            .child(s::RUNNER_OWN_MODEL_HINT),
-                    ),
-            );
+                    // It explains the off state, so it goes once the switch is on.
+                    .when(!own, |d| {
+                        d.child(
+                            div()
+                                .pt(tokens::space::S8)
+                                .n_subheadline()
+                                .text_color(k.secondary)
+                                .child(s::RUNNER_OWN_MODEL_HINT),
+                        )
+                    })
+            }));
         }
         // The look of an existing member changes in its own sheet (更换形象…).
         // A build without the character pack has no looks to pick from.
@@ -2607,6 +2921,11 @@ impl Render for BotForm {
                         character_picker(
                             "bot-character",
                             Some(self.chosen_character(cx)),
+                            picker_tint(
+                                &self.value(&self.name, cx),
+                                Some(self.chosen_character(cx)),
+                                cx,
+                            ),
                             busy,
                             move |c, _, cx| {
                                 pick_page.update(cx, |f, cx| {
@@ -2623,7 +2942,11 @@ impl Render for BotForm {
         let (title, explanation, default) = match &self.editing {
             Some(e) => (
                 fill(s::EDIT_AI_TITLE, &[("name", &one_line(&e.name))]),
-                s::EDIT_AI_HINT,
+                if self.pinned_owner().is_some() {
+                    s::EDIT_AI_PINNED_HINT
+                } else {
+                    s::EDIT_AI_HINT
+                },
                 common::SAVE,
             ),
             None => (s::ADD_AI_TITLE.to_string(), s::ADD_AI_HINT, s::BOT_CREATE),
@@ -2631,16 +2954,25 @@ impl Render for BotForm {
         SheetLayout::new(title)
             .explanation(explanation)
             .body(
-                div()
-                    .id("bot-form-body")
-                    .max_h(px(460.))
-                    .overflow_y_scroll()
-                    .child(body),
+                // The scrollbar shows while the body overflows, so the cut
+                // at the bottom reads as a scroll, not as a clipped group.
+                // The body takes the height the window has to give.
+                widgets::sheet_body_list(
+                    "bot-form-body",
+                    body,
+                    (window.viewport_size().height
+                        - widgets::sheet_top(window, cx)
+                        - metrics::SHEET_BODY_CHROME
+                        - tokens::space::S24)
+                        .max(metrics::SHEET_BODY_MAX),
+                    &self.scroll,
+                ),
             )
             .when_some(failed, |l, f| l.body(f))
             .when_some(name_err.clone().or(role_err.clone()), |l, e| {
                 l.status(crate::ui::native::sheet::sheet_status_error(e, cx))
             })
+            .when_some(runtime_hint, |l, h| l.status(h))
             .buttons(sheet_actions(
                 "bot",
                 default,
@@ -2653,7 +2985,13 @@ impl Render for BotForm {
 }
 
 pub fn open_add_bot(services: Services, window: &mut Window, cx: &mut App) -> Entity<BotForm> {
-    let form = cx.new(|cx| BotForm::new(services, window, cx));
+    let form = cx.new(|cx| {
+        let mut form = BotForm::new(services, window, cx);
+        // A new member works on a computer unless asked otherwise: 外部接入
+        // issues a credential, so it is never what a bare 添加 does.
+        form.runner = true;
+        form
+    });
     open_bot_sheet(form, window, cx)
 }
 
@@ -2679,6 +3017,7 @@ fn open_bot_sheet(form: Entity<BotForm>, window: &mut Window, cx: &mut App) -> E
         SheetWidth::List,
         px(660.),
         |f| (f.created.is_none()).then(|| f.name.clone()),
+        |f| f.created.is_some(),
         |f, cx| f.submit(cx),
         window,
         cx,
@@ -2740,14 +3079,19 @@ impl Render for CharacterForm {
             } else {
                 s::BOT_CHARACTER_HINT
             })
-            .body(character_picker(
-                "member-character",
-                self.selected,
-                self.status.busy(),
-                move |c, window, cx| page.update(cx, |this, cx| this.pick(c, window, cx)),
-                window,
-                cx,
-            ))
+            .body(
+                character_picker(
+                    "member-character",
+                    self.selected,
+                    picker_tint(&self.name, self.selected, cx),
+                    self.status.busy(),
+                    move |c, window, cx| page.update(cx, |this, cx| this.pick(c, window, cx)),
+                    window,
+                    cx,
+                )
+                // On the sheet's left edge, under the title.
+                .justify_start(),
+            )
             .when_some(
                 match &self.status {
                     Status::Failed(t) => Some(widgets::failed_alert(
@@ -2963,6 +3307,7 @@ mod tests {
                 .child(character_picker(
                     "grid",
                     Some(CharacterId::ALL[3]),
+                    gpui::transparent_black(),
                     false,
                     |_, _, _| {},
                     window,
@@ -3183,6 +3528,11 @@ mod tests {
         );
         assert!(pinned_elsewhere(Some("chen"), &list, Some("me")).is_some());
         assert!(pinned_elsewhere(Some("mine"), &list, Some("me")).is_none());
+        // 工作方式 is locked on someone else's computer, and until the computers are known.
+        assert!(placement_locked(Some("chen"), &list, true, Some("me")));
+        assert!(!placement_locked(Some("mine"), &list, true, Some("me")));
+        assert!(placement_locked(Some("mine"), &[], false, Some("me")));
+        assert!(!placement_locked(None, &[], false, Some("me")));
         let person = |id: &str| (id == "chen").then(|| "陈晨".to_string());
         assert_eq!(
             placement_hint(Some("mine"), &list, team, person).as_deref(),
@@ -3190,7 +3540,7 @@ mod tests {
         );
         assert_eq!(
             placement_hint(Some("chen"), &list, team, person).as_deref(),
-            Some("这位成员在陈晨的电脑上，只做陈晨交代的事。")
+            Some("这位成员在陈晨的电脑上，只做陈晨交代的事。只有陈晨能换电脑。")
         );
         assert_eq!(placement_hint(Some("t"), &list, team, person), None);
         // One person alone: nothing about whose.
@@ -3268,5 +3618,65 @@ mod tests {
         assert_eq!(on.runner, Some(RunnerChange::Set(runner.clone())));
         let off = bot_edit("助手", None, Some(&runner), "助手", "", None);
         assert_eq!(off.runner, Some(RunnerChange::Remove));
+    }
+}
+
+#[cfg(test)]
+mod once_only_step_tests {
+    use std::sync::Arc;
+
+    use gpui::TestAppContext;
+
+    use super::*;
+    use crate::{data::ChatProvider, fake::FakeProvider};
+
+    struct Host;
+
+    impl Render for Host {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div()
+        }
+    }
+
+    /// The step that shows an invite code once: Esc does not throw it away,
+    /// and Return is 完成, its default button.
+    #[gpui::test]
+    fn escape_keeps_the_created_step_and_return_closes_it(cx: &mut TestAppContext) {
+        cx.update(gpui_component::init);
+        let provider: Arc<dyn ChatProvider> = FakeProvider::new();
+        let services = cx.update(|cx| Services::new(provider, cx));
+        let (_, cx) = cx.add_window_view(|window, cx| {
+            let host = cx.new(|_| Host);
+            gpui_component::Root::new(host, window, cx)
+        });
+        let form = cx.update(|window, cx| open_invite(services, window, cx));
+        cx.run_until_parked();
+
+        // While the form is being filled, Esc still closes the sheet.
+        cx.simulate_keystrokes("escape");
+        cx.run_until_parked();
+        assert!(!cx.update(|window, cx| window.has_active_dialog(cx)));
+
+        let services = form.read_with(cx, |f, _| f.services.clone());
+        let form = cx.update(|window, cx| open_invite(services, window, cx));
+        cx.run_until_parked();
+        form.update_in(cx, |f, window, cx| {
+            f.fill("新同事", window, cx);
+            f.fill_role("设计", window, cx);
+        });
+        cx.simulate_keystrokes("enter");
+        cx.run_until_parked();
+        assert!(
+            form.read_with(cx, |f, _| f.created.is_some()),
+            "the code is shown"
+        );
+
+        cx.simulate_keystrokes("escape");
+        cx.run_until_parked();
+        assert!(cx.update(|window, cx| window.has_active_dialog(cx)));
+
+        cx.simulate_keystrokes("enter");
+        cx.run_until_parked();
+        assert!(!cx.update(|window, cx| window.has_active_dialog(cx)));
     }
 }

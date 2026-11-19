@@ -49,7 +49,8 @@ pub fn form_field_width(width: SheetWidth) -> gpui::Pixels {
 }
 
 /// A sheet form (2.8 GroupBox): one group, radius 10, a 1 px border, the
-/// group fill; its rows are separated by 1 px lines inset to the label x.
+/// group fill; its rows are separated by 1 px lines inset 16 on both sides,
+/// like every grouped form.
 pub fn sheet_form() -> SheetForm {
     SheetForm::default()
 }
@@ -57,12 +58,23 @@ pub fn sheet_form() -> SheetForm {
 /// The group of a [`sheet_form`]; children are its rows.
 #[derive(IntoElement, Default)]
 pub struct SheetForm {
-    rows: Vec<gpui::AnyElement>,
+    /// Each row with the inset of the line under it.
+    rows: Vec<(gpui::AnyElement, gpui::Pixels)>,
+}
+
+impl SheetForm {
+    /// A row whose line starts at `inset`: a row with media insets it to the
+    /// title (2.8).
+    pub fn child_with_inset(mut self, row: impl IntoElement, inset: gpui::Pixels) -> Self {
+        self.rows.push((row.into_any_element(), inset));
+        self
+    }
 }
 
 impl ParentElement for SheetForm {
     fn extend(&mut self, elements: impl IntoIterator<Item = gpui::AnyElement>) {
-        self.rows.extend(elements);
+        self.rows
+            .extend(elements.into_iter().map(|e| (e, metrics::FORM_ROW_INSET)));
     }
 }
 
@@ -76,12 +88,13 @@ impl gpui::RenderOnce for SheetForm {
             .bg(k.group)
             .flex()
             .flex_col();
-        for (ix, row) in self.rows.into_iter().enumerate() {
+        for (ix, (row, inset)) in self.rows.into_iter().enumerate() {
             group = group.child(row);
             if ix + 1 < n {
                 group = group.child(
                     div()
-                        .ml(metrics::FORM_ROW_INSET)
+                        .ml(inset)
+                        .mr(metrics::FORM_ROW_INSET)
                         .h(crate::ui::native::tokens::layout::HAIRLINE)
                         .bg(k.separator),
                 );
@@ -109,6 +122,53 @@ pub fn sheet_form_row_top(
     cx: &App,
 ) -> gpui::Div {
     form_row(label.into(), control.into_any_element(), true, cx)
+}
+
+/// A row whose control wraps to several lines (a set of buttons): the label
+/// stays in its column on the center line of the first line, `line` high.
+pub fn sheet_form_row_wrap(
+    label: impl Into<gpui::SharedString>,
+    line: gpui::Pixels,
+    control: impl IntoElement,
+    cx: &App,
+) -> gpui::Div {
+    let k = native_colors(cx);
+    // The pair sits on the row's center line as one block, top-aligned
+    // inside, so one line of buttons looks like any other row.
+    let pair = div()
+        .w_full()
+        .flex()
+        .items_start()
+        .gap(FORM_GAP)
+        .child(
+            div()
+                .flex_none()
+                .w(FORM_LABEL)
+                .h(line)
+                .flex()
+                .items_center()
+                .n_body()
+                .text_color(k.label)
+                .overflow_hidden()
+                .whitespace_nowrap()
+                .text_ellipsis()
+                .child(label.into()),
+        )
+        .child(
+            div()
+                .flex_1()
+                .min_w(gpui::Pixels::ZERO)
+                .flex()
+                .child(control.into_any_element()),
+        );
+    div()
+        .w_full()
+        .min_h(metrics::FORM_ROW)
+        .px(metrics::FORM_ROW_INSET)
+        .py(crate::ui::native::tokens::space::S6)
+        .flex()
+        .items_center()
+        .child(pair)
 }
 
 fn form_row(

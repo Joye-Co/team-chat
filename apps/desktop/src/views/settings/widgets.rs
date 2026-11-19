@@ -68,7 +68,15 @@ pub fn size_text(bytes: u64) -> String {
 pub fn date_text(at: Millis) -> String {
     use chrono::TimeZone as _;
     match chrono::Local.timestamp_millis_opt(at) {
-        chrono::LocalResult::Single(t) => t.format("%Y年%-m月%-d日 %H:%M").to_string(),
+        chrono::LocalResult::Single(t) => fill(
+            crate::copy::common::DATE_TIME,
+            &[
+                ("y", &t.format("%Y").to_string()),
+                ("m", &t.format("%-m").to_string()),
+                ("d", &t.format("%-d").to_string()),
+                ("time", &t.format("%H:%M").to_string()),
+            ],
+        ),
         _ => String::new(),
     }
 }
@@ -522,33 +530,76 @@ impl Status {
     }
 }
 
-/// A one-time secret: its label above, the value in a `code-bg` box (radius
-/// 10, padding 12, Menlo 13/20) with a copy button. The value is never logged.
-pub fn secret_block(id: impl Into<ElementId>, label: &'static str, value: &str, cx: &App) -> Div {
-    let k = theme::colors(cx);
+/// A one-time secret (a command, a credential): its label above like any
+/// field of the sheet, the value in a bordered box in the code size with a
+/// copy button. One line that scrolls sideways, never wraps (D13): while a
+/// line is cut, a scrollbar runs along the box's bottom edge. The caller
+/// keeps `scroll`. The value is never logged.
+pub fn secret_block(
+    id: &'static str,
+    label: &'static str,
+    value: &str,
+    scroll: &gpui::ScrollHandle,
+    cx: &App,
+) -> Div {
+    use crate::ui::native::{metrics, native_colors, tokens};
+    use gpui::{InteractiveElement as _, StatefulInteractiveElement as _};
+    use gpui_component::scroll::{Scrollbar, ScrollbarMode};
+    let k = native_colors(cx);
     let value: SharedString = value.to_string().into();
+    // Known from the frame before: a line is wider than the box.
+    let scrolls = scroll.max_offset().x > Pixels::ZERO;
     field(
         label,
         div()
             .w_full()
+            .min_h(metrics::FIELD)
             .flex()
-            .items_start()
-            .gap(space::S8)
-            .pl(space::S12)
-            .pr(space::S6)
-            .py(space::S6)
-            .rounded(theme::radius::FIELD)
-            .bg(k.code_bg)
+            .items_center()
+            .gap(tokens::space::S8)
+            .pl(tokens::space::S12)
+            .pr(tokens::space::S6)
+            .py(tokens::space::S6)
+            .rounded(metrics::FIELD_RADIUS)
+            .bg(k.control)
             .border_1()
-            .border_color(k.border)
+            .border_color(k.separator)
             .child(
                 div()
+                    .relative()
                     .flex_1()
-                    .min_w_0()
-                    .py(space::S4)
-                    .t_code()
-                    .text_color(k.code_text)
-                    .child(value.clone()),
+                    .min_w(Pixels::ZERO)
+                    .child(
+                        div()
+                            .id(SharedString::from(format!("{id}-value")))
+                            .w_full()
+                            .flex()
+                            .overflow_x_scroll()
+                            .restrict_scroll_to_axis()
+                            .track_scroll(scroll)
+                            .child(
+                                div()
+                                    .flex_none()
+                                    .min_w_full()
+                                    // Room for the scrollbar under the last line.
+                                    .when(scrolls, |d| d.pb(tokens::space::S12))
+                                    // The last glyph clears the copy button
+                                    // at the end of the scroll.
+                                    .pr(tokens::space::S8)
+                                    .whitespace_nowrap()
+                                    .t_code()
+                                    .text_color(k.label)
+                                    .child(value.clone()),
+                            ),
+                    )
+                    .when(scrolls, |d| {
+                        d.child(
+                            div()
+                                .absolute()
+                                .inset_0()
+                                .child(Scrollbar::horizontal(scroll).mode(ScrollbarMode::Always)),
+                        )
+                    }),
             )
             .child(Clipboard::new(id).tooltip(s::COPY).value(value)),
         cx,
@@ -615,23 +666,16 @@ pub fn native_status(status: &Status, cx: &App) -> Option<Div> {
         Status::Idle => return None,
         Status::Busy(t) | Status::Done(t) => (t.clone(), k.secondary),
         Status::Failed(t) => {
-            return Some(crate::ui::native::sheet_status_error(t.clone(), cx).px(px(2.)));
+            return Some(crate::ui::native::sheet_status_error(t.clone(), cx));
         }
     };
-    Some(
-        div()
-            .px(px(2.))
-            .n_subheadline()
-            .text_color(color)
-            .child(text),
-    )
+    Some(div().n_subheadline().text_color(color).child(text))
 }
 
 /// A `secondary` Subheadline line (a footer of my own, a field's help).
 pub fn quiet(text: impl Into<SharedString>, cx: &App) -> Div {
     use crate::ui::native::{NativeType as _, native_colors};
     div()
-        .px(px(2.))
         .n_subheadline()
         .text_color(native_colors(cx).secondary)
         .child(text.into())
@@ -737,7 +781,18 @@ pub fn app_icon(cx: &App) -> AnyElement {
         .into_any_element()
 }
 
-/// Opens a sheet attached under the settings toolbar (§7.1): Escape is
+/// Where a sheet of these panes hangs in `window`: the main window has its
+/// own toolbar line (§7.1), the settings and team windows stay under the
+/// settings toolbar's height.
+pub fn sheet_top(window: &Window, cx: &App) -> Pixels {
+    if crate::app::root_view(window, cx).is_some() {
+        crate::ui::native::window_chrome::sheet_top()
+    } else {
+        super::TOOLBAR_HEIGHT
+    }
+}
+
+/// Opens a sheet attached under the window's toolbar (§7.1): Escape is
 /// 取消, the window grows to `floor` while it is up. `build` lays out the
 /// inside with `SheetLayout` on the configured dialog.
 pub fn open_sheet(
@@ -755,11 +810,48 @@ pub fn open_sheet(
     use gpui_component::WindowExt as _;
     super::window_fit::sheet_floor(floor);
     window.open_dialog(cx, move |dialog, window, cx| {
+        let top = sheet_top(window, cx);
         let dialog = crate::ui::native::native_sheet(dialog, width, cx)
-            .margin_top(super::TOOLBAR_HEIGHT)
+            .margin_top(top)
             .px(px(0.));
         build(dialog, window, cx)
     });
+}
+
+/// The step of a sheet that shows what was made once (a code, a command, a
+/// credential) with 完成 as its only button. The form's fields are gone by
+/// then, and the focus with them: the step takes the focus itself, so the
+/// sheet's keys still reach it (Return is 完成).
+pub struct DoneStep {
+    focus: gpui::FocusHandle,
+    taken: bool,
+}
+
+impl DoneStep {
+    pub fn new(cx: &mut App) -> Self {
+        Self {
+            focus: cx.focus_handle(),
+            taken: false,
+        }
+    }
+
+    /// The step around its `layout`; the first time it draws it takes the focus.
+    pub fn show(
+        &mut self,
+        layout: impl IntoElement,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> AnyElement {
+        use gpui::InteractiveElement as _;
+        if !std::mem::replace(&mut self.taken, true) {
+            self.focus.focus(window, cx);
+        }
+        div()
+            .w_full()
+            .track_focus(&self.focus)
+            .child(layout)
+            .into_any_element()
+    }
 }
 
 /// Opens a Tahoe alert (§7.2) on the settings window: 260 wide, attached
@@ -795,6 +887,31 @@ pub fn popup_fixed(
     // the chevron pinned at the trailing edge, so every select in a column
     // lines up (C1-06).
     crate::ui::native::select_button(id, title, crate::ui::native::PushSize::Regular, cx).w(width)
+}
+
+/// A pop-up as wide as the value column of a `width` sheet's form row, so
+/// the selects and the text fields of one group share both edges (2.8).
+/// `unset` draws the title in the placeholder color: nothing is chosen yet.
+pub fn popup_fill(
+    id: impl Into<ElementId>,
+    title: impl Into<SharedString>,
+    unset: bool,
+    width: crate::ui::native::SheetWidth,
+    cx: &App,
+) -> Button {
+    let k = crate::ui::native::native_colors(cx);
+    crate::ui::native::select_button(id, title, crate::ui::native::PushSize::Regular, cx)
+        .w(crate::views::nav::dialogs::form_field_width(width))
+        .when(unset, |b| b.text_color(k.secondary))
+}
+
+/// The menu of a [`popup_fill`]: at least as wide as its trigger, so it reads
+/// as belonging to the field.
+pub fn form_menu(
+    menu: gpui_component::menu::PopupMenu,
+    width: crate::ui::native::SheetWidth,
+) -> gpui_component::menu::PopupMenu {
+    menu.min_w(crate::views::nav::dialogs::form_field_width(width))
 }
 
 /// A row under a list group: the `+`/`−` buttons, then a quiet line.
@@ -869,8 +986,8 @@ pub fn section(header: crate::ui::native::SectionTitle, body: impl IntoElement) 
         .child(body)
 }
 
-/// The 28 icon box of a machine or device row (2.19): radius 6, muted
-/// fill, a 16 icon.
+/// The 28 icon box of a machine or device row (2.19): radius 6, a 16
+/// icon. It sits on a group box, so its fill is the on-group tint.
 pub fn icon_box_28(sym: Sym, cx: &App) -> Div {
     use crate::ui::native::{native_colors, tokens};
     let k = native_colors(cx);
@@ -878,7 +995,7 @@ pub fn icon_box_28(sym: Sym, cx: &App) -> Div {
         .flex_none()
         .size(tokens::height::SM)
         .rounded(tokens::radius::ITEM)
-        .bg(k.fill)
+        .bg(k.on_group)
         .flex()
         .items_center()
         .justify_center()
@@ -896,6 +1013,7 @@ pub struct ItemRow {
     title: SharedString,
     title_lead: Option<AnyElement>,
     description: Option<SharedString>,
+    facts: Vec<SharedString>,
     meta: Option<SharedString>,
     value: Option<AnyElement>,
     menu: Option<AnyElement>,
@@ -910,6 +1028,7 @@ impl ItemRow {
             title: title.into(),
             title_lead: None,
             description: None,
+            facts: Vec::new(),
             meta: None,
             value: None,
             menu: None,
@@ -936,6 +1055,14 @@ impl ItemRow {
         self
     }
 
+    /// The second line as separate facts, most important first: a line too
+    /// long for the row ends after a whole fact, so a label never loses its
+    /// value (2.21).
+    pub fn facts(mut self, facts: Vec<String>) -> Self {
+        self.facts = facts.into_iter().map(SharedString::from).collect();
+        self
+    }
+
     /// A 12 muted tabular meta in front of the value column (a time).
     pub fn meta(mut self, text: impl Into<SharedString>) -> Self {
         self.meta = Some(text.into());
@@ -959,12 +1086,68 @@ impl ItemRow {
     }
 }
 
+/// One line of `facts` joined by middle dots. A fact that does not fit wraps
+/// onto a second line the box clips, so the line ends on a fact boundary; the
+/// whole text is in a tooltip only when something was cut (2.21).
+fn fact_line(id: ElementId, facts: &[SharedString]) -> gpui::Stateful<Div> {
+    use crate::ui::{
+        native::tokens,
+        truncate::{any_cut, cut_line, text_tip},
+    };
+    use gpui::{AppContext as _, InteractiveElement as _, StatefulInteractiveElement as _};
+    let separator = format!(" {} ", crate::copy::native_kit::MIDDLE_DOT);
+    let whole: SharedString = facts.join(separator.as_str()).into();
+    let (segments, lines): (Vec<_>, Vec<_>) = facts
+        .iter()
+        .enumerate()
+        .map(|(i, fact)| {
+            let text = if i == 0 {
+                fact.to_string()
+            } else {
+                format!("{separator}{fact}")
+            };
+            let (styled, layout) = cut_line(text);
+            (
+                div()
+                    .min_w_0()
+                    .overflow_hidden()
+                    .whitespace_nowrap()
+                    .text_ellipsis()
+                    .child(styled),
+                layout,
+            )
+        })
+        .unzip();
+    let wrapped = std::rc::Rc::new(std::cell::Cell::new(false));
+    let seen = wrapped.clone();
+    div()
+        .w_full()
+        .min_w_0()
+        .h(tokens::text::SUBHEADLINE.1)
+        .overflow_hidden()
+        .flex()
+        .flex_wrap()
+        .children(segments)
+        .on_children_prepainted(move |bounds, _, _| {
+            let first = bounds.first().map(|b| b.origin.y);
+            seen.set(bounds.iter().any(|b| Some(b.origin.y) != first));
+        })
+        .id(id)
+        .tooltip(move |window, cx| {
+            if wrapped.get() || any_cut(&lines) {
+                text_tip(whole.clone()).build(window, cx)
+            } else {
+                cx.new(|_| gpui::Empty).into()
+            }
+        })
+}
+
 impl gpui::RenderOnce for ItemRow {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         use crate::ui::native::{NativeType as _, metrics, native_colors, tokens};
         use gpui::InteractiveElement as _;
         let k = native_colors(cx);
-        let two_line = self.description.is_some();
+        let two_line = self.description.is_some() || !self.facts.is_empty();
         // TruncText: one line, "…", the full value in a tooltip only when
         // the line was cut (2.21).
         let title = crate::ui::truncate::TruncText::new(self.title.clone())
@@ -976,6 +1159,18 @@ impl gpui::RenderOnce for ItemRow {
                 .id(ElementId::Name(format!("{}-desc", self.id).into()))
                 .n_subheadline()
                 .text_color(k.secondary)
+                .into_any_element()
+        });
+        let description = description.or_else(|| {
+            (!self.facts.is_empty()).then(|| {
+                fact_line(
+                    ElementId::Name(format!("{}-desc", self.id).into()),
+                    &self.facts,
+                )
+                .n_subheadline()
+                .text_color(k.secondary)
+                .into_any_element()
+            })
         });
         div()
             .id(self.id)
@@ -1057,6 +1252,7 @@ pub fn list_loading(_id: &str, rows: usize, two_line: bool, cx: &App) -> AnyElem
             group = group.child(
                 div()
                     .ml(metrics::FORM_ROW_INSET + tokens::height::SM + tokens::space::S12)
+                    .mr(metrics::FORM_ROW_INSET)
                     .h(tokens::layout::HAIRLINE)
                     .bg(k.separator),
             );
@@ -1161,7 +1357,13 @@ pub fn item_rows(rows: Vec<AnyElement>, media: Pixels, cx: &App) -> Div {
     let mut list = div().w_full().flex().flex_col();
     for (i, row) in rows.into_iter().enumerate() {
         if i > 0 {
-            list = list.child(div().ml(inset).h(tokens::layout::HAIRLINE).bg(k.separator));
+            list = list.child(
+                div()
+                    .ml(inset)
+                    .mr(metrics::FORM_ROW_INSET)
+                    .h(tokens::layout::HAIRLINE)
+                    .bg(k.separator),
+            );
         }
         list = list.child(row);
     }
@@ -1183,8 +1385,42 @@ pub fn capped_list(
     max_h: Pixels,
     scroll: &gpui::ScrollHandle,
 ) -> Div {
+    capped(id, content, max_h, scroll, Pixels::ZERO)
+}
+
+/// The scrolling body of a sheet, capped at `max_h`: as [`capped_list`], with
+/// the scrollbar in the sheet's side padding, so the groups keep their whole
+/// width and one right edge with the footer buttons (2.9).
+pub fn sheet_body_list(
+    id: impl Into<ElementId>,
+    content: impl IntoElement,
+    max_h: Pixels,
+    scroll: &gpui::ScrollHandle,
+) -> Div {
+    capped(
+        id,
+        content,
+        max_h,
+        scroll,
+        crate::ui::native::tokens::space::S16,
+    )
+}
+
+/// `outset`: how far past the content's right edge the scrollbar sits.
+fn capped(
+    id: impl Into<ElementId>,
+    content: impl IntoElement,
+    max_h: Pixels,
+    scroll: &gpui::ScrollHandle,
+    outset: Pixels,
+) -> Div {
     use gpui::{InteractiveElement as _, StatefulInteractiveElement as _};
     use gpui_component::scroll::{Scrollbar, ScrollbarMode};
+    // In the gutter the bar stands alone, so it shows only while the body
+    // is cut (known from the frame before). A body that fits to within a
+    // few points has nothing to scroll to and gets no thumb.
+    let shown =
+        outset == Pixels::ZERO || scroll.max_offset().y > crate::ui::native::tokens::space::S4;
     div()
         .relative()
         .w_full()
@@ -1197,15 +1433,24 @@ pub fn capped_list(
                 .track_scroll(scroll)
                 .child(content),
         )
-        .child(
+        .children(shown.then(|| {
             div()
                 .absolute()
                 .top_0()
-                .right_0()
+                .right(-outset)
                 .bottom_0()
                 .w(crate::ui::native::tokens::space::S12)
-                .child(Scrollbar::vertical(scroll).mode(ScrollbarMode::Always)),
-        )
+                .child({
+                    let bar = Scrollbar::vertical(scroll).mode(ScrollbarMode::Always);
+                    // The bar draws on the scrolled box unless told to
+                    // use this strip.
+                    if outset > Pixels::ZERO {
+                        bar.viewport_from_layout()
+                    } else {
+                        bar
+                    }
+                })
+        }))
 }
 
 /// A whole number with thousands separators (2.21): 1000000 → 1,000,000.

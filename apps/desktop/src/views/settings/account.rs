@@ -119,6 +119,14 @@ pub struct AccountPage {
     email_sent_to: Option<String>,
     email_busy: bool,
     email_error: Option<EmailError>,
+    /// 重新发送 is on its way (`email_busy` also covers checking a code).
+    email_resending: bool,
+    /// A code just went out again: the link row says so until the wait ends
+    /// or a wrong code takes its place.
+    email_resent: bool,
+    /// Seconds until 重新发送 comes back; 0 when it is there.
+    email_resend_wait: u32,
+    email_resend_timer: Option<gpui::Task<()>>,
     /// Bumped on every step change of the email sheet, so the new step
     /// plays its enter animation once.
     email_step: u32,
@@ -225,6 +233,10 @@ impl AccountPage {
             email_sent_to: None,
             email_busy: false,
             email_error: None,
+            email_resending: false,
+            email_resent: false,
+            email_resend_wait: 0,
+            email_resend_timer: None,
             email_step: 0,
             email_back: false,
             phone,
@@ -264,9 +276,51 @@ impl AccountPage {
             .collect()
     }
 
+    /// A well-formed address other than the one I sign in with.
+    fn email_sendable(&self, cx: &App) -> bool {
+        let typed = self.email_input.read(cx).value().trim().to_lowercase();
+        let current = self.email.clone().flatten();
+        chat_core::proto::is_email_address(&typed)
+            && current.is_none_or(|c| c.trim().to_lowercase() != typed)
+    }
+
+    /// Forgets a resend: the sheet opens, or goes back to the address.
+    fn clear_email_resend(&mut self) {
+        self.email_resending = false;
+        self.email_resent = false;
+        self.email_resend_wait = 0;
+        self.email_resend_timer = None;
+    }
+
+    /// A code went out again: say so and rest 重新发送 for a moment, since
+    /// each new code replaces the one before it.
+    fn start_email_resend_wait(&mut self, cx: &mut Context<Self>) {
+        self.email_resent = true;
+        self.email_resend_wait = tokens::email_sheet::RESEND_WAIT_SECS;
+        self.email_resend_timer = Some(cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(tokens::email_sheet::RESEND_TICK)
+                    .await;
+                let waiting = this.update(cx, |this, cx| {
+                    this.email_resend_wait = this.email_resend_wait.saturating_sub(1);
+                    if this.email_resend_wait == 0 {
+                        this.email_resent = false;
+                    }
+                    cx.notify();
+                    this.email_resend_wait > 0
+                });
+                if !waiting.unwrap_or(false) {
+                    break;
+                }
+            }
+        }));
+    }
+
     /// 发送验证码 in the sheet.
     fn send_email_code(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.email_busy {
+        let resend = self.email_sent_to.is_some();
+        if self.email_busy || (resend && self.email_resend_wait > 0) {
             return;
         }
         let email = self.email_input.read(cx).value().trim().to_lowercase();
@@ -275,7 +329,12 @@ impl AccountPage {
             cx.notify();
             return;
         }
+        // Return on the address already in use: nothing to verify.
+        if !self.email_sendable(cx) {
+            return;
+        }
         self.email_busy = true;
+        self.email_resending = resend;
         self.email_error = None;
         let reply = self.services.provider.add_email_code(&email);
         let started = std::time::Instant::now();
@@ -288,11 +347,14 @@ impl AccountPage {
             }
             let _ = this.update_in(cx, |this, window, cx| {
                 this.email_busy = false;
+                this.email_resending = false;
                 match result {
                     Ok(()) => {
                         if this.email_sent_to.is_none() {
                             this.email_step += 1;
                             this.email_back = false;
+                        } else if resend {
+                            this.start_email_resend_wait(cx);
                         }
                         this.email_sent_to = Some(email);
                         this.email_code
@@ -301,7 +363,15 @@ impl AccountPage {
                         let handle = code.read(cx).focus_handle(cx);
                         handle.focus(window, cx);
                     }
-                    Err(e) => this.email_error = Some(e),
+                    Err(e) => {
+                        this.email_error = Some(e);
+                        // The field was off while the code went out: back to
+                        // it to correct (a resend has no field on screen).
+                        if this.email_sent_to.is_none() {
+                            let handle = this.email_input.read(cx).focus_handle(cx);
+                            handle.focus(window, cx);
+                        }
+                    }
                 }
                 cx.notify();
             });
@@ -329,10 +399,12 @@ impl AccountPage {
                     Ok(saved) => {
                         this.email = Some(Some(saved));
                         this.email_sent_to = None;
+                        this.clear_email_resend();
                         window.close_dialog(cx);
                     }
                     Err(e) => {
                         this.email_error = Some(e);
+                        this.email_resent = false;
                         this.email_code.update(cx, |c, cx| c.select_all(window, cx));
                     }
                 }
@@ -364,13 +436,17 @@ impl AccountPage {
         self.email_back = true;
         self.email_sent_to = None;
         self.email_error = None;
+        self.clear_email_resend();
         let handle = self.email_input.read(cx).focus_handle(cx);
         handle.focus(window, cx);
         cx.notify();
     }
 
     /// Self-test: the address step while 发送验证码 is on its way.
-    pub fn preview_email_sending(&mut self, cx: &mut Context<Self>) {
+    pub fn preview_email_sending(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.email_input.update(cx, |st, cx| {
+            st.set_value("new.name@example.com", window, cx)
+        });
         self.email_busy = true;
         cx.notify();
     }
@@ -382,6 +458,23 @@ impl AccountPage {
             .update(cx, |st, cx| st.set_value(to.to_string(), window, cx));
         self.email_step += 1;
         self.email_sent_to = Some(to.to_string());
+        // As after 发送验证码: the first slot has the caret.
+        let handle = self.email_code.read(cx).focus_handle(cx);
+        handle.focus(window, cx);
+        cx.notify();
+    }
+
+    /// Self-test: the code step while 重新发送 is on its way.
+    pub fn preview_email_resending(&mut self, cx: &mut Context<Self>) {
+        self.email_busy = true;
+        self.email_resending = true;
+        cx.notify();
+    }
+
+    /// Self-test: the code step right after a code went out again.
+    pub fn preview_email_resent(&mut self, cx: &mut Context<Self>) {
+        self.email_resent = true;
+        self.email_resend_wait = tokens::email_sheet::RESEND_WAIT_SECS;
         cx.notify();
     }
 
@@ -392,9 +485,11 @@ impl AccountPage {
             p.email_sent_to = None;
             p.email_error = None;
             p.email_busy = false;
-            let current = p.email.clone().flatten().unwrap_or_default();
+            p.clear_email_resend();
+            // The field asks for the new address; the line above it names
+            // the one in use.
             p.email_input
-                .update(cx, |st, cx| st.set_value(current, window, cx));
+                .update(cx, |st, cx| st.set_value("", window, cx));
             cx.notify();
         });
         let first = std::cell::Cell::new(true);
@@ -405,19 +500,27 @@ impl AccountPage {
             px(500.),
             move |dialog, window, cx| {
                 if first.replace(false) {
-                    let handle = this.read(cx).email_input.read(cx).focus_handle(cx);
+                    // The field of the step that is up: the address, or the code slots.
+                    let page = this.read(cx);
+                    let handle = if page.email_sent_to.is_some() {
+                        page.email_code.read(cx).focus_handle(cx)
+                    } else {
+                        page.email_input.read(cx).focus_handle(cx)
+                    };
                     handle.focus(window, cx);
                 }
                 let page = this.read(cx);
                 let busy = page.email_busy;
+                let sendable = page.email_sendable(cx);
+                let current = page.email.clone().flatten();
                 let sent = page.email_sent_to.clone();
                 let error = page.email_error.map(email_error_text);
                 let k = native_colors(cx);
                 // One centered column, one thing at a time (Stripe / Linear
                 // verification): the icon, the title and one line; the
                 // address or the six slots; one full-width button; quiet
-                // links under it. A ✕ in the corner closes, so the footer
-                // has no 取消 / OK pair.
+                // links under it, then the outline 取消 (2.20: no control at the
+                // corners, the sheet's 24 on all four sides).
                 let full_button = |id: &'static str, label: &'static str, enabled: bool| {
                     loading_push(
                         disabled_push(
@@ -429,8 +532,6 @@ impl AccountPage {
                         PushSize::Large,
                     )
                     .w_full()
-                    .h(metrics::CODE_SLOT.1)
-                    .rounded(metrics::FIELD_RADIUS)
                 };
                 let link = |id: &'static str, label: &'static str| {
                     push_button(id, label, PushStyle::Link, PushSize::Small, cx)
@@ -445,18 +546,36 @@ impl AccountPage {
                 ) = match &sent {
                     None => {
                         let send = this.clone();
+                        let (title, hint) = match &current {
+                            Some(email) => (
+                                s::EMAIL_CHANGE_SHEET_TITLE,
+                                fill(s::EMAIL_CHANGE_SHEET_HINT, &[("email", email)]),
+                            ),
+                            None => (s::EMAIL_SHEET_TITLE, s::EMAIL_SHEET_HINT.to_string()),
+                        };
                         (
-                            s::EMAIL_SHEET_TITLE,
-                            s::EMAIL_SHEET_HINT.to_string(),
-                            NativeTextField::new("email-field", &page.email_input)
-                                .full_width()
-                                .size(crate::ui::native::FieldSize::Large)
-                                .leading(crate::ui::icons::icon(
-                                    Sym::Mention,
-                                    tokens::icon::MD,
-                                    k.secondary,
-                                ))
-                                .error(error.is_some())
+                            title,
+                            hint,
+                            // The h36 field of the login card, in a slot as
+                            // tall as the code slots of the next step, so the
+                            // sheet keeps its height between the two (E5).
+                            div()
+                                .w_full()
+                                .h(metrics::CODE_SLOT.1)
+                                .flex()
+                                .items_center()
+                                .child(
+                                    NativeTextField::new("email-field", &page.email_input)
+                                        .full_width()
+                                        .size(crate::ui::native::FieldSize::Large)
+                                        .leading(crate::ui::icons::icon(
+                                            Sym::Mention,
+                                            tokens::icon::MD,
+                                            k.secondary,
+                                        ))
+                                        .disabled(busy)
+                                        .error(error.is_some()),
+                                )
                                 .into_any_element(),
                             Some(
                                 full_button(
@@ -466,7 +585,7 @@ impl AccountPage {
                                     } else {
                                         s::EMAIL_SEND
                                     },
-                                    !busy,
+                                    sendable,
                                 )
                                 .on_click(move |_, window, cx| {
                                     send.update(cx, |p, cx| p.send_email_code(window, cx))
@@ -486,28 +605,45 @@ impl AccountPage {
                                 .items_center()
                                 .n_body()
                                 .text_color(k.secondary)
-                                .child(s::EMAIL_VERIFYING)
+                                .child(if page.email_resending {
+                                    s::EMAIL_SENDING
+                                } else {
+                                    s::EMAIL_VERIFYING
+                                })
                         } else {
-                            div()
+                            let row = div()
                                 .flex()
                                 .items_center()
                                 .justify_center()
                                 .gap(tokens::space::S4)
                                 .n_body()
-                                .text_color(k.secondary)
-                                .child(s::EMAIL_NOT_RECEIVED)
-                                .child(
+                                .text_color(k.secondary);
+                            // Just sent again: what happened and when 重新发送
+                            // is back; 换个邮箱 stays in reach either way.
+                            let row = if page.email_resend_wait > 0 {
+                                let wait = page.email_resend_wait.to_string();
+                                row.when(page.email_resent, |d| {
+                                    d.child(s::EMAIL_RESENT)
+                                        .child(crate::copy::native_kit::MIDDLE_DOT)
+                                })
+                                .child(fill(s::EMAIL_RESEND_WAIT, &[("n", &wait)]))
+                            } else {
+                                row.child(s::EMAIL_NOT_RECEIVED).child(
                                     disabled_push(link("email-resend", s::EMAIL_RESEND), busy, cx)
                                         .on_click(move |_, window, cx| {
                                             resend.update(cx, |p, cx| p.send_email_code(window, cx))
                                         }),
                                 )
-                                .child(crate::copy::native_kit::MIDDLE_DOT)
-                                .child(link("email-other", s::EMAIL_OTHER_ADDRESS).on_click(
-                                    move |_, window, cx| {
+                            };
+                            row.child(crate::copy::native_kit::MIDDLE_DOT).child(
+                                // After the plain countdown the dot needs no link
+                                // padding on this side: it would sit off-center.
+                                link("email-other", s::EMAIL_OTHER_ADDRESS)
+                                    .when(page.email_resend_wait > 0, |l| l.pl_0())
+                                    .on_click(move |_, window, cx| {
                                         back.update(cx, |p, cx| p.edit_email_address(window, cx))
-                                    },
-                                ))
+                                    }),
+                            )
                         };
                         (
                             s::EMAIL_CODE_TITLE,
@@ -523,14 +659,14 @@ impl AccountPage {
                         )
                     }
                 };
-                let close = crate::ui::native::icon_button(
+                let close = push_button(
                     "email-close",
-                    crate::ui::sf_symbols::Sf::Close,
-                    common::CLOSE,
-                    crate::ui::native::IconSize::Small,
-                    window,
+                    common::CANCEL,
+                    PushStyle::Outline,
+                    PushSize::Large,
                     cx,
                 )
+                .w_full()
                 .on_click(|_, window, cx| window.close_dialog(cx));
                 let ok = this.clone();
                 dialog
@@ -548,7 +684,7 @@ impl AccountPage {
                     .child({
                         // The step below the icon slides in (24 pt from the
                         // trailing side, or the leading side on 换个邮箱) and
-                        // fades, once per step change; the icon and ✕ stay.
+                        // fades, once per step change; the icon and 取消 stay.
                         let step = div()
                             .w_full()
                             .flex()
@@ -605,22 +741,14 @@ impl AccountPage {
                         div()
                             .relative()
                             .w_full()
-                            .px(tokens::space::S32)
-                            .pt(tokens::space::S32)
-                            .pb(tokens::space::S24)
+                            .p(metrics::SHEET_PAD)
                             .flex()
                             .flex_col()
                             .items_center()
                             .overflow_hidden()
-                            .child(
-                                div()
-                                    .absolute()
-                                    .top(tokens::space::S12)
-                                    .right(tokens::space::S12)
-                                    .child(close),
-                            )
                             .child(crate::ui::native::feedback::icon_box(Sym::Mention, cx))
                             .child(step)
+                            .child(div().w_full().pt(tokens::space::S8).child(close))
                     })
             },
         );
@@ -629,7 +757,11 @@ impl AccountPage {
     /// 登录邮箱: my address (or 还没有添加) with 添加… / 更改…, and "⋯" ›
     /// 移除登录邮箱; a failed load shows the Alert with 重试.
     fn email_section(&self, window: &Window, cx: &mut Context<Self>) -> gpui::Div {
-        let header = SectionTitle::new(s::EMAIL).description(s::EMAIL_HINT);
+        // With an address set, the line says what it does, not what adding one would do.
+        let header = SectionTitle::new(s::EMAIL).description(match &self.email {
+            Some(Some(_)) => s::EMAIL_HINT_SET,
+            _ => s::EMAIL_HINT,
+        });
         let body: gpui::AnyElement = match (&self.email, &self.email_status) {
             (None, Status::Failed(t)) => widgets::failed_alert(
                 "email-failed",
@@ -670,7 +802,9 @@ impl AccountPage {
                         move |menu, _, _| {
                             let page = page.clone();
                             menu.item(PopupMenuItem::new(s::EMAIL_REMOVE_ITEM).on_click(
-                                move |_, _, cx| page.update(cx, |p, cx| p.remove_email(cx)),
+                                move |_, window, cx| {
+                                    Self::confirm_remove_email(page.clone(), window, cx)
+                                },
                             ))
                         },
                     );
@@ -760,6 +894,11 @@ impl AccountPage {
 
     pub fn phone(&self) -> &Entity<super::account_phone::PhoneSignIn> {
         &self.phone
+    }
+
+    /// A sign-in email is loaded and set (self-test scenes).
+    pub fn has_email(&self) -> bool {
+        matches!(self.email, Some(Some(_)))
     }
 
     pub fn devices(&self) -> Option<&[DeviceInfo]> {
@@ -922,6 +1061,41 @@ impl AccountPage {
         .detach();
     }
 
+    /// "⋯" › 移除登录邮箱… : an alert first, since it takes away a way to sign in.
+    pub fn confirm_remove_email(this: Entity<Self>, window: &mut Window, cx: &mut App) {
+        if !this.read(cx).has_email() {
+            return;
+        }
+        widgets::open_alert(window, cx, move |_, cx| {
+            let page = this.clone();
+            AlertLayout::new(s::EMAIL_REMOVE_CONFIRM_TITLE)
+                .icon(widgets::app_icon(cx))
+                .message(s::EMAIL_REMOVE_CONFIRM_BODY)
+                .buttons([
+                    alert_button(
+                        "email-remove-ok",
+                        s::EMAIL_REMOVE_CONFIRM_OK,
+                        PushStyle::Outline,
+                        true,
+                        cx,
+                    )
+                    .on_click(move |_, window, cx| {
+                        page.update(cx, |p, cx| p.remove_email(cx));
+                        window.close_dialog(cx);
+                    }),
+                    alert_button(
+                        "email-remove-cancel",
+                        common::CANCEL,
+                        PushStyle::Outline,
+                        false,
+                        cx,
+                    )
+                    .on_click(|_, window, cx| window.close_dialog(cx)),
+                ])
+                .into_any_element()
+        });
+    }
+
     /// "⋯" › 退出登录… on the selected device: an alert; this Mac signs out the
     /// whole app instead.
     pub fn confirm_remove_device(this: Entity<Self>, window: &mut Window, cx: &mut App) {
@@ -1016,7 +1190,16 @@ impl AccountPage {
         });
     }
 
-    /// 编辑… : the 编辑资料 sheet (avatar, name and 岗位, 取消 and 完成).
+    /// The name or 岗位 in the fields differs from my member row.
+    fn profile_changed(&self, cx: &App) -> bool {
+        let name = self.name.read(cx).value().trim().to_string();
+        let role = self.role.read(cx).value().trim().to_string();
+        self.me().is_none_or(|me| {
+            me.name.trim() != name || me.role.as_deref().unwrap_or_default().trim() != role
+        })
+    }
+
+    /// 编辑… : the 编辑资料 sheet (avatar, name and 岗位, 取消 and 保存).
     pub fn open_edit(this: Entity<Self>, window: &mut Window, cx: &mut App) {
         this.update(cx, |p, cx| {
             p.save = Status::Idle;
@@ -1037,7 +1220,7 @@ impl AccountPage {
                 let page = this.read(cx);
                 let me = page.me();
                 let busy = page.save.busy();
-                // The error of the last 完成 (an empty name), or a field
+                // The error of the last 保存 (an empty name), or a field
                 // that is too long while typing: the field turns
                 // destructive, its label too, and the message sits under it.
                 let typed_name = page.name.read(cx).value().to_string();
@@ -1048,6 +1231,7 @@ impl AccountPage {
                         .filter(|(f, _)| !(*f == Field::Name && typed_name.trim().is_empty()))
                 });
                 let invalid = problem.is_some();
+                let unchanged = !page.profile_changed(cx);
                 let bad = |f: Field| shown.as_ref().is_some_and(|(g, _)| *g == f);
                 let choose = this.clone();
                 let (cancel, done, ok) = (this.clone(), this.clone(), this.clone());
@@ -1132,7 +1316,11 @@ impl AccountPage {
                 };
                 dialog
                     .on_ok(move |_, window, cx| {
-                        ok.update(cx, |p, cx| p.save(window, cx));
+                        ok.update(cx, |p, cx| {
+                            if p.profile_changed(cx) {
+                                p.save(window, cx)
+                            }
+                        });
                         false
                     })
                     .on_cancel(move |_, window, cx| {
@@ -1168,12 +1356,12 @@ impl AccountPage {
                                 disabled_push(
                                     push_button(
                                         "profile-done",
-                                        s::DONE,
+                                        common::SAVE,
                                         PushStyle::Default,
                                         PushSize::Regular,
                                         cx,
                                     ),
-                                    busy || invalid,
+                                    busy || invalid || unchanged,
                                     cx,
                                 )
                                 .on_click(move |_, window, cx| {
@@ -1310,7 +1498,7 @@ impl AccountPage {
     /// 登录的设备: the list in its group, capped with a scroll inside it,
     /// or its loading, empty or failed state.
     fn devices_section(&self, window: &Window, cx: &mut Context<Self>) -> gpui::Div {
-        let mut header = SectionTitle::new(s::DEVICES).description(s::DEVICES_HINT);
+        let mut header = SectionTitle::new(s::DEVICES);
         let body: gpui::AnyElement = match (&self.devices, &self.devices_status) {
             (Some(list), _) if !list.is_empty() => {
                 header = header.count(list.len() as u32);
@@ -1390,7 +1578,9 @@ impl Render for AccountPage {
                         push_button(
                             "sign-out",
                             s::SIGN_OUT_OPEN,
-                            PushStyle::Destructive,
+                            // The red fill is on the alert that confirms it
+                            // (2.10); at rest the page has no red.
+                            PushStyle::Outline,
                             PushSize::Regular,
                             cx,
                         ),
@@ -1405,28 +1595,14 @@ impl Render for AccountPage {
     }
 }
 
-/// My avatar in the 账号 header: a photo, or a letter disk on the quiet
-/// `quaternary` fill with `label` initials (never the bright ink disk).
+/// My avatar in the 账号 header: a photo, or the one letter fallback of
+/// every person (§1.8), on the profile card's group fill.
 fn account_avatar(me: Option<&Member>, size: gpui::Pixels, cx: &App) -> gpui::AnyElement {
     let k = native_colors(cx);
-    match me {
-        Some(m) if m.avatar_url.is_none() && !m.is_bot() => div()
-            .flex_none()
-            .size(size)
-            .rounded_full()
-            .bg(k.quaternary)
-            .flex()
-            .items_center()
-            .justify_center()
-            .text_size(size * 0.42)
-            .font_weight(gpui::FontWeight::SEMIBOLD)
-            .text_color(k.label)
-            .child(ui::avatar::monogram(&m.name, size))
-            .into_any_element(),
-        _ => ui::MemberAvatar::new(me, size)
-            .on(k.window)
-            .into_any_element(),
-    }
+    ui::MemberAvatar::new(me, size)
+        .on(k.group)
+        .on_group()
+        .into_any_element()
 }
 
 #[cfg(test)]

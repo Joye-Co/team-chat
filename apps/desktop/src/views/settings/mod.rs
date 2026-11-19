@@ -26,7 +26,7 @@ pub mod selftest;
 mod shortcuts;
 pub use shortcuts::apply_saved as apply_saved_shortcuts;
 pub(crate) mod widgets;
-mod window_fit;
+pub(crate) mod window_fit;
 
 use std::rc::Rc;
 
@@ -451,6 +451,11 @@ impl SettingsView {
         self.scroll.scroll_to_bottom();
     }
 
+    /// The pane's scroll (self-tests).
+    pub fn scroll_handle(&self) -> gpui::ScrollHandle {
+        self.scroll.clone()
+    }
+
     pub fn general(&self) -> &Entity<GeneralPage> {
         &self.general
     }
@@ -547,6 +552,20 @@ impl SettingsView {
             .collect();
         let fit = self.fit.clone();
         let handle = window.window_handle();
+        // A pane taller than the window shows its scrollbar at rest, in the
+        // page's side gutter: the cut at the bottom reads as a scroll (2.19).
+        let page_bar = (self.fit.settled()
+            && self.scroll.max_offset().y > crate::ui::native::tokens::space::S4)
+            .then(|| {
+                use gpui_component::scroll::{Scrollbar, ScrollbarMode};
+                div()
+                    .absolute()
+                    .top_0()
+                    .right_0()
+                    .bottom_0()
+                    .w(crate::ui::native::tokens::space::S12)
+                    .child(Scrollbar::vertical(&self.scroll).mode(ScrollbarMode::Always))
+            });
         // Nothing drawn has the focus (a closed sheet held it): the root
         // takes it back, so Tab still walks the pane.
         if window.focused(cx).is_none() {
@@ -615,47 +634,54 @@ impl SettingsView {
             )
             .child(
                 div()
-                    .id("settings-page")
+                    .relative()
                     .flex_1()
                     .min_h(px(0.))
-                    .overflow_y_scroll()
-                    .track_scroll(&self.scroll)
+                    .w_full()
                     .child(
                         div()
-                            .w_full()
-                            .relative()
-                            // A pane fades in when the tab changes, instead
-                            // of swapping in one frame. It does not rise: the
-                            // window's height already moves, and a second
-                            // motion under it read as a jitter.
-                            .child(crate::ui::motion::fade_in(
-                                gpui::ElementId::Name(
-                                    format!("settings-pane-{}", self.page.slug()).into(),
-                                ),
-                                crate::theme::motion::NORMAL,
-                                div().relative().w_full().child(self.render_page()),
-                                cx,
-                            ))
-                            // Measures the pane as laid out; the window then
-                            // takes its height (§8: height follows the pane).
+                            .id("settings-page")
+                            .size_full()
+                            .overflow_y_scroll()
+                            .track_scroll(&self.scroll)
                             .child(
-                                canvas(
-                                    move |bounds: Bounds<gpui::Pixels>, window, cx| {
-                                        fit.measured(
-                                            TOOLBAR_HEIGHT + bounds.size.height,
-                                            handle,
-                                            window,
-                                            cx,
-                                        );
-                                    },
-                                    |_, _, _, _| {},
-                                )
-                                .absolute()
-                                .top_0()
-                                .left_0()
-                                .size_full(),
+                                div()
+                                    .w_full()
+                                    .relative()
+                                    // A pane fades in when the tab changes, instead
+                                    // of swapping in one frame. It does not rise: the
+                                    // window's height already moves, and a second
+                                    // motion under it read as a jitter.
+                                    .child(crate::ui::motion::fade_in(
+                                        gpui::ElementId::Name(
+                                            format!("settings-pane-{}", self.page.slug()).into(),
+                                        ),
+                                        crate::theme::motion::NORMAL,
+                                        div().relative().w_full().child(self.render_page()),
+                                        cx,
+                                    ))
+                                    // Measures the pane as laid out; the window then
+                                    // takes its height (§8: height follows the pane).
+                                    .child(
+                                        canvas(
+                                            move |bounds: Bounds<gpui::Pixels>, window, cx| {
+                                                fit.measured(
+                                                    TOOLBAR_HEIGHT + bounds.size.height,
+                                                    handle,
+                                                    window,
+                                                    cx,
+                                                );
+                                            },
+                                            |_, _, _, _| {},
+                                        )
+                                        .absolute()
+                                        .top_0()
+                                        .left_0()
+                                        .size_full(),
+                                    ),
                             ),
-                    ),
+                    )
+                    .children(page_bar),
             )
     }
 }
