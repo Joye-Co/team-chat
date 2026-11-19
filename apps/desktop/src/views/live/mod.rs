@@ -957,7 +957,10 @@ impl LivePane {
                     .collect();
                 let commands = held.len();
                 // 交还 aborts a command that still runs (the daemon cancels it): say so.
-                let running = held.iter().any(|h| h.result.is_none());
+                // Same test as the command box: a lost result past HAND_COMMAND_MAX is not running.
+                let running = held
+                    .iter()
+                    .any(|h| h.result.is_none() && now - h.at <= HAND_COMMAND_MAX);
                 div()
                     .w_full()
                     .flex()
