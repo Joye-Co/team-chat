@@ -140,6 +140,10 @@ const STEPS: &[(&str, Steps)] = &[
         },
     ),
     // --- end v16/tail2 ---
+    // --- fx/special-rows ---
+    ("state-hover-done-card", hover(700., 520., 400)),
+    ("state-done-card-avatar-tip", hover(303., 413., 1200)),
+    // --- end fx/special-rows ---
 ];
 
 /// Hover points that move in the worst-case run, where longer data shifts the row the

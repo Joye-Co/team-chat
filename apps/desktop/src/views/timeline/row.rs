@@ -194,15 +194,38 @@ impl TimelineView {
     ) -> AnyElement {
         if self.v2
             && self.editing.as_ref().is_none_or(|e| e.key != key)
-            && let Some(row) = self.v2_special_row(message, key, cx)
+            && let Some((row, row_quotes)) = self.v2_special_row(message, key, cx)
         {
-            // v12/behavior: the special rows get the message menu too (§7.3).
+            // v12/behavior: the special rows get the message menu too (§7.3),
+            // and the hover band and toolbar of a message row, so 回复 is
+            // where it is on every other message. A double-click replies: on
+            // the whole 转给 line, in the done card's text column (its avatar
+            // @s); not on 选了, whose own click shows the question.
             let menu_message = message.clone();
             let view = cx.entity().downgrade();
             let (can_edit, can_recall) = (self.can_edit(message), self.can_recall(message));
+            let hovered =
+                self.hovered.as_deref() == Some(key) || self.menu_open.as_deref() == Some(key);
+            let picking = self
+                .reacting
+                .as_ref()
+                .is_some_and(|(k, from_pill)| k == key && !from_pill);
+            let toolbar = (hovered || picking).then(|| self.render_hover_toolbar(message, key, cx));
+            let hover_key: SharedString = key.to_string().into();
+            let selector = format!("special-{key}");
             return div()
                 .id(ElementId::Name(format!("special-{key}").into()))
+                .debug_selector(move || selector)
+                .relative()
+                .w_full()
+                .rounded(theme::radius::MD)
+                .when(hovered || picking, |el| {
+                    el.bg(crate::ui::native::native_colors(cx).fill.opacity(0.5))
+                })
+                .on_hover(Self::track_hover(hover_key, cx))
+                .when(row_quotes, |el| self.quote_on_double_click(el, message, cx))
                 .child(row)
+                .children(toolbar)
                 .context_menu(move |menu, _, cx| {
                     super::menu::build(
                         menu,
@@ -692,38 +715,11 @@ impl TimelineView {
                 })
                 .into_any_element()
         } else {
-            // A click on someone else's avatar @s them in the composer, once
-            // and without a quote (回复 and a double click on the message
-            // quote it); a person's avatar keeps the row's message menu off it.
-            let mention = author
-                .as_ref()
-                .filter(|a| self.me.as_deref() != Some(a.id.as_str()))
-                .map(|a| (a.id.clone(), a.name.clone()));
-            let bot_quick = author
-                .as_ref()
-                .is_some_and(|a| crate::views::settings::bot_quick::can_open(&self.services, a));
-            div()
-                .id(ElementId::Name(format!("avatar-{key}").into()))
-                .w(gutter_w)
-                .flex_none()
-                // An AI member's avatar lets the right-click through to the message menu,
-                // which holds 更换电脑… for owners.
-                .when(!bot_quick, |el| {
-                    el.on_mouse_down(gpui::MouseButton::Right, |_, _, cx| cx.stop_propagation())
-                })
-                .when_some(mention, |el, (id, name)| {
-                    let tip = if bot_quick {
-                        t::AVATAR_MENTION_TIP_BOT
-                    } else {
-                        t::AVATAR_MENTION_TIP
-                    };
-                    let tip: SharedString = fill(tip, &[("name", &name)]).into();
-                    el.tooltip(move |window, cx| {
-                        gpui_component::tooltip::Tooltip::new(tip.clone()).build(window, cx)
-                    })
-                    .on_click(cx.listener(move |this, _, _, cx| this.mention(&id, cx)))
-                })
-                .child(if v2 {
+            self.avatar_hit(
+                author.as_ref(),
+                key,
+                gutter_w,
+                if v2 {
                     // v2: tiles and circles only; presence lives in the rail.
                     ui::MemberAvatar::new(author.as_ref(), gutter_w)
                 } else {
@@ -731,8 +727,9 @@ impl TimelineView {
                     // timeline (§7.5: no status dot on every bot avatar).
                     ui::MemberAvatar::new(author.as_ref(), theme::AVATAR_SIZE)
                         .presence(author.as_ref().filter(|a| !a.is_bot()))
-                })
-                .into_any_element()
+                },
+                cx,
+            )
         };
 
         // The toolbar stays while its emoji picker is open.
@@ -788,42 +785,17 @@ impl TimelineView {
                 let band = crate::ui::native::native_colors(cx).fill;
                 el.bg(band.opacity(self.highlight_alpha(key)))
             })
-            .on_hover(cx.listener(move |this, hovering: &bool, _, cx| {
-                let key = hover_key.to_string();
-                if *hovering {
-                    if this.hovered.as_deref() != Some(key.as_str()) {
-                        this.hovered = Some(key);
-                        // The pointer takes the row back from the keys.
-                        this.keyboard_row = false;
-                        cx.notify();
-                    }
-                } else if this.hovered.as_deref() == Some(key.as_str()) {
-                    this.hovered = None;
-                    cx.notify();
-                }
-            }))
+            .on_hover(Self::track_hover(hover_key, cx))
             .child(gutter)
             .child(
                 div()
                     .flex_1()
                     .min_w(px(0.))
                     // A double-click on the message replies to it (the toolbar's
-                    // 回复 without aiming for it). Capture phase: the selectable
-                    // text below takes the click for itself.
+                    // 回复 without aiming for it).
                     .when(
                         !deleted && editing_is_none(self, key) && !message.id.is_empty(),
-                        |el| {
-                            let m = message.clone();
-                            el.capture_any_mouse_down(cx.listener(
-                                move |this, event: &gpui::MouseDownEvent, _, cx| {
-                                    if event.button == gpui::MouseButton::Left
-                                        && event.click_count == 2
-                                    {
-                                        this.quote(&m, cx);
-                                    }
-                                },
-                            ))
-                        },
+                        |el| self.quote_on_double_click(el, message, cx),
                     )
                     .map(|el| {
                         if v2 {
@@ -856,6 +828,90 @@ impl TimelineView {
                 )
             })
             .into_any_element()
+    }
+
+    /// The avatar of a message's sender, `width` wide. A click on someone
+    /// else's avatar @s them in the composer, once and without a quote (回复
+    /// and a double click on the message quote it); a person's avatar keeps
+    /// the row's message menu off it. Normal rows and the done card share it.
+    pub(super) fn avatar_hit(
+        &self,
+        author: Option<&Member>,
+        key: &str,
+        width: Pixels,
+        avatar: impl IntoElement,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let mention = author
+            .filter(|a| self.me.as_deref() != Some(a.id.as_str()))
+            .map(|a| (a.id.clone(), a.name.clone()));
+        let bot_quick =
+            author.is_some_and(|a| crate::views::settings::bot_quick::can_open(&self.services, a));
+        let selector = format!("avatar-{key}");
+        div()
+            .id(ElementId::Name(format!("avatar-{key}").into()))
+            .debug_selector(move || selector)
+            .w(width)
+            .flex_none()
+            // An AI member's avatar lets the right-click through to the message menu,
+            // which holds 更换电脑… for owners.
+            .when(!bot_quick, |el| {
+                el.on_mouse_down(gpui::MouseButton::Right, |_, _, cx| cx.stop_propagation())
+            })
+            .when_some(mention, |el, (id, name)| {
+                let tip = if bot_quick {
+                    t::AVATAR_MENTION_TIP_BOT
+                } else {
+                    t::AVATAR_MENTION_TIP
+                };
+                let tip: SharedString = fill(tip, &[("name", &name)]).into();
+                el.tooltip(move |window, cx| {
+                    gpui_component::tooltip::Tooltip::new(tip.clone()).build(window, cx)
+                })
+                .on_click(cx.listener(move |this, _, _, cx| this.mention(&id, cx)))
+            })
+            .child(avatar)
+            .into_any_element()
+    }
+
+    /// A double-click inside `el` replies to `message` (the toolbar's 回复
+    /// without aiming for it). Capture phase: selectable text inside takes
+    /// the click for itself.
+    pub(super) fn quote_on_double_click<E: gpui::InteractiveElement>(
+        &self,
+        el: E,
+        message: &Message,
+        cx: &mut Context<Self>,
+    ) -> E {
+        let m = message.clone();
+        el.capture_any_mouse_down(
+            cx.listener(move |this, event: &gpui::MouseDownEvent, _, cx| {
+                if event.button == gpui::MouseButton::Left && event.click_count == 2 {
+                    this.quote(&m, cx);
+                }
+            }),
+        )
+    }
+
+    /// The hover listener of a message row: the hovered row draws its band
+    /// and toolbar; the pointer takes the row back from the keys.
+    fn track_hover(
+        key: SharedString,
+        cx: &mut Context<Self>,
+    ) -> impl Fn(&bool, &mut Window, &mut App) + 'static {
+        cx.listener(move |this, hovering: &bool, _, cx| {
+            let key = key.to_string();
+            if *hovering {
+                if this.hovered.as_deref() != Some(key.as_str()) {
+                    this.hovered = Some(key);
+                    this.keyboard_row = false;
+                    cx.notify();
+                }
+            } else if this.hovered.as_deref() == Some(key.as_str()) {
+                this.hovered = None;
+                cx.notify();
+            }
+        })
     }
 
     /// The hover toolbar (§7.5): a level-1 capsule 18 pt above the row, at
@@ -932,6 +988,7 @@ impl TimelineView {
                 } else {
                     tool("reply", Sym::Reply)
                         .named(t::REPLY)
+                        .debug_selector(|| "hover-toolbar-reply".into())
                         .on_click(cx.listener({
                             let m = message.clone();
                             move |this, _, _, cx| this.quote(&m, cx)
