@@ -474,6 +474,23 @@ impl Store {
         })
     }
 
+    /// The topics opened from a 群聊 message (开个话题): those whose root message quotes it,
+    /// oldest first.
+    pub fn topics_from_message(&self, message_id: &str) -> StoreResult<Vec<TopicRow>> {
+        let me = self.me_id()?.unwrap_or_default();
+        self.with_reader(|c| {
+            let mut st = c.prepare_cached(&rows::topic_select(
+                "WHERE t.root_message_id IN (SELECT m.id FROM messages m \
+                 WHERE json_extract(m.raw, '$.replyTo.messageId') = ?3)",
+            ))?;
+            let mut v: Vec<TopicRow> = st
+                .query_map(params![String::new(), me, message_id], rows::topic_from_row)?
+                .collect::<Result<_, _>>()?;
+            v.reverse();
+            Ok(v)
+        })
+    }
+
     pub fn topic(&self, topic_id: &str) -> StoreResult<Option<TopicRow>> {
         let me = self.me_id()?.unwrap_or_default();
         self.with_reader(|c| {

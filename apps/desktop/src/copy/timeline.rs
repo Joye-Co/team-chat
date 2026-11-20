@@ -82,6 +82,9 @@ crate::copy! {
     CHAT_START_DM = "在这里直接聊；要做一件事时，开个话题",
     START_NEW_TOPIC = "新话题…",
     MENU_OPEN_TOPIC = "开个话题",
+    // 群聊 message that a 话题 was opened from: the chip under it.
+    THREAD_MESSAGES = "{n} 条消息",
+    THREAD_MORE = "另有 {n} 个话题",
     // ⌘F: the find bar of the open 话题 (or 群聊, 私聊), and its 编辑 menu items.
     FIND_PLACEHOLDER = "查找",
     FIND_POSITION = "{n} / {total}",

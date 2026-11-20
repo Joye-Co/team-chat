@@ -90,6 +90,7 @@ pub static REGISTRY: &[&dyn MessageExtra] = &[
     &crate::views::cards::CardExtra,
     &crate::views::files::extra::AttachmentsExtra,
     &crate::views::artifacts::extra::ArtifactRefsExtra,
+    &ThreadExtra,
 ];
 
 /// The extras of `message` for one placement.
@@ -240,6 +241,94 @@ impl MessageExtra for QuoteExtra {
                 )
                 .into_any_element(),
         )
+    }
+}
+
+/// Most 话题 chips under one 群聊 message; the rest is one line of words.
+const THREAD_CHIPS: usize = 3;
+
+/// Under a 群聊 message that a 话题 was opened from (开个话题): one chip per 话题 with its title
+/// and message count, a click opens it. Reads the cache only.
+pub struct ThreadExtra;
+
+impl MessageExtra for ThreadExtra {
+    fn render(
+        &self,
+        message: &Message,
+        ctx: &ExtrasContext,
+        _window: &mut Window,
+        cx: &mut App,
+    ) -> Option<AnyElement> {
+        use gpui::{ElementId, InteractiveElement as _, StatefulInteractiveElement as _};
+
+        use crate::ui::{self, native::NativeType as _, sf_symbols::Sym};
+        if message.id.is_empty() || !crate::data::is_main_topic(&message.topic_id) {
+            return None;
+        }
+        let topics = ctx
+            .provider
+            .topics_from_message(&message.group_id, &message.id);
+        if topics.is_empty() {
+            return None;
+        }
+        let k = theme::colors(cx);
+        let n = ui::native::native_colors(cx);
+        let mut list = div().mt(space::S8).flex().flex_col().items_start().gap(space::S4);
+        for topic in topics.iter().take(THREAD_CHIPS) {
+            let (group, id) = (topic.group_id.clone(), topic.id.clone());
+            let meta = crate::copy::fill(
+                t::THREAD_MESSAGES,
+                &[("n", &topic.message_count.max(1).to_string())],
+            );
+            list = list.child(
+                div()
+                    .id(ElementId::Name(format!("thread-{}-{}", message.id, topic.id).into()))
+                    .max_w_full()
+                    .h(px(32.))
+                    .px(space::S8)
+                    .rounded(ui::native::tokens::radius::CONTAINER)
+                    .border_1()
+                    .border_color(n.separator)
+                    .bg(n.content)
+                    .cursor_pointer()
+                    .hover(|d| d.bg(k.hover))
+                    .flex()
+                    .items_center()
+                    .gap(space::S8)
+                    .child(ui::icon(Sym::OpenTopic, theme::icon::HEADER, k.text_2))
+                    .child(
+                        div()
+                            .min_w_0()
+                            .n_subheadline()
+                            .text_color(n.label)
+                            .one_line()
+                            .child(topic.title.clone()),
+                    )
+                    .child(
+                        div()
+                            .flex_none()
+                            .n_subheadline()
+                            .text_color(n.secondary)
+                            .child(meta),
+                    )
+                    .child(ui::icon(Sym::ChevronRight, theme::icon::HEADER, k.text_2))
+                    .on_click(move |_, _, cx| {
+                        crate::views::nav::open_topic(group.clone(), id.clone(), cx)
+                    }),
+            );
+        }
+        if topics.len() > THREAD_CHIPS {
+            list = list.child(
+                div()
+                    .n_subheadline()
+                    .text_color(n.secondary)
+                    .child(crate::copy::fill(
+                        t::THREAD_MORE,
+                        &[("n", &(topics.len() - THREAD_CHIPS).to_string())],
+                    )),
+            );
+        }
+        Some(list.into_any_element())
     }
 }
 

@@ -989,3 +989,27 @@ fn a_cache_from_before_hide_delete_upgrades_with_everything_shown() {
     assert!(!s.group("G1").unwrap().unwrap().hidden);
     assert!(!s.member("M1").unwrap().unwrap().is_deleted());
 }
+
+#[test]
+fn topics_opened_from_a_chat_message_are_found_by_the_message_they_quote() {
+    let (_d, s) = open();
+    seed_topic(&s);
+    let mut root = message("M2", G1, "T2", ME, 4, "");
+    root.reply_to = Some(ReplyTo {
+        message_id: "M1".into(),
+        author_id: ME.into(),
+        excerpt: "root".into(),
+    });
+    s.apply_events(
+        G1,
+        &[
+            topic_created(3, G1, topic("T2", G1, "M2", 3)),
+            msg_created(4, root),
+        ],
+    )
+    .unwrap();
+    let found = s.topics_from_message("M1").unwrap();
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].topic.id, "T2");
+    assert!(s.topics_from_message("M2").unwrap().is_empty());
+}

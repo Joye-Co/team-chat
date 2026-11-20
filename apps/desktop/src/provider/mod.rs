@@ -1448,6 +1448,22 @@ impl ChatProvider for CoreProvider {
         }
     }
 
+    fn topics_from_message(&self, _group_id: &str, message_id: &str) -> Vec<Topic> {
+        let Some(a) = self.account() else {
+            return Vec::new();
+        };
+        a.client
+            .store()
+            .topics_from_message(message_id)
+            .map(|rows| {
+                rows.iter()
+                    .filter(|r| !r.hidden && !crate::data::is_main_topic(&r.topic.id))
+                    .map(convert::topic)
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
     fn topic(&self, group_id: &str, topic_id: &str) -> Option<Topic> {
         let a = self.account()?;
         let real = self.resolve_topic(topic_id);

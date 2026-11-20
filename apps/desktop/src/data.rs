@@ -1672,6 +1672,11 @@ pub trait ChatProvider: Send + Sync + 'static {
     fn topic(&self, group_id: &str, topic_id: &str) -> Option<Topic> {
         self.topics(group_id).into_iter().find(|t| t.id == topic_id)
     }
+    /// The topics opened from a 群聊 message (开个话题: their first message quotes it), oldest
+    /// first. Reads the cache only.
+    fn topics_from_message(&self, _group_id: &str, _message_id: &str) -> Vec<Topic> {
+        Vec::new()
+    }
     /// Topics that wait on me and topics with unread mentions of me.
     fn todo(&self) -> Vec<TodoItem>;
 
