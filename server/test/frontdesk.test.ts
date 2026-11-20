@@ -4,12 +4,20 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { jsonIn } from "../src/aiservice/tools";
 import { DECIDE_TOOL, MIN_CONFIDENCE, settle, systemPrompt } from "../src/agent/frontdesk";
 import { Daemon, mention, world } from "./daemon";
-import { SELF } from "cloudflare:test";
+import { SELF, env, runInDurableObject } from "cloudflare:test";
+import { FOLLOW_UP_WINDOW_MS } from "../src/bots/desk/input";
 import { BASE, Client, api, clientMsgId, waitUntil } from "./helpers";
 
 afterEach(() => {
   vi.restoreAllMocks();
 });
+
+const benv = env as unknown as { BOT_DESK: DurableObjectNamespace };
+/** Moves a run's end back in time, in the bot's desk. */
+const endEarlier = (botId: string, runId: string, ms: number) =>
+  runInDurableObject(benv.BOT_DESK.get(benv.BOT_DESK.idFromName(botId)), (_o, state: DurableObjectState) => {
+    state.storage.sql.exec("UPDATE runs SET ended_at = ended_at - ? WHERE id = ?", ms, runId);
+  });
 
 const realFetch = globalThis.fetch;
 type Seen = { body: any };
@@ -152,6 +160,54 @@ describe("front desk", () => {
     // Small talk: no 👀 at all, no run.
     expect(c.events().some((e) => e.type === "reaction.changed" && e.data.messageId === thanks.message.id)).toBe(false);
     expect(d.frames.filter((f) => f.t === "run.assign")).toHaveLength(1);
+    d.close();
+    c.close();
+  });
+
+  it("hands the requester's message without an @ to the front desk hours after the last answer", async () => {
+    const w = await world();
+    await aiOn(w.owner.token);
+    const seen = fakeDesk([
+      { action: "dispatch", reason: "work", confidence: 0.9, brief: { goal: "修设置页" } },
+      { action: "dispatch", reason: "continues the work", confidence: 0.9, brief: { goal: "设置页再加个开关" } },
+    ]);
+    const { d } = await Daemon.connect(w.machineToken, {});
+    const { c } = await Client.connect(w.human.token);
+    const topicId = await mention(c, w, "@dev 修设置页");
+    const a = await d.next((f) => f.t === "run.assign");
+    d.send({ t: "run.accept", runId: a.runId });
+    await d.acked(a.runId, d.done(a.runId, { status: "succeeded", resultText: "ok" }));
+    await c.waitEvent((e) => e.type === "run.updated" && e.data.run.id === a.runId && e.data.run.status === "done");
+
+    // 接 1.4 with a front desk: no time window; the front desk is told the message has no @.
+    await endEarlier(w.bot.id, a.runId, 3 * 3600_000);
+    await c.ok({ t: "send", groupId: w.gid, topicId, clientMsgId: clientMsgId(), body: "再加个开关" });
+    const b = await d.next((f) => f.t === "run.assign" && f.runId !== a.runId);
+    expect(seen).toHaveLength(2);
+    expect(seen[1].body.messages[1].content).toContain("This message does not @ you");
+    expect(b.prompt).toContain("Goal: 设置页再加个开关");
+    d.close();
+    c.close();
+  });
+
+  it("without a front desk, takes a message without an @ as a follow-up only within the window", async () => {
+    const w = await world();
+    const { d } = await Daemon.connect(w.machineToken, {});
+    const { c } = await Client.connect(w.human.token);
+    const topicId = await mention(c, w, "@dev 修设置页");
+    const a = await d.next((f) => f.t === "run.assign");
+    d.send({ t: "run.accept", runId: a.runId });
+    await d.acked(a.runId, d.done(a.runId, { status: "succeeded", resultText: "ok" }));
+    await c.waitEvent((e) => e.type === "run.updated" && e.data.run.id === a.runId && e.data.run.status === "done");
+
+    await endEarlier(w.bot.id, a.runId, FOLLOW_UP_WINDOW_MS + 60_000);
+    await c.ok({ t: "send", groupId: w.gid, topicId, clientMsgId: clientMsgId(), body: "再加个开关" });
+    // Messages reach the desk in order: the next run is the @ request's, so the late one started nothing.
+    await c.ok({ t: "send", groupId: w.gid, topicId, clientMsgId: clientMsgId(), body: "@dev 再看看", mentions: [w.bot.id] });
+    const b = await d.next((f) => f.t === "run.assign" && f.runId !== a.runId);
+    expect(b.prompt).toContain("再看看");
+    await new Promise((r) => setTimeout(r, 300));
+    expect(d.frames.filter((f) => f.t === "run.assign")).toHaveLength(2);
     d.close();
     c.close();
   });

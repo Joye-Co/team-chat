@@ -948,8 +948,10 @@ Rules:
   people's talk stays in the topic and reaches the next turn as context. A plain 停 / 别做了
   from the requester stops the run when no front desk is configured. A message that reaches the
   run after its last turn ended starts a new run. When no run is active, a mention starts a run,
-  and so does a message without an @ from the last run's requester within 30 minutes after it
-  ended (with a front desk, the front desk decides; small talk gets no answer).
+  and so does a message without an @ from the last run's requester after it ended (or from a
+  person the front desk answered there), unless that run was stopped: with a front desk at any
+  time later, and the front desk decides (small talk and talk meant for others get no answer);
+  without one only within 30 minutes. In the 群聊 only a mention reaches the bot.
 - In a chat area (the 群聊, a DM's 群聊) a bot works on several requests at once (usable 接 1.5):
   a mention from someone who has no active run of the bot there starts its own run next to the
   running ones, with its own result and its own session. A message that quotes a run's request,
