@@ -57,6 +57,9 @@ describe("front desk rules", () => {
     expect(system).toContain("a `mermaid` fence in a reply is drawn as a diagram");
     // The reply rule is unchanged: what moves a request from reply to dispatch is decided by the replay.
     expect(system).toContain("- reply: conversation, thanks, or a question you can answer well from the topic and general knowledge alone.");
+    // It knows how its member is reached, and leaves questions about the chat's own behavior to the code.
+    expect(system).toContain("in a 话题 it worked in, by any later message without an @ from the person it worked for there; in the 群聊 only an @ reaches it.");
+    expect(system).toContain("needs the code: dispatch it.");
   });
 
   it("falls back to a run when the answer is invalid, empty or unsure", () => {
