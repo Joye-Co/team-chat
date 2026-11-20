@@ -1663,4 +1663,99 @@ mod keyboard_tests {
             "the menu is still open"
         );
     }
+
+    /// A done card (已交付) answers like a message row: its avatar @s the
+    /// member, the hover toolbar's 回复 and a double-click on the card quote
+    /// it (the special row used to skip the row's handlers).
+    #[gpui::test]
+    fn a_done_card_mentions_and_quotes_like_a_message(cx: &mut gpui::TestAppContext) {
+        use crate::fake::v2::FORGE;
+        use gpui::{Modifiers, MouseButton, MouseDownEvent, MouseUpEvent};
+        cx.update(|cx| {
+            gpui_component::init(cx);
+            bind_keys(cx);
+        });
+        let provider: Arc<dyn ChatProvider> = V2Samples::new();
+        let (view, cx) = cx.add_window_view(move |_, cx| {
+            let services = Services::new(provider, cx);
+            services.nav.update(cx, |nav, cx| {
+                nav.open_topic(DEV.into(), T_RECONNECT.into(), cx)
+            });
+            TimelineView::new(services, cx)
+        });
+        view.update(cx, |this, cx| this.set_v2(true, cx));
+        cx.run_until_parked();
+        let events = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let sink = events.clone();
+        cx.update(|_, cx| {
+            cx.subscribe(&view, move |_, e: &TimelineEvent, _| {
+                sink.borrow_mut().push(e.clone())
+            })
+            .detach()
+        });
+        let done = view.read_with(cx, |this, _| {
+            this.messages
+                .iter()
+                .find(|m| matches!(this.v2_special(m), Some(v2::Special::Done { .. })))
+                .cloned()
+                .expect("the sample 话题 has a done card")
+        });
+        assert_eq!(done.author_id, FORGE);
+        let key = model::key(&done).to_string();
+        // `debug_bounds` takes a static selector; a test can leak two.
+        let selector = |s: String| -> &'static str { Box::leak(s.into_boxed_str()) };
+        let quote = TimelineEvent::Quote {
+            group_id: done.group_id.clone(),
+            topic_id: done.topic_id.clone(),
+            message_id: done.id.clone(),
+            author_id: Some(FORGE.into()),
+        };
+        let mention = TimelineEvent::Mention {
+            member_id: FORGE.into(),
+        };
+
+        // A click on the card's avatar @s Forge.
+        let avatar = cx
+            .debug_bounds(selector(format!("avatar-{key}")))
+            .expect("the done card's avatar is drawn");
+        cx.simulate_click(avatar.center(), Modifiers::none());
+        cx.run_until_parked();
+        assert_eq!(events.borrow().as_slice(), std::slice::from_ref(&mention));
+
+        // The hover toolbar shows on the card; its 回复 quotes it.
+        let card = cx
+            .debug_bounds(selector(format!("special-{key}")))
+            .expect("the done card is drawn");
+        cx.simulate_mouse_move(card.center(), None, Modifiers::none());
+        cx.run_until_parked();
+        let reply = cx
+            .debug_bounds("hover-toolbar-reply")
+            .expect("the toolbar shows on the done card");
+        cx.simulate_click(reply.center(), Modifiers::none());
+        cx.run_until_parked();
+        assert_eq!(
+            events.borrow().as_slice(),
+            &[mention.clone(), quote.clone()]
+        );
+
+        // A double-click on the card's text quotes it too.
+        let at = card.center();
+        for click_count in [1, 2] {
+            cx.simulate_event(MouseDownEvent {
+                position: at,
+                button: MouseButton::Left,
+                modifiers: Modifiers::none(),
+                click_count,
+                first_mouse: false,
+            });
+            cx.simulate_event(MouseUpEvent {
+                position: at,
+                button: MouseButton::Left,
+                modifiers: Modifiers::none(),
+                click_count,
+            });
+        }
+        cx.run_until_parked();
+        assert_eq!(events.borrow().as_slice(), &[mention, quote.clone(), quote]);
+    }
 }

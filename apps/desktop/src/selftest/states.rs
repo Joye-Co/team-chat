@@ -278,6 +278,22 @@ pub const SCENES: &[Scene] = &[
         open: crate::views::settings::selftest::open_notifications_focus_last,
     },
     // --- end v16/tail2 ---
+    // --- fx/special-rows: a done card answers the pointer like a message row ---
+    Scene {
+        name: "state-hover-done-card",
+        about: "topic-v2 with the pointer on Forge's done card: the row hover band and the hover toolbar with 回复",
+        start: Start::V2,
+        setup: |s, cx| (like("topic-v2").setup)(s, cx),
+        open: open_main,
+    },
+    Scene {
+        name: "state-done-card-avatar-tip",
+        about: "topic-v2 with the pointer on the done card's avatar: the tooltip says a click @s Forge",
+        start: Start::V2,
+        setup: |s, cx| (like("topic-v2").setup)(s, cx),
+        open: open_main,
+    },
+    // --- end fx/special-rows ---
 ];
 
 /// The scene each state scene starts from: its capture must differ from that
@@ -298,6 +314,8 @@ const BASES: &[(&str, &str)] = &[
     ("state-focus-artifact-row", "artifacts-v2"),
     ("state-focus-diagram-node", "diagram-viewer"),
     ("state-focus-settings-row", "settings-notifications-end"),
+    ("state-hover-done-card", "topic-v2"),
+    ("state-done-card-avatar-tip", "topic-v2"),
 ];
 
 /// The base scene of state scene `name`.

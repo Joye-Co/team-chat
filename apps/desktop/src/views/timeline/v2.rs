@@ -319,21 +319,27 @@ impl TimelineView {
     }
 
     /// A row that replaces the whole message in the v2 style, or `None` for
-    /// a normal message.
+    /// a normal message, and whether a double-click anywhere on it replies
+    /// (the 转给 line; the done card takes it in its text column, 选了 has a
+    /// click of its own).
     pub(super) fn v2_special_row(
         &mut self,
         message: &Message,
         key: &str,
         cx: &mut Context<Self>,
-    ) -> Option<AnyElement> {
+    ) -> Option<(AnyElement, bool)> {
         let special = self.v2_special(message)?;
         let author = self.v2_member(&message.author_id).cloned();
         Some(match special {
-            Special::Routed(to) => self.v2_routing_row(message, author.as_ref(), &to, cx),
-            Special::Decision(text) => self.v2_decision_row(message, author.as_ref(), &text, cx),
-            Special::Done { title, rest, proof } => {
-                self.v2_done_card(message, key, author.as_ref(), title, rest, proof, cx)
-            }
+            Special::Routed(to) => (self.v2_routing_row(message, author.as_ref(), &to, cx), true),
+            Special::Decision(text) => (
+                self.v2_decision_row(message, author.as_ref(), &text, cx),
+                false,
+            ),
+            Special::Done { title, rest, proof } => (
+                self.v2_done_card(message, key, author.as_ref(), title, rest, proof, cx),
+                false,
+            ),
         })
     }
 
@@ -718,21 +724,25 @@ impl TimelineView {
             .pb(space::S4)
             .flex()
             .gap(space::S12)
-            .child(
-                div()
-                    .flex_none()
-                    .child(ui::MemberAvatar::new(author, GUTTER)),
-            )
-            .child(
-                div()
+            // The avatar @s its member like on every message row.
+            .child(self.avatar_hit(
+                author,
+                key,
+                GUTTER,
+                ui::MemberAvatar::new(author, GUTTER),
+                cx,
+            ))
+            .child({
+                let text = div()
                     .flex_1()
                     .min_w_0()
                     .flex()
                     .flex_col()
                     .gap(space::S6)
                     .child(self.v2_meta(author, message.created_at, cx))
-                    .child(card),
-            )
+                    .child(card);
+                self.quote_on_double_click(text, message, cx)
+            })
             .into_any_element()
     }
 
