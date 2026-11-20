@@ -1447,11 +1447,24 @@ impl RootView {
         } else {
             px(0.)
         };
-        // Every pane kind takes the one width the pane was dragged to (D13).
+        // The room beside the page's minimum: the pane shrinks to it (a
+        // narrow window, a wide sidebar) and floats only when even its
+        // minimum does not fit.
+        let room = window_w - rail_w - theme::PAGE_MIN_WIDTH;
+        self.columns.right_pane_room = Some(room);
+        // A pane takes its own column while the page keeps its minimum;
+        // in a window without room for the pane's minimum it floats over the
+        // page (level 2). Decided by the room, not the drawn width, so a drag
+        // never turns the pane into a float and takes its handle away.
+        let floats = room < theme::RIGHT_PANE_MIN;
+        // Every pane kind takes the one width the pane was dragged to (D13),
+        // narrowed to the room beside the page; a float keeps it whole.
         let full_pane_w = if drawn_pane == RightPane::None {
             px(0.)
-        } else {
+        } else if floats {
             self.columns.width(Column::RightPane)
+        } else {
+            self.columns.drawn_width(Column::RightPane)
         };
         if drawn_pane != RightPane::None
             && cx
@@ -1461,9 +1474,6 @@ impl RootView {
             cx.set_global(crate::views::columns::RightPaneWidth(full_pane_w));
         }
         let pane_w = full_pane_w * right;
-        // A pane takes its own column while the page keeps its minimum;
-        // in a narrower window it floats over the page (level 2).
-        let floats = window_w - rail_w - pane_w < theme::PAGE_MIN_WIDTH;
         // v12/fx-shell: one leading content inset. The title starts
         // `CONTENT_LEADING` after the sidebar's trailing edge (where the page
         // column starts), or past the sidebar toggle when the sidebar is

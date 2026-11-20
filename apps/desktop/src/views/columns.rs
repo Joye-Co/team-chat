@@ -89,6 +89,10 @@ pub struct Columns {
     pub settle: Option<Settle>,
     /// Save changes to `layout.json` (the app, not a self-test).
     pub persist: bool,
+    /// The most the right pane can take now: the window less the sidebar and
+    /// the page's minimum, set every frame. The pane is drawn no wider and a
+    /// drag stops there, so it never covers the page while its minimum fits.
+    pub right_pane_room: Option<Pixels>,
 }
 
 #[derive(Deserialize, Default)]
@@ -107,6 +111,7 @@ impl Default for Columns {
             drag: None,
             settle: None,
             persist: false,
+            right_pane_room: None,
         }
     }
 }
@@ -195,12 +200,41 @@ impl Columns {
         }
     }
 
+    /// The bounds of `column` in the window now: the right pane's largest
+    /// width is also the room beside the page, never under its smallest.
+    fn bounds_now(&self, column: Column) -> (Pixels, Pixels) {
+        let (min, max) = column.bounds();
+        match (column, self.right_pane_room) {
+            (Column::RightPane, Some(room)) => (min, max.min(room).max(min)),
+            _ => (min, max),
+        }
+    }
+
+    /// The width `column` is drawn at: its width, narrowed to the room the
+    /// window has for it now (a narrower window or a wider sidebar shrinks the
+    /// right pane, a wider window gives its width back). A drag or a settle of
+    /// the column draws as it goes.
+    pub fn drawn_width(&self, column: Column) -> Pixels {
+        let w = self.width(column);
+        let moving = self.drag.is_some_and(|d| d.column == column)
+            || self.settle.is_some_and(|s| s.column == column);
+        if moving {
+            w
+        } else {
+            w.min(self.bounds_now(column).1)
+        }
+    }
+
     pub fn start_drag(&mut self, column: Column, x: Pixels) {
         self.settle = None;
+        // From the width on screen, so a pane narrowed to the room moves
+        // with the pointer at once.
+        let start = self.drawn_width(column);
+        *self.width_mut(column) = start;
         self.drag = Some(Drag {
             column,
             grab_x: x,
-            start: self.width(column),
+            start,
         });
     }
 
@@ -211,7 +245,7 @@ impl Columns {
         };
         let w = rubber_width(
             d.start + (x - d.grab_x) * d.column.sign(),
-            d.column.bounds(),
+            self.bounds_now(d.column),
         );
         let slot = self.width_mut(d.column);
         let changed = *slot != w;
@@ -224,7 +258,7 @@ impl Columns {
         let Some(d) = self.drag.take() else {
             return false;
         };
-        let (min, max) = d.column.bounds();
+        let (min, max) = self.bounds_now(d.column);
         let w = self.width(d.column);
         let to = w.clamp(min, max);
         *self.width_mut(d.column) = to;
@@ -314,6 +348,41 @@ mod tests {
         c.end_drag(true);
         c.reset(Column::RightPane);
         assert_eq!(c.width(Column::RightPane), theme::RIGHT_PANE);
+    }
+
+    #[test]
+    fn the_right_pane_fits_the_room_beside_the_page() {
+        let mut c = Columns {
+            right_pane: px(699.),
+            ..Columns::default()
+        };
+        // A 1440 window with a 249 sidebar (265 with its insets) leaves 695.
+        c.right_pane_room = Some(px(1440. - 265. - 480.));
+        assert_eq!(c.drawn_width(Column::RightPane), px(695.));
+        // A wider window gives the dragged width back.
+        c.right_pane_room = Some(px(900.));
+        assert_eq!(c.drawn_width(Column::RightPane), px(699.));
+        // A narrow window shrinks it to its minimum, never under.
+        c.right_pane_room = Some(px(200.));
+        assert_eq!(c.drawn_width(Column::RightPane), theme::RIGHT_PANE_MIN);
+    }
+
+    #[test]
+    fn a_right_pane_drag_starts_on_screen_and_stops_at_the_room() {
+        let mut c = Columns {
+            right_pane: px(699.),
+            ..Columns::default()
+        };
+        c.right_pane_room = Some(px(600.));
+        c.start_drag(Column::RightPane, px(800.));
+        // Moving right narrows it at once (no dead zone from 699 to 600).
+        c.drag_to(px(850.));
+        assert_eq!(c.width(Column::RightPane), px(550.));
+        // Past the room it resists, and the release settles back to it.
+        c.drag_to(px(500.));
+        assert!(c.width(Column::RightPane) < px(600. + RUBBER_LIMIT));
+        c.end_drag(true);
+        assert_eq!(c.width(Column::RightPane), px(600.));
     }
 
     #[test]
