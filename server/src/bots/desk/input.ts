@@ -19,7 +19,9 @@ import { isAddOn, isNewTask } from "../../agent/frontdesk";
 
 /**
  * 接 1.4 (usable section 4): a message without an @ from the person who asked for the last run in
- * a topic counts as a follow-up for this long after the bot's last answer there.
+ * a topic counts as a follow-up for this long after the bot's last answer there, when no front
+ * desk reads it. With a front desk it counts at any time: the front desk skips small talk and
+ * talk meant for someone else, and a person often comes back to a topic hours later.
  */
 export const FOLLOW_UP_WINDOW_MS = 30 * 60_000;
 
@@ -52,7 +54,7 @@ export abstract class DeskInput extends DeskRelay {
       }
       // Without an @: the answer to the front desk's open question, or a follow-up (接 1.4).
       if (m.mentioned || this.openAsk(m)) return await this.admit({ ...m, mentioned: true });
-      if (this.isFollowUp(m)) await this.admit({ ...m, mentioned: true }, true);
+      if (await this.isFollowUp(m)) await this.admit({ ...m, mentioned: true }, true);
     } catch (err) {
       this.log.error("onMessage failed", { err, topicId: m.topicId });
       throw err;
@@ -110,11 +112,11 @@ export abstract class DeskInput extends DeskRelay {
 
   /**
    * 接 1.4: a message without an @ in a topic is a follow-up when it comes from the person the
-   * bot last answered there (a run's requester, or the front desk's reply), soon after.
+   * bot last answered there (a run's requester, or the front desk's reply): at any time with a
+   * front desk, within {@link FOLLOW_UP_WINDOW_MS} without one.
    */
-  protected isFollowUp(m: TopicMessage): boolean {
+  protected async isFollowUp(m: TopicMessage): Promise<boolean> {
     if (isMainTopicId(m.topicId) || m.dm) return false;
-    const since = Date.now() - FOLLOW_UP_WINDOW_MS;
     const last = this.sql
       .exec<{ requested_by: string; ended_at: number | null; status: string }>(
         "SELECT requested_by, ended_at, status FROM runs WHERE topic_id = ? AND (kind IS NULL OR kind != ?) ORDER BY created_at DESC LIMIT 1",
@@ -124,12 +126,14 @@ export abstract class DeskInput extends DeskRelay {
       .toArray()[0];
     // A run a person stopped (停, the stop button) invites no follow-up: "好的我自己来" starts nothing.
     if (last?.status === "cancelled") return false;
-    if (last && last.ended_at !== null && last.ended_at >= since && last.requested_by === m.authorId) return true;
-    return (
+    const ran = last && last.ended_at !== null && last.requested_by === m.authorId ? last.ended_at : null;
+    const answered =
       this.sql
-        .exec("SELECT 1 FROM decisions WHERE topic_id = ? AND author_id = ? AND reply_message_id IS NOT NULL AND at >= ? LIMIT 1", m.topicId, m.authorId, since)
-        .toArray().length > 0
-    );
+        .exec<{ at: number | null }>("SELECT MAX(at) AS at FROM decisions WHERE topic_id = ? AND author_id = ? AND reply_message_id IS NOT NULL", m.topicId, m.authorId)
+        .toArray()[0]?.at ?? null;
+    if (ran === null && answered === null) return false;
+    if (Math.max(ran ?? 0, answered ?? 0) >= Date.now() - FOLLOW_UP_WINDOW_MS) return true;
+    return (await useConfig(this.env, "front_desk", this.log)) !== null;
   }
 
   protected handledMessage(messageId: string): boolean {
@@ -185,7 +189,7 @@ export abstract class DeskInput extends DeskRelay {
     if (r.ended_at !== null) {
       // Ended meanwhile: treat as a new request when it mentions the bot or follows its answer.
       if (m.mentioned) await this.admit(m);
-      else if (this.isFollowUp(m)) await this.admit({ ...m, mentioned: true }, true);
+      else if (await this.isFollowUp(m)) await this.admit({ ...m, mentioned: true }, true);
       return;
     }
     const link = r.machine_id ? linkStub(this.env, r.machine_id) : null;

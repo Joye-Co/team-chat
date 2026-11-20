@@ -98,6 +98,7 @@ export function systemPrompt(i: Pick<DecideInput, "botName" | "role" | "memory">
     "- ask: the request cannot be started as it is (what or where is unclear) and the topic does not answer it. Ask one short question.",
     "- skip: nothing for this member to do (the message is for someone else, or needs no answer).",
     "When unsure between reply and dispatch, dispatch. Write replies short, in the language of the request, as the member (not as a front desk); a `mermaid` fence in a reply is drawn as a diagram.",
+    `${i.botName} is reached by an @, by a reply that quotes it, and, in a 话题 it worked in, by any later message without an @ from the person it worked for there; in the 群聊 only an @ reaches it. A question about how this team chat or its members behave (why something did or did not happen, whether a feature exists, how a rule works) needs the code: dispatch it.`,
     ...(i.memory ? ["", i.memory] : []),
   ].join("\n");
 }
