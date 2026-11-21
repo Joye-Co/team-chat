@@ -952,6 +952,7 @@ fn scroll_table(
     cx: &mut App,
 ) -> Div {
     let id = gpui::ElementId::Name(format!("{key}-scroll").into());
+    let bar_id = ui::native::blocks::scrollbar_id(&id);
     let scroll = window
         .use_keyed_state(id.clone(), cx, |_, _| gpui::ScrollHandle::new())
         .read(cx)
@@ -1002,6 +1003,7 @@ fn scroll_table(
                     .h(space::S12)
                     .child(
                         gpui_component::scroll::Scrollbar::horizontal(&scroll)
+                            .id(bar_id)
                             .mode(gpui_component::scroll::ScrollbarMode::Always),
                     ),
             )

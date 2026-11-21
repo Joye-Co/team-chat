@@ -2385,6 +2385,7 @@ fn command_lines(
         .clone();
     // Known from the frame before: a line is wider than the box.
     let scrolls = scroll.max_offset().x > px(0.);
+    let bar_id = crate::ui::native::blocks::scrollbar_id(&id);
     div()
         .relative()
         .flex_1()
@@ -2416,6 +2417,7 @@ fn command_lines(
         .child(
             div().absolute().inset_0().child(
                 gpui_component::scroll::Scrollbar::horizontal(&scroll)
+                    .id(bar_id)
                     .mode(gpui_component::scroll::ScrollbarMode::Always),
             ),
         )
