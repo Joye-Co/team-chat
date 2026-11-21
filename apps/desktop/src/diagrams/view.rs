@@ -578,6 +578,7 @@ fn image_with_hits(
     }
     let toggle = ui.clone();
     let scrolls = fit.w > avail + 0.5;
+    let scroll_id = ElementId::Name(format!("dscroll-{id}").into());
     let scroll = ui.read(cx).scroll.clone();
     div()
         .w_full()
@@ -589,7 +590,7 @@ fn image_with_hits(
                 .w_full()
                 .child(
                     div()
-                        .id(ElementId::Name(format!("dscroll-{id}").into()))
+                        .id(scroll_id.clone())
                         .when(!scrolls, |d| d.w_full().justify_center())
                         .flex()
                         // Room under the drawing for the scrollbar, so it never covers it.
@@ -632,6 +633,7 @@ fn image_with_hits(
                             .bottom(-space::S12)
                             .child(
                                 gpui_component::scroll::Scrollbar::horizontal(&scroll)
+                                    .id(crate::ui::native::blocks::scrollbar_id(&scroll_id))
                                     // Drawn in a box wider than the canvas by the
                                     // card's padding: the content counts as much
                                     // wider, so the thumb keeps its true share.

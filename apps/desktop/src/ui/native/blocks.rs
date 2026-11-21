@@ -774,6 +774,16 @@ pub fn selected_weight() -> gpui::FontWeight {
 // ---------------------------------------------------------------------------
 // Sideways scroll of a code box
 
+/// The element id of the scrollbar over the scroll area `area`. A scrollbar
+/// keeps its hover and its drag under its element id, and by default that id
+/// is the line of code that built it: every box one helper draws (each command
+/// box of the steps, each table of a card) then shared one drag, and pressing
+/// the second box's thumb scrolled the first box. Named after its area, each
+/// box's bar keeps its own state.
+pub fn scrollbar_id(area: &ElementId) -> ElementId {
+    ElementId::NamedChild(std::sync::Arc::new(area.clone()), "scrollbar".into())
+}
+
 /// One part of a code box whose lines never wrap (§2.17, D13): `inner`
 /// keeps its content width and scrolls sideways inside the part, with a
 /// scrollbar along the part's bottom edge and a 16 fade to `fill` at its right
@@ -788,6 +798,7 @@ pub fn scroll_x(
     cx: &mut App,
 ) -> gpui::Div {
     let id = id.into();
+    let bar_id = scrollbar_id(&id);
     let scroll = window
         .use_keyed_state(id.clone(), cx, |_, _| gpui::ScrollHandle::new())
         .read(cx)
@@ -824,7 +835,87 @@ pub fn scroll_x(
         .child(
             div().absolute().inset_0().child(
                 gpui_component::scroll::Scrollbar::horizontal(&scroll)
+                    .id(bar_id)
                     .mode(gpui_component::scroll::ScrollbarMode::Always),
             ),
         )
+}
+
+#[cfg(test)]
+mod scroll_x_tests {
+    use super::*;
+    use gpui::{AppContext as _, Modifiers, MouseButton, ScrollHandle, VisualTestContext, point};
+    use std::cell::RefCell;
+
+    /// Two code boxes drawn by [`scroll_x`], one 100 under the other, each 300 wide with a
+    /// line 1200 wide, as two command boxes in the steps of the live pane.
+    struct Boxes {
+        handles: Rc<RefCell<Vec<ScrollHandle>>>,
+    }
+
+    impl gpui::Render for Boxes {
+        fn render(
+            &mut self,
+            window: &mut Window,
+            cx: &mut gpui::Context<Self>,
+        ) -> impl IntoElement {
+            let mut handles = Vec::new();
+            let mut boxes = Vec::new();
+            for key in ["box-a", "box-b"] {
+                let id = ElementId::Name(key.into());
+                let line = |_| div().w(px(1200.)).h(px(40.));
+                boxes.push(div().w(px(300.)).h(px(100.)).child(scroll_x(
+                    id.clone(),
+                    gpui::black(),
+                    line,
+                    window,
+                    cx,
+                )));
+                handles.push(
+                    window
+                        .use_keyed_state(id, cx, |_, _| ScrollHandle::new())
+                        .read(cx)
+                        .clone(),
+                );
+            }
+            *self.handles.borrow_mut() = handles;
+            div().flex().flex_col().children(boxes)
+        }
+    }
+
+    /// Dragging the second box's thumb scrolls the second box and leaves the first alone.
+    /// Every box's bar had the same element id and so one drag state, and the first box's
+    /// bar took the drag (Joye's recording, 2026-11-21).
+    #[gpui::test]
+    fn dragging_one_box_scrolls_only_that_box(cx: &mut gpui::TestAppContext) {
+        cx.update(gpui_component::init);
+        let handles = Rc::new(RefCell::new(Vec::new()));
+        let shared = handles.clone();
+        let window = cx.update(|cx| {
+            cx.open_window(Default::default(), |window, cx| {
+                let view = cx.new(|_| Boxes { handles: shared });
+                cx.new(|cx| gpui_base::Root::new(view, window, cx))
+            })
+            .unwrap()
+        });
+        let cx = &mut VisualTestContext::from_window(window.into(), cx);
+        // The bars show from the second frame, once the boxes know they scroll.
+        cx.update(|window, _| window.refresh());
+        cx.run_until_parked();
+        let offsets = || -> Vec<Pixels> { handles.borrow().iter().map(|h| h.offset().x).collect() };
+        assert_eq!(offsets(), vec![px(0.), px(0.)]);
+        // On the second box's thumb: its left end, just above the box's bottom edge.
+        let none = Modifiers::default();
+        let grab = point(px(24.), px(133.));
+        cx.simulate_mouse_down(grab, MouseButton::Left, none);
+        cx.simulate_mouse_move(point(px(120.), px(133.)), MouseButton::Left, none);
+        cx.simulate_mouse_move(point(px(200.), px(133.)), MouseButton::Left, none);
+        cx.simulate_mouse_up(point(px(200.), px(133.)), MouseButton::Left, none);
+        cx.run_until_parked();
+        let [a, b] = offsets()[..] else {
+            panic!("two boxes")
+        };
+        assert_eq!(a, px(0.), "the first box stays put");
+        assert!(b < px(-200.), "the second box follows the drag: {b:?}");
+    }
 }

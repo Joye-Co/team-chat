@@ -549,6 +549,7 @@ pub fn secret_block(
     let value: SharedString = value.to_string().into();
     // Known from the frame before: a line is wider than the box.
     let scrolls = scroll.max_offset().x > Pixels::ZERO;
+    let value_id = ElementId::from(SharedString::from(format!("{id}-value")));
     field(
         label,
         div()
@@ -571,7 +572,7 @@ pub fn secret_block(
                     .min_w(Pixels::ZERO)
                     .child(
                         div()
-                            .id(SharedString::from(format!("{id}-value")))
+                            .id(value_id.clone())
                             .w_full()
                             .flex()
                             .overflow_x_scroll()
@@ -594,10 +595,11 @@ pub fn secret_block(
                     )
                     .when(scrolls, |d| {
                         d.child(
-                            div()
-                                .absolute()
-                                .inset_0()
-                                .child(Scrollbar::horizontal(scroll).mode(ScrollbarMode::Always)),
+                            div().absolute().inset_0().child(
+                                Scrollbar::horizontal(scroll)
+                                    .id(crate::ui::native::blocks::scrollbar_id(&value_id))
+                                    .mode(ScrollbarMode::Always),
+                            ),
                         )
                     }),
             )
@@ -1421,12 +1423,13 @@ fn capped(
     // few points has nothing to scroll to and gets no thumb.
     let shown =
         outset == Pixels::ZERO || scroll.max_offset().y > crate::ui::native::tokens::space::S4;
+    let id: ElementId = id.into();
     div()
         .relative()
         .w_full()
         .child(
             div()
-                .id(id)
+                .id(id.clone())
                 .w_full()
                 .max_h(max_h)
                 .overflow_y_scroll()
@@ -1441,7 +1444,9 @@ fn capped(
                 .bottom_0()
                 .w(crate::ui::native::tokens::space::S12)
                 .child({
-                    let bar = Scrollbar::vertical(scroll).mode(ScrollbarMode::Always);
+                    let bar = Scrollbar::vertical(scroll)
+                        .id(crate::ui::native::blocks::scrollbar_id(&id))
+                        .mode(ScrollbarMode::Always);
                     // The bar draws on the scrolled box unless told to
                     // use this strip.
                     if outset > Pixels::ZERO {
