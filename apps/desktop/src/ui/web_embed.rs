@@ -624,6 +624,7 @@ impl WebEmbedState {
             } else if let Some(n) = &self.native
                 && let Err(e) = n.show_version(self.spec.version.clone(), self.spec.capabilities)
             {
+                tracing::warn!(artifact_id = %self.spec.artifact_id, reason = %e, "embedded 产出 could not switch version");
                 self.phase = Phase::Failed(e.to_string());
             }
         }
@@ -877,7 +878,7 @@ impl WebEmbedState {
         self.window = Some(Window::window_handle(window));
         let (tx, mut rx) = futures::channel::mpsc::unbounded::<ArtifactEvent>();
         let mut options = artifact_view::EmbedOptions::new(
-            self.spec.artifact_id.clone(),
+            view_id(&self.spec.artifact_id),
             self.spec.version.clone(),
         );
         options.capabilities = self.spec.capabilities;
@@ -908,7 +909,10 @@ impl WebEmbedState {
                     }
                 }));
             }
-            Err(e) => self.phase = Phase::Failed(e.to_string()),
+            Err(e) => {
+                tracing::warn!(artifact_id = %self.spec.artifact_id, reason = %e, "embedded 产出 could not mount");
+                self.phase = Phase::Failed(e.to_string());
+            }
         }
     }
 
@@ -1241,6 +1245,35 @@ fn sample_points(visible: Bounds<Pixels>) -> Vec<Point<Pixels>> {
         }
     }
     out
+}
+
+/// The id the page's view gets: `id` itself when the view takes it, else a stand-in of
+/// 64 `[A-Za-z0-9_-]` characters, the start of `id` and a digest of all of it. The view
+/// takes at most 64 such characters, and an attached file's key is `file-<sha256>` (69):
+/// without this its page never mounts, and the video player (`player-` before the key)
+/// fails on every attached video.
+#[cfg(any(target_os = "macos", windows, test))]
+fn view_id(id: &str) -> String {
+    if artifact_view::origin_host(id, 0).is_ok() {
+        return id.to_string();
+    }
+    use sha2::{Digest as _, Sha256};
+    let digest: String = Sha256::digest(id.as_bytes())[..8]
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    let head: String = id
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .take(64 - 1 - digest.len())
+        .collect();
+    format!("{head}-{digest}")
 }
 
 /// Adds a page above GPUI's own view of `window` (an AppKit sibling view). `None` when
@@ -2213,6 +2246,7 @@ mod preview_disk {
 
 #[cfg(test)]
 mod tests {
+    use super::view_id;
     use super::virtual_key;
     use super::{Canvas, base_css, window_base_script};
     use crate::ui::native::tokens::space;
@@ -2278,5 +2312,30 @@ mod tests {
         assert_eq!(virtual_key("up"), None);
         assert_eq!(virtual_key("f"), Some(0x46));
         assert_eq!(virtual_key("f0"), None);
+    }
+
+    #[test]
+    fn an_id_the_view_takes_is_kept_and_a_longer_one_fits() {
+        assert_eq!(
+            view_id("01M7V6PDVT4VYP2JV6612MN5NZ"),
+            "01M7V6PDVT4VYP2JV6612MN5NZ"
+        );
+        assert_eq!(view_id("player-sample-video"), "player-sample-video");
+        let file = format!("file-{}", "435f18589b8eb34a".repeat(4));
+        let player = format!("player-{file}");
+        for id in [&file, &player] {
+            let v = view_id(id);
+            assert!(v.len() <= 64, "{v}");
+            assert!(artifact_view::origin_host(&v, 0).is_ok(), "{v}");
+            assert_eq!(view_id(id), v);
+        }
+        assert!(view_id(&player).starts_with("player-file-435f"));
+        // Two files whose ids share the kept start still get their own pages.
+        let other = format!(
+            "player-file-{}0",
+            "435f18589b8eb34a".repeat(4).split_at(63).0
+        );
+        assert_ne!(view_id(&player), view_id(&other));
+        assert!(artifact_view::origin_host(&view_id("报告 v2"), 0).is_ok());
     }
 }
